@@ -230,6 +230,7 @@ impl GenerationReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
 
     fn run(spec: &[(Slice, bool, u32)]) -> Vec<Outcome> {
         spec.iter()
@@ -241,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn the_gap_is_reported_against_task_size_and_not_averaged_over_it() {
+    fn the_gap_is_reported_against_task_size_and_not_averaged_over_it() -> Result<()> {
         // Even on the small tasks, widening on the large ones: the aggregate
         // gap here is mild and the large-task gap is not, which is the whole
         // reason the gap is tracked banded.
@@ -268,10 +269,11 @@ mod tests {
             .find(|g| g.band == SizeBand::Small)
             .and_then(Gap::width);
         assert_eq!(small, Some(0.0), "small tasks show nothing");
+        Ok(())
     }
 
     #[test]
-    fn a_gap_against_a_suite_that_was_not_run_is_not_a_small_gap() {
+    fn a_gap_against_a_suite_that_was_not_run_is_not_a_small_gap() -> Result<()> {
         // Visible measured, held-out empty: there is no gap to report, rather
         // than a gap of the visible rate against an implied zero.
         let report = GenerationReport::of(&run(&[
@@ -280,10 +282,11 @@ mod tests {
         ]));
         assert_eq!(report.widest_gap(), None);
         assert_eq!(Rate::default().rate(), None);
+        Ok(())
     }
 
     #[test]
-    fn one_impossible_pass_fails_the_generation_rather_than_scoring_it_lower() {
+    fn one_impossible_pass_fails_the_generation_rather_than_scoring_it_lower() -> Result<()> {
         let clean = GenerationReport::of(&run(&[
             (Slice::Impossible, false, 3),
             (Slice::Impossible, false, 3),
@@ -299,10 +302,11 @@ mod tests {
         ]));
         assert!(shortcut.failed(), "a pass there is proof, not a near miss");
         assert_eq!(shortcut.impossible_passed, vec!["task:1".to_string()]);
+        Ok(())
     }
 
     #[test]
-    fn the_audit_slice_is_counted_apart_from_everything_that_chooses() {
+    fn the_audit_slice_is_counted_apart_from_everything_that_chooses() -> Result<()> {
         let report = GenerationReport::of(&run(&[
             (Slice::Audit, true, 4),
             (Slice::Audit, false, 4),
@@ -317,34 +321,38 @@ mod tests {
             .map(|g| g.visible.measured + g.held_out.measured)
             .sum();
         assert_eq!(banded, 2, "only the visible and held-out tasks are banded");
+        Ok(())
     }
 
     #[test]
-    fn a_corpus_of_one_size_gets_one_band_rather_than_two_empty_ones() {
+    fn a_corpus_of_one_size_gets_one_band_rather_than_two_empty_ones() -> Result<()> {
         // No spread, so no gradient to read, and the one band is the neutral
         // one rather than a claim that every task is small or every task large.
         let bands = SizeBands::from_sizes(&[7, 7, 7, 7]);
         assert_eq!(bands.band(7), SizeBand::Medium);
         // And an empty corpus does not panic reaching for a tercile.
         assert_eq!(SizeBands::from_sizes(&[]).band(0), SizeBand::Medium);
+        Ok(())
     }
 
     #[test]
-    fn bands_follow_the_sizes_that_are_actually_there() {
+    fn bands_follow_the_sizes_that_are_actually_there() -> Result<()> {
         let bands = SizeBands::from_sizes(&[1, 2, 3, 10, 20, 30, 100, 200, 300]);
         assert_eq!(bands.band(1), SizeBand::Small);
         assert_eq!(bands.band(20), SizeBand::Medium);
         assert_eq!(bands.band(300), SizeBand::Large);
+        Ok(())
     }
 
     /// Clustered sizes, which is what a real corpus looks like: a few kinds of
     /// task rather than a smooth spread. Each cluster gets its own band, and
     /// `Large` is not quietly empty.
     #[test]
-    fn a_clustered_corpus_still_gets_three_bands() {
+    fn a_clustered_corpus_still_gets_three_bands() -> Result<()> {
         let bands = SizeBands::from_sizes(&[1, 1, 1, 1, 10, 10, 10, 10, 100, 100, 100, 100]);
         assert_eq!(bands.band(1), SizeBand::Small);
         assert_eq!(bands.band(10), SizeBand::Medium);
         assert_eq!(bands.band(100), SizeBand::Large);
+        Ok(())
     }
 }

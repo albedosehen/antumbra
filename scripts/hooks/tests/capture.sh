@@ -13,16 +13,18 @@ check() {
     if [ "$2" = 0 ]; then echo "  ok    $1"; else echo "  FAIL  $1"; FAILED=1; fi
 }
 
-mkdir -p "$WORK/bin" "$WORK/tmp"
+mkdir -p "$WORK/bin" "$WORK/run"
 cat > "$WORK/bin/curl" <<'CURL'
 #!/usr/bin/env bash
 printf '%s\n' "$@" > "$CURL_ARGS"
+# What `--config -` would read: curl always drains its stdin for it.
+cat > "${CURL_CONFIG:-/dev/null}"
 CURL
 chmod +x "$WORK/bin/curl"
-export CURL_ARGS="$WORK/args" ANTUMBRA_TOKEN=test-token TMPDIR="$WORK/tmp"
+export CURL_ARGS="$WORK/args" CURL_CONFIG="$WORK/config" ANTUMBRA_TOKEN=test-token XDG_RUNTIME_DIR="$WORK/run"
 
 run() {
-    rm -f "$CURL_ARGS"
+    rm -f "$CURL_ARGS" "$CURL_CONFIG"
     printf '%s' "$1" | PATH="$WORK/bin:$PATH" bash "$HOOK"
 }
 
@@ -35,6 +37,10 @@ printf '%s' "$body" | jq -e '.tool == "observe_turn"' > /dev/null
 check 'reports the turn to the server' $?
 printf '%s' "$body" | jq -e '.arguments == {session: "s1", text: "deployed it blue green", turn: "p1"}' > /dev/null
 check 'with its session, turn and answer' $?
+! grep -q 'Bearer' "$CURL_ARGS"
+check "keeps the bearer off curl's command line" $?
+grep -qx 'header = "Authorization: Bearer test-token"' "$CURL_CONFIG"
+check 'and hands it to curl through its config on stdin' $?
 
 echo 'the end of a turn on a named machine'
 out="$(ANTUMBRA_HOST_ID=windows run '{"session_id":"s4","prompt_id":"p4","hook_event_name":"Stop","last_assistant_message":"done"}')"
@@ -51,8 +57,19 @@ run '{"session_id":"s2","hook_event_name":"PreCompact"}' > /dev/null
 test ! -e "$CURL_ARGS"
 check 'reports no turn' $?
 
+echo 'a hostile session id'
+rm -f "$WORK/run"/antumbra-capture-*
+out="$(run '{"session_id":"../../x y","hook_event_name":"Stop/../z","last_assistant_message":"x"}')"
+printf '%s' "$out" | jq -e '.decision == "block"' > /dev/null
+check 'is handled like any other' $?
+test -f "$WORK/run/antumbra-capture-Stopz-xy"
+check 'names the sentinel from the id cut to [A-Za-z0-9_-], under the runtime directory' $?
+test "$(ls "$WORK/run" | wc -l | tr -d ' ')" = 1 && test ! -e "$WORK/x y" && test ! -e "$WORK/run/../x y"
+check 'and touches nothing else' $?
+rm -f "$WORK/run"/antumbra-capture-*
+
 echo 'no token'
-rm -f "$WORK/tmp"/antumbra-capture-*
+rm -f "$WORK/run"/antumbra-capture-*
 out="$(printf '%s' '{"session_id":"s3","hook_event_name":"Stop","last_assistant_message":"x"}' |
     ANTUMBRA_TOKEN= ANTUMBRA_TOKEN_FILE="$WORK/none" PATH="$WORK/bin:$PATH" bash "$HOOK")"
 printf '%s' "$out" | jq -e '.decision == "block"' > /dev/null && test ! -e "$CURL_ARGS"

@@ -27,7 +27,7 @@ dist = false
 
 [dependencies]
 antumbra-control = { path = "../antumbra-control" }
-antumbra-store = { path = "../antumbra-store" }
+antumbra-store = { path = "../antumbra-store", features = ["clap"] }
 antumbra-core = { path = "../antumbra-core" }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
 anyhow = "1"
@@ -57,6 +57,8 @@ oneiriq-surql = { version = "0.34.2", default-features = false, features = ["cli
 [dev-dependencies]
 # `oneshot` drives the axum router in tests without binding a socket.
 tower = { version = "0.5", features = ["util"] }
+# The embedded store the route tests serve from; `clap` stays, as the normal dependency has it.
+antumbra-store = { path = "../antumbra-store", features = ["clap", "testing"] }
 
 [features]
 default = []
@@ -65,3 +67,10 @@ smtp = ["dep:lettre"]
 # The kayak wire contract, its drift gate (tests/contract.rs), and the artifact
 # generation. The four routes this server actually serves do not need it.
 contract = ["dep:oneiriq-kayak", "dep:oneiriq-surql"]
+
+# Its own workspace, so the root's [workspace.lints] does not reach it: the
+# same rule, stated here.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "warn"

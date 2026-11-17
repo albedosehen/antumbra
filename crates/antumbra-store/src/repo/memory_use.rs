@@ -27,7 +27,7 @@ use crate::dto::parse_dt;
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "memory_use";
+const TABLE: &str = crate::tables::MEMORY_USE;
 
 /// Which counts one observation adds to. Each set flag adds one; `used`,
 /// `recurred` and `good` also restart the memory's fade.

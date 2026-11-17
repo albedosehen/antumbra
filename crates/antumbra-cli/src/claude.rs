@@ -27,6 +27,7 @@ pub mod mcp_stdio;
 pub mod reanchor;
 pub mod run;
 pub mod skills;
+pub mod surface_args;
 pub mod version;
 
 /// The Claude Code release the rules below were verified against, the day, and
@@ -732,7 +733,7 @@ mod tests {
     /// The vendor's table is explicit that these switches do not behave alike,
     /// and a detector that treats them alike is wrong in both directions.
     #[test]
-    fn each_trigger_counts_exactly_the_values_the_vendor_says() {
+    fn each_trigger_counts_exactly_the_values_the_vendor_says() -> anyhow::Result<()> {
         for (pairs, expected) in [
             // Presence: any non-empty value, `0` and `false` included.
             (vec![("DISABLE_TELEMETRY", "1")], vec!["DISABLE_TELEMETRY"]),
@@ -773,21 +774,23 @@ mod tests {
         ] {
             assert_eq!(triggered(&pairs), expected, "{pairs:?}");
         }
+        Ok(())
     }
 
     #[test]
-    fn outside_sovereign_mode_there_is_nothing_to_find() {
+    fn outside_sovereign_mode_there_is_nothing_to_find() -> anyhow::Result<()> {
         let report = examine(&inputs(Os::Windows, &[("DISABLE_ERROR_REPORTING", "1")]));
         assert!(report.triggers.is_empty());
         assert!(report.findings.is_empty());
         assert_eq!(report.required_missing(), 0);
         assert!(render(&report).starts_with("Sovereign mode: off"));
+        Ok(())
     }
 
     /// The host's dominant shell decides: a missing PowerShell tool fails the
     /// doctor on Windows and is not a finding anywhere else.
     #[test]
-    fn the_powershell_tool_is_required_on_windows_only() {
+    fn the_powershell_tool_is_required_on_windows_only() -> anyhow::Result<()> {
         let off = [("DISABLE_TELEMETRY", "1")];
         let on = [
             ("DISABLE_TELEMETRY", "1"),
@@ -808,10 +811,11 @@ mod tests {
             standing(&elsewhere, "powershell-tool"),
             Some(Standing::Fine(_))
         ));
+        Ok(())
     }
 
     #[test]
-    fn advisory_settings_hint_and_never_fail() {
+    fn advisory_settings_hint_and_never_fail() -> anyhow::Result<()> {
         // The default mode is a loss only before 2.1.283.
         let older = |i: Inputs| Inputs {
             installed_version: Some("2.1.278".into()),
@@ -847,10 +851,11 @@ mod tests {
                 "{id}"
             );
         }
+        Ok(())
     }
 
     #[test]
-    fn an_unread_agents_md_is_called_out_by_path() -> Result<(), String> {
+    fn an_unread_agents_md_is_called_out_by_path() -> anyhow::Result<()> {
         // Read natively with telemetry off from 2.1.281; lost before it.
         let report = examine(&Inputs {
             instructions: bridge::Instructions::Unread(PathBuf::from("/work/repo/AGENTS.md")),
@@ -858,10 +863,10 @@ mod tests {
             ..inputs(Os::Other, &[("DISABLE_TELEMETRY", "1")])
         });
         let Some(Standing::Attention(what)) = standing(&report, "agents-md") else {
-            return Err(format!(
+            anyhow::bail!(
                 "expected the file to be called out, got {:?}",
                 standing(&report, "agents-md")
-            ));
+            );
         };
         assert!(
             what.contains("AGENTS.md") && what.contains("not being read"),
@@ -871,7 +876,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_contribute_their_env_block_and_default_mode() {
+    fn settings_contribute_their_env_block_and_default_mode() -> anyhow::Result<()> {
         let parsed = parse_settings(
             r#"{ "env": { "DISABLE_TELEMETRY": "1", "PORT": 8080 },
                  "permissions": { "defaultMode": "auto", "allow": ["Bash"] } }"#,
@@ -888,10 +893,11 @@ mod tests {
         assert_eq!(parsed.default_mode.as_deref(), Some("auto"));
         assert_eq!(parse_settings("not json"), Settings::default());
         assert_eq!(parse_settings("{}"), Settings::default());
+        Ok(())
     }
 
     #[test]
-    fn the_first_source_to_name_a_variable_keeps_it() {
+    fn the_first_source_to_name_a_variable_keeps_it() -> anyhow::Result<()> {
         let settings = PathBuf::from("/home/me/.claude/settings.json");
         let merged = merge(vec![
             (
@@ -916,6 +922,7 @@ mod tests {
             merged.get("MCP_PROTOCOL_NEGOTIATION").map(|v| &v.origin),
             Some(&Origin::Settings(settings))
         );
+        Ok(())
     }
 
     /// The prose the doctor prints and the name `apply` writes must be the same
@@ -946,7 +953,7 @@ mod tests {
     }
 
     #[test]
-    fn a_newer_installed_version_is_flagged_for_reverification() {
+    fn a_newer_installed_version_is_flagged_for_reverification() -> anyhow::Result<()> {
         assert_eq!(
             version_in("2.1.278 (Claude Code)\n").as_deref(),
             Some("2.1.278")
@@ -962,10 +969,11 @@ mod tests {
         assert!(render(&newer).contains("re-verify"));
         let same = examine(&inputs(Os::Other, &[("DISABLE_TELEMETRY", "1")]));
         assert_eq!(same.unverified_version, None);
+        Ok(())
     }
 
     #[test]
-    fn every_rule_is_judged_and_the_report_names_why() {
+    fn every_rule_is_judged_and_the_report_names_why() -> anyhow::Result<()> {
         // On a release before any loss ended, every rule applies.
         let report = examine(&Inputs {
             installed_version: Some("2.1.278".into()),
@@ -983,5 +991,6 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), rules().len());
+        Ok(())
     }
 }

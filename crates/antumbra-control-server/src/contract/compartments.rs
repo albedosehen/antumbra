@@ -4,46 +4,37 @@
 //! anything else. `super::contract` puts them together, because what kayak
 //! validates is the whole.
 
-use kayak::{FieldExposure, Identity, Resource, ResourceFaces};
+use kayak::{FieldExposure, Resource};
 use surql::schema::{datetime_field, string_field, FieldDefinition};
 
-use super::built;
+use super::{built, read_only};
 
 /// Compartments: the named latent-spaces of memory within a tenant, the unit
 /// of organization and sharing. Read-only here; creation and sharing stay on
 /// the MCP tools, where the engine's owner/grant rules are enforced.
 pub(super) fn resource() -> Resource {
     Resource {
-        name: "compartments".into(),
-        table: "compartment".into(),
-        faces: ResourceFaces::ALL,
-        // The domain id persists as `key` (compartment_key_uq is over
-        // tenant_id + key); the reserved SurrealDB `id` never reaches the
-        // wire.
-        identity: Identity::Column("key".into()),
-        fields: vec![
-            FieldExposure::column("key"),
-            FieldExposure::column("name"),
-            FieldExposure::column("owner"),
-            FieldExposure::column("created_at"),
-            FieldExposure::column("updated_at"),
-        ],
         // tenant_id is server-bound on every read; compartment_key_uq and
         // compartment_owner_idx both lead with it, so the plain listing
         // seeks and the owner filter is credited.
         pinned: vec!["tenant_id".into()],
-        pinned_either: vec![],
-        filterable: vec!["owner".into()],
-        filter_options: Default::default(),
-        sortable: vec!["updated_at".into()],
-        max_page_size: 100,
-        graphql: None,
-        watchable: false,
-        reads_require: vec![],
-        rate_class: None,
-        sub_resources: vec![],
-        content: None,
-        actions: vec![],
+        // The domain id persists as `key` (compartment_key_uq is over
+        // tenant_id + key); the reserved SurrealDB `id` never reaches the
+        // wire.
+        ..read_only(
+            "compartments",
+            antumbra_store::tables::COMPARTMENT,
+            "key",
+            vec![
+                FieldExposure::column("key"),
+                FieldExposure::column("name"),
+                FieldExposure::column("owner"),
+                FieldExposure::column("created_at"),
+                FieldExposure::column("updated_at"),
+            ],
+            &["owner"],
+            &["updated_at"],
+        )
     }
 }
 

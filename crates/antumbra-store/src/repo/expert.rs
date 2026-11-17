@@ -17,7 +17,7 @@ use crate::error::map;
 use crate::knn::search_effort;
 use crate::store::Store;
 
-const TABLE: &str = "expert";
+const TABLE: &str = crate::tables::EXPERT;
 
 /// Insert an expert. The domain id lives in the `key` column (unique index);
 /// SurrealDB assigns the record id.
@@ -97,7 +97,7 @@ pub async fn knn_by_capability(store: &Store, query: &[f32], k: usize) -> Result
 mod tests {
     use super::*;
     use crate::schema::EMBED_DIM;
-    use antumbra_core::{Expert, Generation};
+    use antumbra_core::{AntumbraError, Expert, Generation};
     use chrono::Utc;
 
     fn expert(id: &str, vec: Vec<f32>) -> Expert {
@@ -122,7 +122,7 @@ mod tests {
     /// servable and routes to adapters it does not hold.
     #[tokio::test]
     async fn placement_survives_the_round_trip() -> antumbra_core::Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = crate::testing::mem_store().await?;
         let mut v = vec![0.0f32; EMBED_DIM];
         v[0] = 1.0;
         let mut placed = expert("expert:placed", v.clone());
@@ -147,59 +147,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn insert_get_list_knn_delete() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn insert_get_list_knn_delete() -> antumbra_core::Result<()> {
+        let s = crate::testing::mem_store().await?;
         let mut v = vec![0.0f32; EMBED_DIM];
         v[0] = 1.0;
-        insert(&s, &expert("expert:a", v.clone())).await.unwrap();
+        insert(&s, &expert("expert:a", v.clone())).await?;
 
-        assert_eq!(
-            get(&s, &ExpertId::new("expert:a"))
-                .await
-                .unwrap()
-                .unwrap()
-                .name,
-            "expert:a"
-        );
-        assert!(get(&s, &ExpertId::new("expert:missing"))
-            .await
-            .unwrap()
-            .is_none());
-        assert_eq!(list(&s).await.unwrap().len(), 1);
+        let Some(a) = get(&s, &ExpertId::new("expert:a")).await? else {
+            return Err(AntumbraError::other("expert:a did not read back"));
+        };
+        assert_eq!(a.name, "expert:a");
+        assert!(get(&s, &ExpertId::new("expert:missing")).await?.is_none());
+        assert_eq!(list(&s).await?.len(), 1);
 
-        let near = knn_by_capability(&s, &v, 1).await.unwrap();
+        let near = knn_by_capability(&s, &v, 1).await?;
         assert_eq!(near.len(), 1);
         assert_eq!(near[0].id.as_str(), "expert:a");
 
-        delete(&s, &ExpertId::new("expert:a")).await.unwrap();
-        assert!(list(&s).await.unwrap().is_empty());
+        delete(&s, &ExpertId::new("expert:a")).await?;
+        assert!(list(&s).await?.is_empty());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn set_frozen_toggles_in_place_and_ignores_the_absent() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn set_frozen_toggles_in_place_and_ignores_the_absent() -> antumbra_core::Result<()> {
+        let s = crate::testing::mem_store().await?;
         let mut v = vec![0.0f32; EMBED_DIM];
         v[0] = 1.0;
         // Seed an unfrozen expert (override the helper's frozen default).
         let mut e = expert("expert:f", v);
         e.frozen_at = None;
-        insert(&s, &e).await.unwrap();
+        insert(&s, &e).await?;
         let id = ExpertId::new("expert:f");
 
         // Freeze in place: same record (one row), now frozen.
-        set_frozen(&s, &id, Some(Utc::now())).await.unwrap();
-        let frozen = get(&s, &id).await.unwrap().unwrap();
+        set_frozen(&s, &id, Some(Utc::now())).await?;
+        let Some(frozen) = get(&s, &id).await? else {
+            return Err(AntumbraError::other("expert:f went missing on freeze"));
+        };
         assert!(frozen.is_frozen());
-        assert_eq!(list(&s).await.unwrap().len(), 1, "replaced, not duplicated");
+        assert_eq!(list(&s).await?.len(), 1, "replaced, not duplicated");
 
         // Thaw in place.
-        set_frozen(&s, &id, None).await.unwrap();
-        assert!(!get(&s, &id).await.unwrap().unwrap().is_frozen());
+        set_frozen(&s, &id, None).await?;
+        let Some(thawed) = get(&s, &id).await? else {
+            return Err(AntumbraError::other("expert:f went missing on thaw"));
+        };
+        assert!(!thawed.is_frozen());
 
         // Absent id is a no-op, not an error.
-        set_frozen(&s, &ExpertId::new("expert:ghost"), Some(Utc::now()))
-            .await
-            .unwrap();
-        assert_eq!(list(&s).await.unwrap().len(), 1);
+        set_frozen(&s, &ExpertId::new("expert:ghost"), Some(Utc::now())).await?;
+        assert_eq!(list(&s).await?.len(), 1);
+        Ok(())
     }
 }

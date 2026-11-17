@@ -7,12 +7,10 @@
 //! evaluations, and which recipe it descends from. No raw SurrealQL.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{get_record, query_records, upsert_record};
+use surql::query::crud::query_records;
 use surql::types::operators::eq;
-use surql::types::RecordID;
 
 use antumbra_core::{Generation, RecipeRecord, Result, RunId, ShadowId, TrainingRecipe};
 
@@ -20,7 +18,7 @@ use crate::dto::parse_dt;
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "recipe";
+const TABLE: &str = crate::tables::RECIPE;
 
 #[derive(Serialize, Deserialize)]
 struct RecipeRow {
@@ -73,23 +71,22 @@ impl RecipeRow {
 
 /// Record a run of a recipe, replacing any row the same shadow left before.
 pub async fn upsert(store: &Store, record: &RecipeRecord) -> Result<()> {
-    let id = RecordID::<()>::new(TABLE, record.shadow.as_str()).map_err(map)?;
-    let data: Value = serde_json::to_value(RecipeRow::from_domain(record))?;
-    upsert_record(store.client(), &id, data)
+    store
+        .put(
+            TABLE,
+            record.shadow.as_str(),
+            &RecipeRow::from_domain(record),
+        )
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// The row a shadow left, if it trained under a recorded recipe.
 pub async fn get(store: &Store, shadow: &ShadowId) -> Result<Option<RecipeRecord>> {
-    let rid = RecordID::<()>::new(TABLE, shadow.as_str()).map_err(map)?;
-    match get_record(store.client(), &rid).await.map_err(map)? {
-        Some(value) => Ok(Some(
-            serde_json::from_value::<RecipeRow>(value)?.into_domain()?,
-        )),
-        None => Ok(None),
-    }
+    store
+        .get_row::<RecipeRow>(TABLE, shadow.as_str())
+        .await?
+        .map(RecipeRow::into_domain)
+        .transpose()
 }
 
 /// Every recipe one run trained under, in generation order: the search's
@@ -109,7 +106,7 @@ pub async fn list_for_run(store: &Store, run_id: &RunId) -> Result<Vec<RecipeRec
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use chrono::Utc;
 
     fn record(run: &str, generation: u32, fitness: f32) -> RecipeRecord {
@@ -135,10 +132,14 @@ mod tests {
 
     #[tokio::test]
     async fn a_row_round_trips_by_its_shadow() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         let r = record("run:a", 1, 0.5);
         upsert(&s, &r).await?;
-        let back = get(&s, &r.shadow).await?.expect("stored");
+        let Some(back) = get(&s, &r.shadow).await? else {
+            return Err(antumbra_core::AntumbraError::other(
+                "the recipe row did not read back",
+            ));
+        };
         assert_eq!(
             (
                 back.generation,
@@ -157,7 +158,7 @@ mod tests {
     /// one row per shadow, however many times it was written.
     #[tokio::test]
     async fn rewriting_a_shadows_row_replaces_it() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         upsert(&s, &record("run:a", 0, 0.2)).await?;
         upsert(&s, &record("run:a", 0, 0.3)).await?;
         let rows = list_for_run(&s, &RunId::new("run:a")).await?;
@@ -168,7 +169,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_runs_history_reads_in_generation_order_and_alone() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         for (run, generation) in [("run:a", 2), ("run:a", 0), ("run:b", 1), ("run:a", 1)] {
             upsert(&s, &record(run, generation, 0.1)).await?;
         }

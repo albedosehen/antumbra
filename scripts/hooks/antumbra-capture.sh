@@ -23,7 +23,17 @@ session_id=$(printf '%s' "$input" | jq -r '.session_id // "default"')
 event=$(printf '%s' "$input" | jq -r '.hook_event_name // "Stop"')
 workspace="${ANTUMBRA_WORKSPACE_ID:-<workspace>}"
 
-SENTINEL="${TMPDIR:-/tmp}/antumbra-capture-${event}-${session_id}"
+# The sentinel's name is built from two fields of the hook's input, so both are
+# cut to [A-Za-z0-9_-] before they name a file: a value carrying `../` or a
+# space is used as given otherwise. It lives under a directory only this user
+# writes (the session runtime directory, else one under the home), not a
+# world-writable temp directory where another user could plant the name.
+name_of() { printf '%s' "$1" | tr -cd 'A-Za-z0-9_-'; }
+safe_session="$(name_of "$session_id")"; [ -n "$safe_session" ] || safe_session=default
+safe_event="$(name_of "$event")"; [ -n "$safe_event" ] || safe_event=Stop
+run_dir="${XDG_RUNTIME_DIR:-$HOME/.antumbra/run}"
+mkdir -p "$run_dir" 2>/dev/null && chmod 700 "$run_dir" 2>/dev/null
+SENTINEL="$run_dir/antumbra-capture-${safe_event}-${safe_session}"
 if [ -f "$SENTINEL" ]; then rm -f "$SENTINEL"; exit 0; fi
 touch "$SENTINEL"
 
@@ -45,18 +55,16 @@ if [ "$event" = "Stop" ] && command -v curl >/dev/null 2>&1; then
   # what this machine's agent recalled for itself is judged against this turn.
   host_id="$(printf '%s' "${ANTUMBRA_HOST_ID:-}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
   if [ -n "$token" ] && [ -n "$body" ]; then
-    if [ -n "$host_id" ]; then
-      curl -s -o /dev/null -X POST "$url/mcp/call" \
-        -H 'Content-Type: application/json' \
-        -H "Authorization: Bearer $token" \
-        -H "X-Antumbra-Host: $host_id" \
-        --max-time 2 --data-binary "$body" >/dev/null 2>&1 || true
-    else
-      curl -s -o /dev/null -X POST "$url/mcp/call" \
-        -H 'Content-Type: application/json' \
-        -H "Authorization: Bearer $token" \
-        --max-time 2 --data-binary "$body" >/dev/null 2>&1 || true
-    fi
+    named=()
+    [ -n "$host_id" ] && named=(-H "X-Antumbra-Host: $host_id")
+    # The bearer reaches curl as a config line on its stdin, never as an
+    # argument: an argument sits in the process list, readable by every other
+    # user of the machine, for as long as the request lasts.
+    printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -s -o /dev/null -X POST "$url/mcp/call" \
+      -H 'Content-Type: application/json' \
+      --config - \
+      "${named[@]}" \
+      --max-time 2 --data-binary "$body" >/dev/null 2>&1 || true
   fi
 fi
 

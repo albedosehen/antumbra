@@ -9,15 +9,14 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use surql::query::crud::{get_record, upsert_record};
-use surql::types::RecordID;
+use surql::query::crud::create_record;
 
-use antumbra_core::Result;
+use antumbra_core::{AntumbraError, Result};
 
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "account";
+const TABLE: &str = crate::tables::ACCOUNT;
 
 /// A hosted account: a login identity bound to the workspace it owns.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,38 +32,71 @@ pub struct Account {
     pub created_at: DateTime<Utc>,
 }
 
-fn record_id(subject: &str) -> Result<RecordID> {
-    let key = subject.replace([':', '/', '\\', '|', ' ', '@'], "_");
-    RecordID::<()>::new(TABLE, key.as_str()).map_err(map)
+fn key(subject: &str) -> String {
+    subject.replace([':', '/', '\\', '|', ' ', '@'], "_")
 }
 
-/// Persist a new account (signup). Keyed by subject; idempotent on it.
+/// Persist a new account (signup). Keyed by subject, and a creation rather
+/// than a write: a second account for the same login is refused, so a signup
+/// that lost a race, or a replayed one, cannot overwrite the first.
 pub async fn create(store: &Store, account: &Account) -> Result<()> {
-    let rid = record_id(&account.subject)?;
-    upsert_record(store.client(), &rid, serde_json::to_value(account)?)
-        .await
-        .map_err(map)?;
-    Ok(())
+    let mut row = serde_json::to_value(account)?;
+    row["id"] = serde_json::json!(key(&account.subject));
+    match create_record(store.client(), TABLE, row).await {
+        Ok(_) => Ok(()),
+        Err(e) if e.to_string().contains("already exists") => Err(AntumbraError::rejected(
+            "an account for this login already exists",
+        )),
+        Err(e) => Err(map(e)),
+    }
 }
 
 /// Look up the account for a verified login subject (login).
 pub async fn get_by_subject(store: &Store, subject: &str) -> Result<Option<Account>> {
-    let rid = record_id(subject)?;
-    match get_record(store.client(), &rid).await.map_err(map)? {
-        Some(value) => Ok(Some(serde_json::from_value(value)?)),
-        None => Ok(None),
-    }
+    store.get_row(TABLE, key(subject).as_str()).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
+
+    /// A signup creates and never overwrites: a second account for the same
+    /// login (a signup that lost a race, or a replayed one) is refused and the
+    /// first stands.
+    #[tokio::test]
+    async fn a_second_account_for_the_same_login_is_refused() -> Result<()> {
+        let store = crate::testing::mem_store().await?;
+        let first = Account {
+            subject: "email:dana@example.com".into(),
+            tenant: "ws:first".into(),
+            user: "user:dana".into(),
+            email: Some("dana@example.com".into()),
+            display: None,
+            created_at: Utc::now(),
+        };
+        create(&store, &first).await?;
+        let second = Account {
+            tenant: "ws:second".into(),
+            ..first.clone()
+        };
+        let Err(refused) = create(&store, &second).await else {
+            return Err(AntumbraError::other(
+                "a second account for the login was written",
+            ));
+        };
+        assert!(refused.is_rejection(), "{refused}");
+        let Some(kept) = get_by_subject(&store, &first.subject).await? else {
+            return Err(AntumbraError::other("the first account vanished"));
+        };
+        assert_eq!(kept.tenant, "ws:first");
+        Ok(())
+    }
 
     #[tokio::test]
-    async fn create_then_lookup_by_subject() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
-        assert!(get_by_subject(&s, "github:1").await.unwrap().is_none());
+    async fn create_then_lookup_by_subject() -> Result<()> {
+        let s = mem_store().await?;
+        assert!(get_by_subject(&s, "github:1").await?.is_none());
         create(
             &s,
             &Account {
@@ -76,11 +108,15 @@ mod tests {
                 created_at: Utc::now(),
             },
         )
-        .await
-        .unwrap();
-        let got = get_by_subject(&s, "github:1").await.unwrap().unwrap();
+        .await?;
+        let Some(got) = get_by_subject(&s, "github:1").await? else {
+            return Err(antumbra_core::AntumbraError::other(
+                "the account did not read back",
+            ));
+        };
         assert_eq!(got.tenant, "ws:abc");
         assert_eq!(got.user, "user:owner");
         assert_eq!(got.email.as_deref(), Some("a@b.com"));
+        Ok(())
     }
 }

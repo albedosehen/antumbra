@@ -238,8 +238,7 @@ impl Remeasurement {
     /// The mean pass rate over the seeds, which the graduation threshold is
     /// applied to. `None` with no evaluations.
     pub fn mean(&self) -> Option<f32> {
-        (!self.pass_rates.is_empty())
-            .then(|| self.pass_rates.iter().sum::<f32>() / self.pass_rates.len() as f32)
+        crate::stats::mean(self.pass_rates.iter().copied())
     }
 }
 
@@ -574,6 +573,9 @@ pub struct RelevanceState {
 }
 
 impl RelevanceState {
+    /// Two strings and a list of strings always serialize; an error here would
+    /// be serde_json's, not a state this code can reach, so the expect stays.
+    #[allow(clippy::expect_used)]
     pub fn encode(&self) -> String {
         serde_json::to_string(self).expect("two strings and a list of them serialize")
     }
@@ -604,7 +606,7 @@ mod typed_decisions {
     /// to remember. A question that cannot be answered well is not worth asking
     /// cheaply.
     #[test]
-    fn a_choice_answer_space_is_bounded() {
+    fn a_choice_answer_space_is_bounded() -> anyhow::Result<()> {
         let ok = Question::Choice {
             options: (0..MAX_CHOICE_OPTIONS).map(|i| i.to_string()).collect(),
         };
@@ -616,22 +618,24 @@ mod typed_decisions {
             !too_many.is_answerable(),
             "past the bound the question must be refused rather than answered badly"
         );
+        Ok(())
     }
 
     /// An empty or single-option choice is not a decision, and asking it wastes a
     /// forward pass on an answer the caller already has.
     #[test]
-    fn a_choice_with_nothing_to_choose_is_not_answerable() {
+    fn a_choice_with_nothing_to_choose_is_not_answerable() -> anyhow::Result<()> {
         assert!(!Question::Choice { options: vec![] }.is_answerable());
         assert!(!Question::Choice {
             options: vec!["only".into()]
         }
         .is_answerable());
+        Ok(())
     }
 
     /// A scale has to have width, or the expectation it asks for is a constant.
     #[test]
-    fn a_score_needs_a_real_scale() {
+    fn a_score_needs_a_real_scale() -> anyhow::Result<()> {
         assert!(Question::Score {
             low: 0.0,
             high: 1.0
@@ -650,12 +654,14 @@ mod typed_decisions {
             .is_answerable(),
             "an inverted scale is a caller error, not a question"
         );
+        Ok(())
     }
 
     /// A `Noul` is always answerable: its answer space is fixed.
     #[test]
-    fn a_noul_is_always_answerable() {
+    fn a_noul_is_always_answerable() -> anyhow::Result<()> {
         assert!(Question::Noul.is_answerable());
+        Ok(())
     }
 }
 
@@ -664,7 +670,7 @@ mod act_request_tests {
     use super::*;
 
     #[test]
-    fn an_adapter_without_a_weight_weighs_one() {
+    fn an_adapter_without_a_weight_weighs_one() -> anyhow::Result<()> {
         let mut req = ActRequest::new("t", "p", vec![ExpertId::new("a"), ExpertId::new("b")]);
         assert_eq!(
             req.blend(),
@@ -675,12 +681,14 @@ mod act_request_tests {
             req.blend(),
             vec![(ExpertId::new("a"), 0.4), (ExpertId::new("b"), 1.0)]
         );
+        Ok(())
     }
 
     #[test]
-    fn a_request_without_weights_still_parses() {
+    fn a_request_without_weights_still_parses() -> anyhow::Result<()> {
         let req: ActRequest =
-            serde_json::from_str(r#"{"task_id":"t","prompt":"p","adapters":["a"]}"#).unwrap();
+            serde_json::from_str(r#"{"task_id":"t","prompt":"p","adapters":["a"]}"#)?;
         assert!(req.weights.is_empty());
+        Ok(())
     }
 }

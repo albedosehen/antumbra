@@ -104,7 +104,7 @@ mod tests {
     }
 
     #[test]
-    fn a_new_file_starts_from_the_example_with_its_comments() {
+    fn a_new_file_starts_from_the_example_with_its_comments() -> anyhow::Result<()> {
         let (text, wrote) = fill(None, EXAMPLE, &wants());
         assert!(text.contains("# the stack's secrets\nSURREAL_PASS=pass1\n"));
         assert!(text.contains("ANTUMBRA_JWT_SECRET=secret1\n"));
@@ -118,10 +118,11 @@ mod tests {
                 "ANTUMBRA_SURREAL_DATA"
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn a_real_value_already_there_is_kept() {
+    fn a_real_value_already_there_is_kept() -> anyhow::Result<()> {
         let existing = "SURREAL_PASS=mine\nANTUMBRA_JWT_SECRET=change-me-base64-32-bytes\n";
         let (text, wrote) = fill(Some(existing), EXAMPLE, &wants());
         assert!(text.contains("SURREAL_PASS=mine\n"));
@@ -132,18 +133,20 @@ mod tests {
         );
         assert_eq!(wrote, vec!["ANTUMBRA_JWT_SECRET", "ANTUMBRA_SURREAL_DATA"]);
         assert_eq!(get(&text, "SURREAL_PASS"), Some("mine"));
+        Ok(())
     }
 
     #[test]
-    fn a_second_run_writes_nothing() {
+    fn a_second_run_writes_nothing() -> anyhow::Result<()> {
         let (once, _) = fill(None, EXAMPLE, &wants());
         let (twice, wrote) = fill(Some(&once), EXAMPLE, &wants());
         assert_eq!(once, twice);
         assert!(wrote.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn set_replaces_the_value_in_place_or_adds_it() {
+    fn set_replaces_the_value_in_place_or_adds_it() -> anyhow::Result<()> {
         let text = "# ANTUMBRA_IMAGE=example\nANTUMBRA_IMAGE=old:1\nOTHER=x\n";
         let moved = set(text, "ANTUMBRA_IMAGE", "new:2");
         assert_eq!(
@@ -153,12 +156,14 @@ mod tests {
         let added = set("OTHER=x\n", "ANTUMBRA_IMAGE", "new:2");
         assert_eq!(added, "OTHER=x\nANTUMBRA_IMAGE=new:2\n");
         assert_eq!(get(&added, "ANTUMBRA_IMAGE"), Some("new:2"));
+        Ok(())
     }
 
     #[test]
-    fn a_commented_line_is_not_a_value() {
+    fn a_commented_line_is_not_a_value() -> anyhow::Result<()> {
         assert_eq!(get("# SURREAL_PASS=x\n", "SURREAL_PASS"), None);
         assert_eq!(get("SURREAL_PASS_FILE=x\n", "SURREAL_PASS"), None);
         assert_eq!(get("SURREAL_PASS = \"x\"\n", "SURREAL_PASS"), Some("x"));
+        Ok(())
     }
 }

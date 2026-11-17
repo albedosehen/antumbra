@@ -12,10 +12,10 @@ use antumbra_core::ports::{
 };
 use antumbra_core::slice::Holdout;
 use antumbra_core::testing::ScriptedTrainer;
-use antumbra_core::{Expert, ExpertId, Generation, Result, RunId};
+use antumbra_core::{AntumbraError, Expert, ExpertId, Generation, Result, RunId};
 use antumbra_loop::{ContributionPolicy, GenerationLoop, GrowPolicy, LoopConfig};
 use antumbra_store::repo::{expert, grow};
-use antumbra_store::Store;
+use antumbra_store::testing::mem_store_of;
 
 const DIM: usize = 4;
 const REGIONS: [(&str, f32); 4] = [("half", 0.5), ("third", 0.4), ("easy", 0.9), ("never", 0.0)];
@@ -44,6 +44,25 @@ impl Embedder for Axes {
 struct Regions {
     focus: Mutex<Vec<Vec<String>>>,
     parents: Mutex<Vec<Option<String>>>,
+}
+
+impl Regions {
+    /// The focus of every run asked for, in order. The fake only ever pushes
+    /// to the list, so a poisoned lock holds a whole list and is read as is.
+    fn focus(&self) -> Vec<Vec<String>> {
+        self.focus
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// The parent adapter of every run asked for, in order; read as `focus` is.
+    fn parents(&self) -> Vec<Option<String>> {
+        self.parents
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
 }
 
 #[async_trait]
@@ -103,7 +122,7 @@ fn growing() -> LoopConfig {
 
 #[tokio::test]
 async fn each_generation_learns_from_the_region_the_census_makes_most_learnable() -> Result<()> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = mem_store_of(DIM).await?;
     let trainer = Regions::default();
     let run = RunId::new("run:grow");
     let reports = GenerationLoop::new(&store, &trainer, &Axes, growing())
@@ -112,7 +131,10 @@ async fn each_generation_learns_from_the_region_the_census_makes_most_learnable(
 
     // Generation 0 has no census yet: it learns from everything, and takes
     // the first census, of the base model alone.
-    let first = reports[0].growth.as_ref().expect("decided");
+    let first = reports[0]
+        .growth
+        .as_ref()
+        .ok_or_else(|| AntumbraError::other("generation 0 decided nothing"))?;
     assert!(first.record.chosen.is_none() && first.focus.is_empty());
     let census: Vec<(&str, f32)> = reports[0]
         .census
@@ -126,7 +148,10 @@ async fn each_generation_learns_from_the_region_the_census_makes_most_learnable(
 
     // Generation 1 learns from the half-solved region, and a quarter of what
     // it learns is sampled from the rest.
-    let second = reports[1].growth.as_ref().expect("decided");
+    let second = reports[1]
+        .growth
+        .as_ref()
+        .ok_or_else(|| AntumbraError::other("generation 1 decided nothing"))?;
     assert_eq!(second.record.chosen.as_deref(), Some("half"));
     assert_eq!((second.record.focus, second.record.unfiltered), (6, 2));
     let never = second
@@ -135,14 +160,17 @@ async fn each_generation_learns_from_the_region_the_census_makes_most_learnable(
         .iter()
         .find(|c| c.region == "never");
     assert!(never.is_some_and(|c| !c.admitted), "the gate keeps it out");
-    let asked = trainer.focus.lock().unwrap().clone();
+    let asked = trainer.focus();
     assert!(asked[0].is_empty());
     assert_eq!(asked[1].iter().filter(|t| t.starts_with("half")).count(), 4);
 
     // Generation 2: the half region, just chosen, gives up half its
     // learnability, so the next most learnable is chosen; and the first
     // choice's realized credit is recorded.
-    let third = reports[2].growth.as_ref().expect("decided");
+    let third = reports[2]
+        .growth
+        .as_ref()
+        .ok_or_else(|| AntumbraError::other("generation 2 decided nothing"))?;
     assert_eq!(third.record.chosen.as_deref(), Some("third"));
     assert_eq!(
         third.record.credit,
@@ -159,7 +187,7 @@ async fn each_generation_learns_from_the_region_the_census_makes_most_learnable(
 
 #[tokio::test]
 async fn without_a_policy_every_run_learns_from_everything() -> Result<()> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = mem_store_of(DIM).await?;
     let trainer = Regions::default();
     let cfg = LoopConfig {
         grow: None,
@@ -169,7 +197,7 @@ async fn without_a_policy_every_run_learns_from_everything() -> Result<()> {
         .run_until(&RunId::new("run:plain"), 2)
         .await?;
     assert!(reports.iter().all(|r| r.growth.is_none()));
-    assert!(trainer.focus.lock().unwrap().iter().all(Vec::is_empty));
+    assert!(trainer.focus().iter().all(Vec::is_empty));
     Ok(())
 }
 
@@ -194,17 +222,20 @@ fn half_expert() -> Expert {
 
 #[tokio::test]
 async fn a_region_shadow_starts_from_the_expert_that_serves_the_region() -> Result<()> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = mem_store_of(DIM).await?;
     expert::insert(&store, &half_expert()).await?;
     let trainer = Regions::default();
     let run = RunId::new("run:warm");
     let reports = GenerationLoop::new(&store, &trainer, &Axes, growing())
         .run_until(&run, 2)
         .await?;
-    let second = reports[1].growth.as_ref().expect("decided");
+    let second = reports[1]
+        .growth
+        .as_ref()
+        .ok_or_else(|| AntumbraError::other("generation 1 decided nothing"))?;
     assert_eq!(second.record.chosen.as_deref(), Some("half"));
     assert_eq!(second.record.warm_from, Some(ExpertId::new("expert:half")));
-    let parents = trainer.parents.lock().unwrap().clone();
+    let parents = trainer.parents();
     // Generation 0 chose no region and started fresh; generation 1 started
     // from the serving expert's adapter.
     assert_eq!(parents, vec![None, Some("adapters/half".to_string())]);
@@ -214,7 +245,7 @@ async fn a_region_shadow_starts_from_the_expert_that_serves_the_region() -> Resu
 #[tokio::test]
 async fn off_or_with_no_expert_serving_the_region_a_shadow_starts_fresh() -> Result<()> {
     // Off: the serving expert is there, and ignored.
-    let store = Store::connect_memory(DIM).await?;
+    let store = mem_store_of(DIM).await?;
     expert::insert(&store, &half_expert()).await?;
     let trainer = Regions::default();
     let cold = LoopConfig {
@@ -227,15 +258,19 @@ async fn off_or_with_no_expert_serving_the_region_a_shadow_starts_fresh() -> Res
     let reports = GenerationLoop::new(&store, &trainer, &Axes, cold)
         .run_until(&RunId::new("run:cold"), 2)
         .await?;
-    assert_eq!(reports[1].growth.as_ref().unwrap().record.warm_from, None);
-    assert!(trainer.parents.lock().unwrap().iter().all(Option::is_none));
+    let second = reports[1]
+        .growth
+        .as_ref()
+        .ok_or_else(|| AntumbraError::other("generation 1 decided nothing"))?;
+    assert_eq!(second.record.warm_from, None);
+    assert!(trainer.parents().iter().all(Option::is_none));
 
     // On, but no expert: nothing to start from.
-    let store = Store::connect_memory(DIM).await?;
+    let store = mem_store_of(DIM).await?;
     let trainer = Regions::default();
     GenerationLoop::new(&store, &trainer, &Axes, growing())
         .run_until(&RunId::new("run:none"), 2)
         .await?;
-    assert!(trainer.parents.lock().unwrap().iter().all(Option::is_none));
+    assert!(trainer.parents().iter().all(Option::is_none));
     Ok(())
 }

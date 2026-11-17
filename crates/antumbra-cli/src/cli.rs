@@ -3,6 +3,8 @@
 
 use clap::{Parser, Subcommand};
 
+use crate::claude::surface_args::SurfaceArgs;
+
 #[derive(Parser)]
 #[command(name = "antumbra", about = "Antumbra operator CLI", version)]
 pub struct Cli {
@@ -10,65 +12,19 @@ pub struct Cli {
     /// across commands. Use `mem://` for an ephemeral run, or
     /// `ws://host:8000/rpc` for a remote server. (`antumbra tui` reads the
     /// Antumbra server instead.)
-    #[arg(long, global = true, default_value = "surrealkv://./data/antumbra.skv")]
+    #[arg(
+        long,
+        global = true,
+        env = "ANTUMBRA_DB_URL",
+        default_value = "surrealkv://./data/antumbra.skv"
+    )]
     pub url: String,
-    /// Root username for an authenticated remote SurrealDB (`ws://`). Omit for an
-    /// embedded store or an unauthenticated server.
-    #[arg(long, global = true, env = "ANTUMBRA_DB_USER")]
-    pub db_user: Option<String>,
-    /// Root password for the remote SurrealDB.
-    #[arg(long, global = true, env = "ANTUMBRA_DB_PASS")]
-    pub db_pass: Option<String>,
-    /// Embed via an OpenAI-compatible `/embeddings` endpoint (for example Ollama
-    /// serving `all-minilm`) instead of the built-in embedder. It must return
-    /// vectors of the store's dimension. Use the SAME endpoint the population and
-    /// memories were built with, or recall and routing lose coherence.
-    #[arg(long, global = true, env = "ANTUMBRA_EMBEDDER_URL")]
-    pub embedder_url: Option<String>,
-    /// Model name sent to `--embedder-url`.
-    #[arg(
-        long,
-        global = true,
-        env = "ANTUMBRA_EMBEDDER_MODEL",
-        default_value = "all-MiniLM-L6-v2"
-    )]
-    pub embedder_model: String,
-    /// Optional bearer key for `--embedder-url`.
-    #[arg(long, global = true, env = "ANTUMBRA_EMBEDDER_KEY")]
-    pub embedder_key: Option<String>,
-    /// Use the deterministic byte-histogram stand-in (NOT semantic: it matches
-    /// character statistics), for demos and smoke tests only. Without
-    /// `--features models`, a command that embeds refuses to run with neither
-    /// this nor `--embedder-url` rather than silently degrading.
-    #[arg(
-        long,
-        global = true,
-        env = "ANTUMBRA_FAKE_EMBEDDER",
-        default_value_t = false
-    )]
-    pub fake_embedder: bool,
-    /// Archive each ingested document's ORIGINAL content to a copal file
-    /// service (the document of record), exactly as the MCP server does: bare
-    /// `host:port` or a full URL base. The upload happens before any chunk is
-    /// stored (a dead copal fails the ingest), and every chunk carries the
-    /// copal file id + digest. Off when unset: ingest keeps only the chunks.
-    #[arg(long, global = true, env = "ANTUMBRA_COPAL_ADDR")]
-    pub copal_addr: Option<String>,
-    /// Land every workspace's documents under this ONE copal tenant (copal's
-    /// header auth mode). Omit all three tenancy args for per-workspace
-    /// tenancy, the default. At most one of --copal-tenant / --copal-key /
-    /// --copal-keys.
-    #[arg(long, global = true, env = "ANTUMBRA_COPAL_TENANT")]
-    pub copal_tenant: Option<String>,
-    /// One `ck1` copal API key for every workspace (keys auth mode, shared
-    /// tenancy: the key's tenant is THE tenant).
-    #[arg(long, global = true, env = "ANTUMBRA_COPAL_KEY")]
-    pub copal_key: Option<String>,
-    /// Path to a JSON file mapping workspace tenant -> `ck1` copal API key
-    /// (keys auth mode, per-workspace tenancy); a workspace absent from the
-    /// map fails its ingest rather than landing in another tenant.
-    #[arg(long, global = true, env = "ANTUMBRA_COPAL_KEYS")]
-    pub copal_keys: Option<std::path::PathBuf>,
+    #[command(flatten)]
+    pub db: antumbra_store::args::DbAuthArgs,
+    #[command(flatten)]
+    pub embedder: antumbra_embed::args::EmbedderArgs,
+    #[command(flatten)]
+    pub copal: antumbra_copal::args::CopalArgs,
     #[command(subcommand)]
     pub command: Command,
 }
@@ -128,16 +84,8 @@ pub enum ClaudeAction {
         /// alongside `dir`.
         #[arg(long)]
         repos: Option<std::path::PathBuf>,
-        /// The Antumbra MCP surface to record through, as the hooks know it.
-        #[arg(
-            long = "surface",
-            env = "ANTUMBRA_URL",
-            default_value = "http://127.0.0.1:8081"
-        )]
-        surface: String,
-        /// The bearer token for that surface. Prefer the environment variable.
-        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
-        token: Option<String>,
+        #[command(flatten)]
+        surface: SurfaceArgs,
         /// Say which edges were found and record nothing.
         #[arg(long, default_value_t = false)]
         dry_run: bool,
@@ -148,17 +96,8 @@ pub enum ClaudeAction {
     /// expert. Safe to run again: a rule already there is kept, a changed one is
     /// stored and the old text penalized, and nothing is deleted.
     Remember {
-        /// The Antumbra MCP surface, as the hooks know it.
-        #[arg(
-            long = "surface",
-            env = "ANTUMBRA_URL",
-            default_value = "http://127.0.0.1:8081"
-        )]
-        surface: String,
-        /// The bearer token for that surface. Prefer the environment variable:
-        /// a flag ends up in the shell's history.
-        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
-        token: Option<String>,
+        #[command(flatten)]
+        surface: SurfaceArgs,
         /// Say what would be done and write nothing.
         #[arg(long, default_value_t = false)]
         dry_run: bool,
@@ -178,16 +117,8 @@ pub enum ClaudeAction {
         /// A directory whose child directories are your repositories.
         #[arg(long)]
         repos: Option<std::path::PathBuf>,
-        /// The Antumbra MCP surface to ask for memories, as the hooks know it.
-        #[arg(
-            long = "surface",
-            env = "ANTUMBRA_URL",
-            default_value = "http://127.0.0.1:8081"
-        )]
-        surface: String,
-        /// The bearer token for that surface. Prefer the environment variable.
-        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
-        token: Option<String>,
+        #[command(flatten)]
+        surface: SurfaceArgs,
         /// How many memories to offer for each slot.
         #[arg(long, default_value_t = 4)]
         each: u32,
@@ -223,16 +154,8 @@ pub enum ClaudeAction {
         /// The skill, when not run as a hook.
         #[arg(long)]
         name: Option<String>,
-        /// The Antumbra MCP surface, as the hooks know it.
-        #[arg(
-            long = "surface",
-            env = "ANTUMBRA_URL",
-            default_value = "http://127.0.0.1:8081"
-        )]
-        surface: String,
-        /// The bearer token for that surface. Prefer the environment variable.
-        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
-        token: Option<String>,
+        #[command(flatten)]
+        surface: SurfaceArgs,
     },
     /// Which of your skills are used, how often, and when last: the ones never
     /// used come first. Reads the skills installed for you and for the project,
@@ -243,18 +166,10 @@ pub enum ClaudeAction {
         #[arg(long)]
         dir: Option<std::path::PathBuf>,
         /// Call out a skill not used in this many days.
-        #[arg(long, default_value_t = 30)]
+        #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(i64).range(0..=36_500))]
         days: i64,
-        /// The Antumbra MCP surface, as the hooks know it.
-        #[arg(
-            long = "surface",
-            env = "ANTUMBRA_URL",
-            default_value = "http://127.0.0.1:8081"
-        )]
-        surface: String,
-        /// The bearer token for that surface. Prefer the environment variable.
-        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
-        token: Option<String>,
+        #[command(flatten)]
+        surface: SurfaceArgs,
     },
     /// Move the memories of merged branches onto the branch each merged into,
     /// so recall from there counts them in scope. Reads the repository's merged
@@ -270,21 +185,13 @@ pub enum ClaudeAction {
         limit: u32,
         /// Only the merges of the last this many days. The session-start hook
         /// passes a few, so each session reports only what is recent.
-        #[arg(long)]
+        #[arg(long, value_parser = clap::value_parser!(i64).range(0..=36_500))]
         days: Option<i64>,
         /// Say which merges would be reported and write nothing.
         #[arg(long, default_value_t = false)]
         dry_run: bool,
-        /// The Antumbra MCP surface, as the hooks know it.
-        #[arg(
-            long = "surface",
-            env = "ANTUMBRA_URL",
-            default_value = "http://127.0.0.1:8081"
-        )]
-        surface: String,
-        /// The bearer token for that surface. Prefer the environment variable.
-        #[arg(long, env = "ANTUMBRA_TOKEN", hide_env_values = true)]
-        token: Option<String>,
+        #[command(flatten)]
+        surface: SurfaceArgs,
     },
     /// Check an MCP server's tools for input schemas the API refuses. In
     /// sovereign mode the agent no longer leaves such a tool out, so one of them
@@ -391,31 +298,7 @@ pub enum Command {
     Seed,
     /// Route a task to an expert and serve a real answer from its adapter
     /// (needs --features models + a GPU; the expert must have a trained adapter).
-    Ask {
-        /// The task to route and answer.
-        task: String,
-        #[arg(long, default_value_t = 1)]
-        k: usize,
-        /// Max tokens to generate for the answer.
-        #[arg(long, default_value_t = 128)]
-        max_new_tokens: usize,
-        /// Abstention threshold on relative coverage. Adjacent experts compress
-        /// the margin; lower it to serve rather than escalate.
-        #[arg(long, default_value_t = 0.08)]
-        threshold: f32,
-        /// Standing experts always composed onto the routed one (your conventions),
-        /// `name:weight,...`, the static rule layer, internalized into the learned gate.
-        #[arg(long)]
-        with: Option<String>,
-        /// Blend weight for the task-routed (contextual) expert when composing
-        /// with standing experts.
-        #[arg(long, default_value_t = 0.4)]
-        self_weight: f32,
-        /// Sampling temperature. 0 = greedy (deterministic, the learned mode,
-        /// the right default for serving); raise for diverse draws.
-        #[arg(long, default_value_t = 0.0)]
-        temperature: f64,
-    },
+    Ask(crate::models::AskArgs),
     /// Resident multi-adapter server with hardware-adaptive serving: load the shared base ONCE and
     /// hot-swap each routed expert's adapter per prompt, instead of cold-loading
     /// a model per call. Reads prompts from stdin (one per line) or a single
@@ -423,20 +306,7 @@ pub enum Command {
     /// resident engine, so a stream of prompts pays the base load only once.
     /// Needs --features models. A build with no GPU backend serves on the CPU,
     /// from a Q8_0 base.
-    Serve {
-        /// Answer this one prompt and exit; omit to stream prompts from stdin.
-        #[arg(long)]
-        task: Option<String>,
-        /// Max tokens to generate per answer.
-        #[arg(long, default_value_t = 128)]
-        max_new_tokens: usize,
-        /// Abstention threshold on relative coverage; below it the gate escalates.
-        #[arg(long, default_value_t = 0.08)]
-        threshold: f32,
-        /// Sampling temperature. 0 = greedy (deterministic, the learned mode).
-        #[arg(long, default_value_t = 0.0)]
-        temperature: f64,
-    },
+    Serve(crate::commands::ServeArgs),
     /// Collector/sync: bidirectionally reconcile this local store (the
     /// global `--url`, an embedded penumbra) with a remote authoritative
     /// SurrealDB, last-write-wins by each row's version timestamp. Runs on a
@@ -464,31 +334,7 @@ pub enum Command {
     /// hold a behavior fixed, vary the context, and find the governing feature
     /// and C' by actually serving and checking. Stores an actionable boundary.
     /// Needs --features models + a GPU + python.
-    Scope {
-        /// Path to a scope spec JSON: { behavior, base_model?, governing_feature?,
-        /// fail_context, candidates: [<full context objects, each with verify>] }.
-        #[arg(long)]
-        spec: String,
-        /// Probe with this expert's adapter (by name) instead of the bare base,
-        /// so the search maps that expert's own competence boundary.
-        #[arg(long)]
-        expert: Option<String>,
-        /// Infer the governing feature from which contexts pass vs fail, instead
-        /// of trusting the spec's label (treats fail_context + candidates as a pool).
-        #[arg(long)]
-        discover: bool,
-        #[arg(long, default_value_t = 96)]
-        max_new_tokens: usize,
-        /// Best-of-K samples per context check (generation is stochastic).
-        #[arg(long, default_value_t = 8)]
-        samples: usize,
-        /// Sampling temperature; higher diversifies the best-of-K draws.
-        #[arg(long, default_value_t = 0.8)]
-        temperature: f64,
-        /// Confidence assigned to the recovered boundary.
-        #[arg(long, default_value_t = 0.7)]
-        confidence: f32,
-    },
+    Scope(crate::models::ScopeArgs),
     /// Train shadows with the real candle trainer (needs --features models + GPU).
     Train(crate::train_args::TrainArgs),
     /// Score a saved adapter's pass-rate on a corpus, with no training.
@@ -497,30 +343,7 @@ pub enum Command {
     /// Capture a supplied, verifier-checked correction into a frozen expert (the
     /// other intake path beside `train`, the capture intake into the umbra). The corpus carries a
     /// `completion` per task. Needs --features models + a GPU + python.
-    Teach {
-        /// JSON corpus of {id, prompt, completion, verify} corrections.
-        #[arg(long)]
-        corpus: String,
-        #[arg(long, default_value_t = 1)]
-        generations: u32,
-        #[arg(long, default_value = "run:teach")]
-        run: String,
-        /// SFT epochs over the verified corrections. Overriding a strong base
-        /// prior from one example needs many (try 40-80).
-        #[arg(long, default_value_t = 40)]
-        rounds: usize,
-        /// Completions sampled to measure whether the correction internalized.
-        #[arg(long, default_value_t = 8)]
-        samples: usize,
-        #[arg(long, default_value_t = 32)]
-        max_new_tokens: usize,
-        /// LoRA learning rate. Capturing a correction wants it higher than RAFT.
-        #[arg(long, default_value_t = 3e-4)]
-        lr: f64,
-        /// Warm-start from this adapter (accumulate onto an existing expert).
-        #[arg(long)]
-        parent: Option<String>,
-    },
+    Teach(crate::models::TeachArgs),
     /// Train the learned router over the population's exemplars (the learned gate): a
     /// per-dimension metric that separates specialists from generalists where
     /// raw-cosine routing cannot. Retrain after the population changes. Needs
@@ -551,122 +374,26 @@ pub enum Command {
     /// training (warm-started from the prior adapter) until it passes or the
     /// generation budget runs out. The system improves itself to a quality bar,
     /// eval-gated, with no manual per-step driving. Needs --features models + GPU.
-    Evolve {
-        /// JSON corpus of verifiable tasks ({id,prompt,verify}).
-        #[arg(long)]
-        corpus: String,
-        #[arg(long, default_value = "run:evolve")]
-        run: String,
-        /// Stop once the held pass-rate reaches this.
-        #[arg(long, default_value_t = 0.9)]
-        target: f32,
-        /// Generation budget (each is one warm-started RAFT pass).
-        #[arg(long, default_value_t = 3)]
-        max_gens: usize,
-        #[arg(long, default_value_t = 6)]
-        samples: usize,
-        #[arg(long, default_value_t = 2)]
-        rounds: usize,
-        #[arg(long, default_value_t = 32)]
-        max_new_tokens: usize,
-    },
+    Evolve(crate::commands::EvolveArgs),
     /// Autonomous population growth: route each task across the population, and
     /// grow a NEW specialist for the cluster the gate cannot cover, until
     /// coverage meets target or the expert budget runs out. Additive: existing
     /// experts are kept. Needs --features models + a GPU.
-    Populate {
-        /// JSON corpus of verifiable tasks ({id,prompt,verify}).
-        #[arg(long)]
-        corpus: String,
-        #[arg(long, default_value = "grown")]
-        run: String,
-        /// Stop once this fraction of tasks is covered by the population.
-        #[arg(long, default_value_t = 0.9)]
-        target_coverage: f32,
-        /// How many new specialists to grow at most.
-        #[arg(long, default_value_t = 3)]
-        max_experts: usize,
-        #[arg(long, default_value_t = 8)]
-        samples: usize,
-        #[arg(long, default_value_t = 3)]
-        rounds: usize,
-        #[arg(long, default_value_t = 32)]
-        max_new_tokens: usize,
-    },
+    Populate(crate::commands::PopulateArgs),
     /// Bootstrap from an existing memory corpus (qdrant, surrealdb, a json
     /// file): adapt a normalized memory export into capture tasks and learn
     /// from them, instead of discovering every skill cold via RAFT. Reinforced
     /// memories are captured (trusted on import); weak ones become RAFT seeds.
     /// Writes the converted corpus; with --train, internalizes the captures.
     /// Needs --features models (+ a GPU + python only when --train).
-    MemoryImport {
-        /// JSON array of normalized memories ({content, scope, marker, forbid,
-        /// confidence, ...}). See `memory::MemoryRecord`.
-        #[arg(long)]
-        source: String,
-        /// Where to write the converted capture corpus for inspection / `teach`.
-        #[arg(long, default_value = "corpora/_imported.json")]
-        out: String,
-        /// Confidence at/above which a memory is trusted on import (else seed).
-        #[arg(long, default_value_t = 0.5)]
-        capture_threshold: f32,
-        /// Also internalize the captured memories now (the capture loop).
-        #[arg(long, default_value_t = false)]
-        train: bool,
-        #[arg(long, default_value = "run:memory")]
-        run: String,
-        #[arg(long, default_value_t = 40)]
-        rounds: usize,
-        #[arg(long, default_value_t = 8)]
-        samples: usize,
-        #[arg(long, default_value_t = 32)]
-        max_new_tokens: usize,
-        #[arg(long, default_value_t = 3e-4)]
-        lr: f64,
-    },
+    MemoryImport(crate::commands::MemoryImportArgs),
     /// Consolidation: score a normalized memory export against the
     /// graduation gate (recurrence x verifiability x stability), graduate the
     /// survivors into per-skill specialists rehearsing already-consolidated
     /// skills (replay, the catastrophic-interference fix), and append them to
     /// the consolidated log. The store keeps everything that does not graduate
     /// (volatile / episodic / under-reinforced). Needs --features models.
-    Consolidate {
-        /// JSON array of normalized memories (see `memory::MemoryRecord`).
-        #[arg(long)]
-        source: String,
-        /// Accumulating consolidated corpus: the replay source and demotion log.
-        #[arg(long, default_value = "corpora/_consolidated.json")]
-        log: String,
-        /// Reinforcement count at/above which recurrence is satisfied.
-        #[arg(long, default_value_t = 2)]
-        min_recurrence: u32,
-        /// Confidence floor a graduating memory must clear.
-        #[arg(long, default_value_t = 0.5)]
-        min_confidence: f32,
-        /// Internalize the graduates now (else dry-run scoring + log only).
-        #[arg(long, default_value_t = false)]
-        train: bool,
-        /// Rehearsal examples per winner interleaved into capture SFT.
-        #[arg(long, default_value_t = 0.5)]
-        replay_ratio: f64,
-        #[arg(long, default_value = "expert:consolidated")]
-        run: String,
-        #[arg(long, default_value_t = 40)]
-        rounds: usize,
-        #[arg(long, default_value_t = 8)]
-        samples: usize,
-        #[arg(long, default_value_t = 32)]
-        max_new_tokens: usize,
-        #[arg(long, default_value_t = 3e-4)]
-        lr: f64,
-        /// Verified winners per optimizer step. 1 steps on each example in
-        /// turn; more steps on the mean gradient of that many at a time (true
-        /// mini-batch descent), which is less noisy, so a higher `--lr` stays
-        /// stable and no example dominates by being trained last. Examples are
-        /// backpropagated one at a time, so memory does not grow with it.
-        #[arg(long, default_value_t = 1)]
-        batch_size: usize,
-    },
+    Consolidate(crate::ops::ConsolidateArgs),
     /// Retire an expert: population-level forgetting that demotes rather than
     /// deletes. The expert goes dormant, masked from the gate
     /// but kept, and still served when named; `--archive` takes it out of
@@ -696,85 +423,29 @@ pub enum Command {
         #[arg(long)]
         note: Option<String>,
     },
+    /// End a token before it expires: the one saved on this machine, a token
+    /// file, or an id. Every networked server refuses it within half a minute.
+    /// For a token on a lost or shared machine; rotating the signing key ends
+    /// every token at once instead.
+    RevokeToken(crate::ops::RevokeTokenArgs),
     /// Seed a memory into a user's compartment from the CLI (the owner/admin
     /// path; agents write via the MCP `store_memory` tool). No embedding is
     /// attached; consolidation gathers a compartment by membership. Pair with
     /// `consolidate-compartment` to mint the compartment into a private expert.
-    Remember {
-        #[arg(long)]
-        tenant: String,
-        #[arg(long)]
-        user: String,
-        #[arg(long)]
-        compartment: String,
-        /// The memory content: the behavior/fact to internalize on consolidation.
-        #[arg(long)]
-        content: String,
-        #[arg(long, default_value = "world")]
-        network: String,
-        #[arg(long, default_value_t = 1.0)]
-        confidence: f32,
-    },
+    Remember(crate::ops::RememberArgs),
     /// Ingest a knowledge document for `recall_documents`: chunk, embed, store,
     /// from a file or from what a command prints. The command form is the
     /// parser-free answer to an inventory question: run the framework's own
     /// lister (`deno task routes`, an OpenAPI export, `cargo metadata`) and keep
     /// its output, stamped with the repository, commit, and branch it ran at, so
     /// a recalled chunk says which commit it describes.
-    Ingest {
-        #[arg(long)]
-        tenant: String,
-        #[arg(long)]
-        user: String,
-        /// The document's title (groups and names its chunks; re-ingesting a
-        /// title replaces its chunks in place).
-        #[arg(long)]
-        title: String,
-        /// Read the document from this file.
-        #[arg(long, conflicts_with = "run")]
-        file: Option<std::path::PathBuf>,
-        /// Where the document came from, for the record (defaults to the file
-        /// path or the command line).
-        #[arg(long)]
-        source: Option<String>,
-        /// The file the document is about, added to the git anchor.
-        #[arg(long)]
-        path: Option<String>,
-        /// Do not stamp the current repository / commit / branch on the chunks.
-        #[arg(long, default_value_t = false)]
-        no_git: bool,
-        /// Keep the document in this compartment, so only its owner and the people
-        /// it is shared with can recall it. Omit it for the workspace's shared
-        /// pool, which every member can recall.
-        #[arg(long)]
-        compartment: Option<String>,
-        /// The command whose stdout is the document, after `--`
-        /// (`antumbra ingest --title routes -- deno task routes`).
-        #[arg(last = true)]
-        run: Vec<String>,
-    },
+    Ingest(crate::ops::IngestArgs),
     /// Derive facts the repository's history already states, from `git log`
     /// with no parser: ownership per top-level area, change hotspots, and files
     /// that change together, over a window. Each fact is stored as a `world`
     /// memory whose evidence names the commit range it came from, so a later
     /// session sees how old it is instead of trusting a refreshed-or-not index.
-    GitFacts {
-        #[arg(long)]
-        tenant: String,
-        #[arg(long)]
-        user: String,
-        #[arg(long)]
-        compartment: String,
-        /// Look back this many days.
-        #[arg(long, default_value_t = 90)]
-        days: u32,
-        /// How many hotspots and co-change pairs to keep.
-        #[arg(long, default_value_t = 10)]
-        top: usize,
-        /// Print the facts without storing them.
-        #[arg(long, default_value_t = false)]
-        dry_run: bool,
-    },
+    GitFacts(crate::ops::FactsArgs),
     /// Train a user's accepted behaviors into their private standing expert.
     /// Each behavior's worked examples are the tasks, a quarter held out. The
     /// base model's own answers to everyday prompts are replayed beside them,
@@ -788,66 +459,14 @@ pub enum Command {
     /// learns to do in one shot what it took many steps to do. Only successful,
     /// recurrent traces metabolize. Writes the converted corpus; with --train,
     /// internalizes it. Needs --features models.
-    Metabolize {
-        /// JSON file of normalized harness traces ({goal, solution, kind, steps,
-        /// success, recurrence, ...}). See `antumbra_train::HarnessTrace`. Any
-        /// harness exports to this shape (see scripts/ for an example adapter).
-        #[arg(long)]
-        source: String,
-        /// Where to write the converted capture corpus for inspection / `teach`.
-        #[arg(long, default_value = "corpora/_metabolized.json")]
-        out: String,
-        /// Recurrence floor: only patterns seen at least this often metabolize.
-        #[arg(long, default_value_t = 1)]
-        min_recurrence: u32,
-        /// Do NOT metabolize each trace's decomposition (its steps); learn only
-        /// the collapsed one-shot outcome, not the process. Steps are on by default.
-        #[arg(long, default_value_t = false)]
-        no_steps: bool,
-        /// Re-pull and metabolize on a cadence (a continuous learning daemon).
-        #[arg(long, default_value_t = false)]
-        watch: bool,
-        /// Seconds between cycles when --watch is set.
-        #[arg(long, default_value_t = 300)]
-        interval_secs: u64,
-        /// Also internalize the metabolized traces now (the capture loop).
-        #[arg(long, default_value_t = false)]
-        train: bool,
-        #[arg(long, default_value = "run:metabolize")]
-        run: String,
-        #[arg(long, default_value_t = 40)]
-        rounds: usize,
-        #[arg(long, default_value_t = 8)]
-        samples: usize,
-        #[arg(long, default_value_t = 32)]
-        max_new_tokens: usize,
-        #[arg(long, default_value_t = 3e-4)]
-        lr: f64,
-    },
+    Metabolize(crate::commands::MetabolizeArgs),
     /// Have the antumbra propose memory compartments by clustering a user's
     /// unorganized memory (their inbox compartment + anything they authored
     /// uncompartmented) into competence-coherent regions. Needs no model: it
     /// clusters the embeddings already stored on each memory. With --apply it
     /// creates each proposal as an `Origin::Proposed` compartment and moves its
     /// members in (reversible by deleting the compartment).
-    ProposeCompartments {
-        #[arg(long)]
-        tenant: String,
-        #[arg(long)]
-        user: String,
-        /// The inbox compartment to cluster; defaults to comp:{tenant}:{user}:default.
-        #[arg(long)]
-        inbox: Option<String>,
-        /// Cosine at/above which two memories cluster together.
-        #[arg(long, default_value_t = 0.6)]
-        similarity_threshold: f32,
-        /// Smallest cluster worth proposing.
-        #[arg(long, default_value_t = 3)]
-        min_size: usize,
-        /// Persist the proposals (else print only).
-        #[arg(long, default_value_t = false)]
-        apply: bool,
-    },
+    ProposeCompartments(crate::ops::ProposeCompartmentsArgs),
     /// Set a workspace's embedder endpoint (hosted multi-tenant): the
     /// OpenAI-compatible `/embeddings` URL + model it embeds with. Without
     /// `--source-dim` the endpoint must produce the index dimension; with it,

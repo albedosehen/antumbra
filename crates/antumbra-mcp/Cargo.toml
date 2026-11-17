@@ -23,11 +23,12 @@ path = "src/main.rs"
 # runs without a GPU; the real BERT embedder lands under `models`.
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 antumbra-auth = { path = "../antumbra-auth" }
-antumbra-store = { path = "../antumbra-store" }
-antumbra-embed = { path = "../antumbra-embed" }
+antumbra-store = { path = "../antumbra-store", features = ["clap"] }
+antumbra-embed = { path = "../antumbra-embed", features = ["clap"] }
 antumbra-rerank = { path = "../antumbra-rerank" }
 antumbra-sync = { path = "../antumbra-sync" }
-antumbra-copal = { path = "../antumbra-copal" }
+antumbra-copal = { path = "../antumbra-copal", features = ["clap"] }
+antumbra-http = { path = "../antumbra-http" }
 antumbra-github = { path = "../antumbra-github" }
 antumbra-ingest = { path = "../antumbra-ingest" }
 antumbra-serve = { path = "../antumbra-serve", optional = true }
@@ -67,6 +68,8 @@ tracing-opentelemetry = "0.34"
 axum-tracing-opentelemetry = { version = "0.42", features = ["tracing_level_info"] }
 
 [dev-dependencies]
+# The embedded store and signed-in sessions the server's tests stand up.
+antumbra-store = { path = "../antumbra-store", features = ["clap", "testing"] }
 # The canned GitHub transport and the throwaway App key the receiver's tests drive.
 antumbra-github = { path = "../antumbra-github", features = ["testing"] }
 # `oneshot` to drive the axum router in tests without binding a socket.
@@ -85,3 +88,6 @@ models = ["dep:antumbra-serve", "antumbra-serve/models"]
 # networked server can actually serve through experts on a CUDA box).
 cuda = ["models", "antumbra-serve/cuda"]
 metal = ["models", "antumbra-serve/metal"]
+
+[lints]
+workspace = true

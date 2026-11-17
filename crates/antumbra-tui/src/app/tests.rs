@@ -5,10 +5,12 @@ use antumbra_core::ShadowStatus;
 use antumbra_store::repo::{
     boundary, edge, evaluation, expert, generation, loop_control, memory, shadow,
 };
+use antumbra_store::testing::mem_store;
 use antumbra_store::Store;
+use anyhow::Context as _;
 
 #[test]
-fn every_page_has_a_number_key_and_no_key_reaches_past_the_last() {
+fn every_page_has_a_number_key_and_no_key_reaches_past_the_last() -> anyhow::Result<()> {
     let keys: Vec<Option<usize>> = "0123456789x".chars().map(Page::index_for_key).collect();
     let reached: Vec<usize> = keys.iter().flatten().copied().collect();
     assert_eq!(reached, (0..Page::ALL.len()).collect::<Vec<_>>());
@@ -22,6 +24,7 @@ fn every_page_has_a_number_key_and_no_key_reaches_past_the_last() {
         Page::index_for_key('5').and_then(|i| Page::ALL.get(i)),
         Some(&Page::Sovereign)
     );
+    Ok(())
 }
 
 /// The whole path the page depends on: counters written to a store, read by
@@ -29,7 +32,7 @@ fn every_page_has_a_number_key_and_no_key_reaches_past_the_last() {
 #[tokio::test]
 async fn the_sovereign_page_reads_counters_from_the_store_and_selects_among_them(
 ) -> anyhow::Result<()> {
-    let store = Store::connect_memory(EMBED_DIM).await?;
+    let store = mem_store().await?;
     let mut app = App::load(&Backend::demo(store.clone())).await?;
     app.set_page(Page::Sovereign);
     // Nothing to select: the keys must not move a selection that is not there.
@@ -82,8 +85,8 @@ use chrono::Utc;
 
 /// An in-memory store with one exploring shadow and one boundary, loaded into
 /// a fresh `App` (so reads go through the real `App::load`/`reload` path).
-async fn seeded() -> (Store, App) {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+async fn seeded() -> anyhow::Result<(Store, App)> {
+    let store = mem_store().await?;
     shadow::upsert(
         &store,
         &Shadow {
@@ -96,8 +99,7 @@ async fn seeded() -> (Store, App) {
             created_at: Utc::now(),
         },
     )
-    .await
-    .unwrap();
+    .await?;
     boundary::upsert(
         &store,
         &FailureBoundary {
@@ -115,15 +117,14 @@ async fn seeded() -> (Store, App) {
             created_at: Utc::now(),
         },
     )
-    .await
-    .unwrap();
-    let app = App::load(&Backend::demo(store.clone())).await.unwrap();
-    (store, app)
+    .await?;
+    let app = App::load(&Backend::demo(store.clone())).await?;
+    Ok((store, app))
 }
 
 #[tokio::test]
-async fn prune_writes_to_the_store_and_raises_an_event() {
-    let (store, mut app) = seeded().await;
+async fn prune_writes_to_the_store_and_raises_an_event() -> anyhow::Result<()> {
+    let (store, mut app) = seeded().await?;
     app.focus = Focus::Shadows;
     app.request_action();
     assert!(matches!(app.pending, Some(Pending::PruneShadow(_))));
@@ -133,7 +134,7 @@ async fn prune_writes_to_the_store_and_raises_an_event() {
         .shadows
         .iter()
         .find(|s| s.id.as_str() == "shadow:s1")
-        .unwrap();
+        .context("shadow:s1 is not loaded")?;
     assert_eq!(s.status.as_str(), "pruned", "the store reflects the prune");
     assert!(
         app.events.iter().any(|e| e.text.contains("pruned")),
@@ -141,11 +142,12 @@ async fn prune_writes_to_the_store_and_raises_an_event() {
     );
     assert_eq!(app.mode, Mode::Normal);
     assert!(app.pending.is_none());
+    Ok(())
 }
 
 #[tokio::test]
-async fn delete_removes_the_boundary_and_raises_an_event() {
-    let (store, mut app) = seeded().await;
+async fn delete_removes_the_boundary_and_raises_an_event() -> anyhow::Result<()> {
+    let (store, mut app) = seeded().await?;
     app.focus = Focus::Boundaries;
     app.request_action();
     app.apply_pending(&Backend::demo(store.clone())).await;
@@ -157,11 +159,12 @@ async fn delete_removes_the_boundary_and_raises_an_event() {
             .any(|e| e.text.contains("boundary removed")),
         "the deletion surfaced as an event"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn graduate_writes_to_the_store_and_raises_an_event() {
-    let (store, mut app) = seeded().await;
+async fn graduate_writes_to_the_store_and_raises_an_event() -> anyhow::Result<()> {
+    let (store, mut app) = seeded().await?;
     app.focus = Focus::Shadows;
     app.request_graduate();
     assert!(matches!(app.pending, Some(Pending::GraduateShadow(_))));
@@ -171,7 +174,7 @@ async fn graduate_writes_to_the_store_and_raises_an_event() {
         .shadows
         .iter()
         .find(|s| s.id.as_str() == "shadow:s1")
-        .unwrap();
+        .context("shadow:s1 is not loaded")?;
     assert_eq!(
         s.status.as_str(),
         "graduated",
@@ -182,20 +185,22 @@ async fn graduate_writes_to_the_store_and_raises_an_event() {
         "the graduation surfaced as an event"
     );
     assert_eq!(app.mode, Mode::Normal);
+    Ok(())
 }
 
 #[tokio::test]
-async fn request_graduate_skips_an_already_graduated_shadow() {
-    let (_store, mut app) = seeded().await;
+async fn request_graduate_skips_an_already_graduated_shadow() -> anyhow::Result<()> {
+    let (_store, mut app) = seeded().await?;
     app.shadows[0].status = ShadowStatus::Graduated;
     app.focus = Focus::Shadows;
     app.request_graduate();
     assert!(app.pending.is_none());
+    Ok(())
 }
 
 #[tokio::test]
-async fn freeze_toggles_the_expert_and_raises_events() {
-    let (store, mut app) = seeded().await;
+async fn freeze_toggles_the_expert_and_raises_events() -> anyhow::Result<()> {
+    let (store, mut app) = seeded().await?;
     let mut v = vec![0.0f32; EMBED_DIM];
     v[0] = 1.0;
     expert::insert(
@@ -216,15 +221,14 @@ async fn freeze_toggles_the_expert_and_raises_events() {
             created_at: Utc::now(),
         },
     )
-    .await
-    .unwrap();
-    app.reload(&Backend::demo(store.clone())).await.unwrap();
+    .await?;
+    app.reload(&Backend::demo(store.clone())).await?;
     app.focus = Focus::Experts;
     app.selected = app
         .experts
         .iter()
         .position(|e| e.id.as_str() == "expert:e1")
-        .unwrap();
+        .context("expert:e1 is not loaded")?;
 
     // First toggle freezes.
     app.request_freeze();
@@ -234,7 +238,7 @@ async fn freeze_toggles_the_expert_and_raises_events() {
         .experts
         .iter()
         .find(|e| e.id.as_str() == "expert:e1")
-        .unwrap();
+        .context("expert:e1 is not loaded")?;
     assert!(frozen.is_frozen(), "the store reflects the freeze");
     assert!(app.events.iter().any(|ev| ev.text.contains("frozen")));
 
@@ -246,9 +250,10 @@ async fn freeze_toggles_the_expert_and_raises_events() {
         .experts
         .iter()
         .find(|e| e.id.as_str() == "expert:e1")
-        .unwrap();
+        .context("expert:e1 is not loaded")?;
     assert!(!thawed.is_frozen(), "the store reflects the thaw");
     assert!(app.events.iter().any(|ev| ev.text.contains("thawed")));
+    Ok(())
 }
 
 fn an_expert(id: &str, name: &str, fitness: f32, gen: u32) -> Expert {
@@ -270,8 +275,8 @@ fn an_expert(id: &str, name: &str, fitness: f32, gen: u32) -> Expert {
 }
 
 #[tokio::test]
-async fn sort_experts_orders_and_preserves_selection() {
-    let (_store, mut app) = seeded().await;
+async fn sort_experts_orders_and_preserves_selection() -> anyhow::Result<()> {
+    let (_store, mut app) = seeded().await?;
     app.experts = vec![
         an_expert("expert:b", "beta", 0.5, 2),
         an_expert("expert:a", "alpha", 0.9, 1),
@@ -288,7 +293,7 @@ async fn sort_experts_orders_and_preserves_selection() {
         "fitness, strongest first"
     );
     assert_eq!(
-        app.selected_expert().unwrap().name,
+        app.selected_expert().context("no expert is selected")?.name,
         "beta",
         "selection tracks the expert across the re-sort"
     );
@@ -300,22 +305,23 @@ async fn sort_experts_orders_and_preserves_selection() {
 
     app.cycle_sort(); // Name → Generation
     assert_eq!(
-        app.experts.first().unwrap().name,
+        app.experts.first().context("no experts are loaded")?.name,
         "gamma",
         "newest gen first"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn loop_and_evals_load_for_their_pages() {
-    let (store, mut app) = seeded().await;
+async fn loop_and_evals_load_for_their_pages() -> anyhow::Result<()> {
+    let (store, mut app) = seeded().await?;
     assert!(app.loop_heads.is_empty());
     assert!(app.evals.is_empty());
     let now = Utc::now();
 
     let mut head = GenerationHead::new(RunId::new("run:x"), now);
     head.state = LoopState::Decide;
-    generation::save_head(&store, &head).await.unwrap();
+    generation::save_head(&store, &head).await?;
     evaluation::insert(
         &store,
         &EvaluationRun {
@@ -329,9 +335,8 @@ async fn loop_and_evals_load_for_their_pages() {
             created_at: now,
         },
     )
-    .await
-    .unwrap();
-    app.reload(&Backend::demo(store.clone())).await.unwrap();
+    .await?;
+    app.reload(&Backend::demo(store.clone())).await?;
 
     assert_eq!(app.loop_heads.len(), 1);
     assert_eq!(app.loop_heads[0].state, LoopState::Decide);
@@ -344,17 +349,18 @@ async fn loop_and_evals_load_for_their_pages() {
     assert_eq!(app.selected_eval, 0, "single run, selection holds");
     app.request_action();
     assert!(app.pending.is_none());
+    Ok(())
 }
 
 #[tokio::test]
-async fn loop_page_selects_runs_and_drills_into_eval_history() {
-    let (store, mut app) = seeded().await;
+async fn loop_page_selects_runs_and_drills_into_eval_history() -> anyhow::Result<()> {
+    let (store, mut app) = seeded().await?;
     let now = Utc::now();
     let mut a = GenerationHead::new(RunId::new("run:a"), now);
     a.state = LoopState::Score;
     let b = GenerationHead::new(RunId::new("run:b"), now);
-    generation::save_head(&store, &a).await.unwrap();
-    generation::save_head(&store, &b).await.unwrap();
+    generation::save_head(&store, &a).await?;
+    generation::save_head(&store, &b).await?;
     // One evaluation, tied to run:b only.
     evaluation::insert(
         &store,
@@ -369,9 +375,8 @@ async fn loop_page_selects_runs_and_drills_into_eval_history() {
             created_at: now,
         },
     )
-    .await
-    .unwrap();
-    app.reload(&Backend::demo(store.clone())).await.unwrap();
+    .await?;
+    app.reload(&Backend::demo(store.clone())).await?;
     assert_eq!(app.loop_heads.len(), 2);
 
     // j/k drive selected_loop and wrap (the Loop page now owns a selection).
@@ -394,13 +399,13 @@ async fn loop_page_selects_runs_and_drills_into_eval_history() {
         .loop_heads
         .iter()
         .find(|h| h.run_id.as_str() == "run:b")
-        .unwrap()
+        .context("run:b is not loaded")?
         .clone();
     let without = app
         .loop_heads
         .iter()
         .find(|h| h.run_id.as_str() == "run:a")
-        .unwrap()
+        .context("run:a is not loaded")?
         .clone();
     let hist = app.loop_eval_history(&with_eval);
     assert_eq!(hist.len(), 1);
@@ -409,7 +414,7 @@ async fn loop_page_selects_runs_and_drills_into_eval_history() {
 
     // Reload clamps an out-of-range selection back into the heads.
     app.selected_loop = 9;
-    app.reload(&Backend::demo(store.clone())).await.unwrap();
+    app.reload(&Backend::demo(store.clone())).await?;
     assert!(app.selected_loop < app.loop_heads.len());
 
     // With no heads, Enter is a no-op (no empty drill-down).
@@ -417,14 +422,15 @@ async fn loop_page_selects_runs_and_drills_into_eval_history() {
     app.mode = Mode::Normal;
     app.open_detail();
     assert_eq!(app.mode, Mode::Normal);
+    Ok(())
 }
 
 #[tokio::test]
-async fn loop_halt_request_writes_the_control_and_cancel_clears_it() {
-    let (store, mut app) = seeded().await;
+async fn loop_halt_request_writes_the_control_and_cancel_clears_it() -> anyhow::Result<()> {
+    let (store, mut app) = seeded().await?;
     let head = GenerationHead::new(RunId::new("run:z"), Utc::now());
-    generation::save_head(&store, &head).await.unwrap();
-    app.reload(&Backend::demo(store.clone())).await.unwrap();
+    generation::save_head(&store, &head).await?;
+    app.reload(&Backend::demo(store.clone())).await?;
     assert_eq!(app.loop_heads.len(), 1);
     assert!(!app.loop_halt_pending);
 
@@ -435,9 +441,7 @@ async fn loop_halt_request_writes_the_control_and_cancel_clears_it() {
     app.apply_pending(&Backend::demo(store.clone())).await;
     assert!(app.loop_halt_pending, "halt is now pending");
     assert_eq!(
-        loop_control::load(&store, &RunId::new("run:z"))
-            .await
-            .unwrap(),
+        loop_control::load(&store, &RunId::new("run:z")).await?,
         LoopCommand::Halt
     );
 
@@ -449,16 +453,15 @@ async fn loop_halt_request_writes_the_control_and_cancel_clears_it() {
     app.cancel_halt(&Backend::demo(store.clone())).await;
     assert!(!app.loop_halt_pending);
     assert_eq!(
-        loop_control::load(&store, &RunId::new("run:z"))
-            .await
-            .unwrap(),
+        loop_control::load(&store, &RunId::new("run:z")).await?,
         LoopCommand::Run
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn eval_history_groups_by_subject_and_drill_down_opens() {
-    let (_store, mut app) = seeded().await;
+async fn eval_history_groups_by_subject_and_drill_down_opens() -> anyhow::Result<()> {
+    let (_store, mut app) = seeded().await?;
     let now = Utc::now();
     let mk = |id: &str, subj: &str, status| EvaluationRun {
         run_id: RunId::new(id),
@@ -488,11 +491,12 @@ async fn eval_history_groups_by_subject_and_drill_down_opens() {
     app.evals.clear();
     app.open_detail();
     assert_eq!(app.mode, Mode::Normal, "no drill-down with no runs");
+    Ok(())
 }
 
 #[tokio::test]
-async fn dashboard_metrics_summarize_the_substrate() {
-    let (_store, mut app) = seeded().await;
+async fn dashboard_metrics_summarize_the_substrate() -> anyhow::Result<()> {
+    let (_store, mut app) = seeded().await?;
     let m = app.dashboard_metrics();
     assert_eq!(
         m.map(|(label, _)| label),
@@ -504,25 +508,24 @@ async fn dashboard_metrics_summarize_the_substrate() {
     // Graduate the lone shadow → the graduation ratio becomes 1/1.
     app.shadows[0].status = ShadowStatus::Graduated;
     assert_eq!(app.dashboard_metrics()[2].1, 1.0);
+    Ok(())
 }
 
 #[tokio::test]
-async fn memories_and_edges_load_and_drive_the_memory_page() {
-    let (store, mut app) = seeded().await;
+async fn memories_and_edges_load_and_drive_the_memory_page() -> anyhow::Result<()> {
+    let (store, mut app) = seeded().await?;
     assert!(app.memories.is_empty(), "no memory traces in the base seed");
     let now = Utc::now();
     memory::upsert(
         &store,
         &Memory::new("memory:a", "ws:1", MemoryNetwork::World, "alpha", 0.5, now),
     )
-    .await
-    .unwrap();
+    .await?;
     memory::upsert(
         &store,
         &Memory::new("memory:b", "ws:1", MemoryNetwork::Bank, "beta", 0.9, now),
     )
-    .await
-    .unwrap();
+    .await?;
     edge::relate(
         &store,
         &MemoryEdge::new(
@@ -534,9 +537,8 @@ async fn memories_and_edges_load_and_drive_the_memory_page() {
             now,
         ),
     )
-    .await
-    .unwrap();
-    app.reload(&Backend::demo(store.clone())).await.unwrap();
+    .await?;
+    app.reload(&Backend::demo(store.clone())).await?;
 
     assert_eq!(app.memories.len(), 2);
     assert_eq!(app.edges.len(), 1);
@@ -544,7 +546,12 @@ async fn memories_and_edges_load_and_drive_the_memory_page() {
     // On the Memory page, navigation drives the trace selection and wraps.
     app.page = Page::Memory;
     app.selected_memory = 0;
-    let id = app.selected_memory().unwrap().id.as_str().to_string();
+    let id = app
+        .selected_memory()
+        .context("no memory is selected")?
+        .id
+        .as_str()
+        .to_string();
     assert_eq!(app.memory_edges(&id).len(), 1, "the selected trace's edge");
     app.select_next();
     assert_eq!(app.selected_memory, 1);
@@ -556,22 +563,24 @@ async fn memories_and_edges_load_and_drive_the_memory_page() {
     assert!(app.pending.is_none());
     app.open_detail();
     assert_eq!(app.mode, Mode::Normal);
+    Ok(())
 }
 
 #[tokio::test]
-async fn apply_pending_is_a_noop_with_nothing_staged() {
-    let (store, mut app) = seeded().await;
+async fn apply_pending_is_a_noop_with_nothing_staged() -> anyhow::Result<()> {
+    let (store, mut app) = seeded().await?;
     app.apply_pending(&Backend::demo(store.clone())).await;
     assert_eq!(app.shadows.len(), 1);
     assert_eq!(app.boundaries.len(), 1);
     assert_eq!(app.mode, Mode::Normal);
+    Ok(())
 }
 
 /// A token that is not an operator's reads the console and acts on nothing:
 /// asking to act stages nothing and says why.
 #[tokio::test]
-async fn a_read_only_console_stages_no_action_and_says_why() {
-    let (_store, mut app) = seeded().await;
+async fn a_read_only_console_stages_no_action_and_says_why() -> anyhow::Result<()> {
+    let (_store, mut app) = seeded().await?;
     app.operator = false;
     app.set_focus(Focus::Boundaries);
     app.request_action();
@@ -583,11 +592,12 @@ async fn a_read_only_console_stages_no_action_and_says_why() {
         app.events.iter().any(|e| e.text.contains("read-only")),
         "the event stream says it is read-only"
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn request_action_skips_a_pruned_shadow_and_experts() {
-    let (_store, mut app) = seeded().await;
+async fn request_action_skips_a_pruned_shadow_and_experts() -> anyhow::Result<()> {
+    let (_store, mut app) = seeded().await?;
     // Pruned shadow: no action is staged.
     app.shadows[0].status = ShadowStatus::Pruned;
     app.focus = Focus::Shadows;
@@ -601,4 +611,5 @@ async fn request_action_skips_a_pruned_shadow_and_experts() {
     app.focus = Focus::Experts;
     app.request_action();
     assert!(app.pending.is_none());
+    Ok(())
 }

@@ -54,7 +54,7 @@ impl<V: Verifier> Verifier for Governed<V> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::Mutex;
+    use std::sync::{Mutex, MutexGuard};
 
     use antumbra_core::{RunId, VerifierId};
 
@@ -65,6 +65,26 @@ mod tests {
     #[derive(Default)]
     struct Namespace(Mutex<HashMap<String, (String, serde_json::Value)>>);
 
+    impl Namespace {
+        /// The specs as they are. An insert or a clear leaves the map whole,
+        /// so a poisoned lock holds a whole map and is read as is.
+        fn specs(&self) -> MutexGuard<'_, HashMap<String, (String, serde_json::Value)>> {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        }
+
+        /// Trust `id` to grant reward for `task` with `spec`.
+        fn trust(&self, id: &str, task: &str, spec: serde_json::Value) {
+            self.specs().insert(id.into(), (task.into(), spec));
+        }
+
+        /// Quarantine every verifier at once.
+        fn clear(&self) {
+            self.specs().clear();
+        }
+    }
+
     #[async_trait]
     impl TrustedVerifiers for Namespace {
         async fn trusted_spec(
@@ -73,9 +93,7 @@ mod tests {
             task: &str,
         ) -> Result<Option<serde_json::Value>> {
             Ok(self
-                .0
-                .lock()
-                .unwrap()
+                .specs()
                 .get(id.as_str())
                 .filter(|(t, _)| t == task)
                 .map(|(_, spec)| spec.clone()))
@@ -96,73 +114,66 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_spec_in_the_task_runs_as_it_is() {
+    async fn a_spec_in_the_task_runs_as_it_is() -> Result<()> {
         let gate = Governed::new(CommandVerifier, Arc::new(Namespace::default()));
         let spec = serde_json::json!({ "contains_all": ["x"] });
-        assert!(
-            gate.verify(&req("t", "x", spec.clone()))
-                .await
-                .unwrap()
-                .passed
-        );
-        assert!(!gate.verify(&req("t", "y", spec)).await.unwrap().passed);
+        assert!(gate.verify(&req("t", "x", spec.clone())).await?.passed);
+        assert!(!gate.verify(&req("t", "y", spec)).await?.passed);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_named_verifier_grants_only_while_trusted_and_only_for_its_task() {
+    async fn a_named_verifier_grants_only_while_trusted_and_only_for_its_task() -> Result<()> {
         let namespace = Arc::new(Namespace::default());
-        namespace.0.lock().unwrap().insert(
-            "verifier:v".into(),
-            ("t".into(), serde_json::json!({ "contains_all": ["x"] })),
+        namespace.trust(
+            "verifier:v",
+            "t",
+            serde_json::json!({ "contains_all": ["x"] }),
         );
         let gate = Governed::new(CommandVerifier, namespace.clone());
         assert!(
             gate.verify(&req("t", "x", named("verifier:v")))
-                .await
-                .unwrap()
+                .await?
                 .passed
         );
         assert!(
             !gate
                 .verify(&req("t", "y", named("verifier:v")))
-                .await
-                .unwrap()
+                .await?
                 .passed
         );
         assert!(
             !gate
                 .verify(&req("u", "x", named("verifier:v")))
-                .await
-                .unwrap()
+                .await?
                 .passed
         );
         assert!(
             !gate
                 .verify(&req("t", "x", named("verifier:unknown")))
-                .await
-                .unwrap()
+                .await?
                 .passed
         );
         // Quarantined between two checks: the next one grants nothing.
-        namespace.0.lock().unwrap().clear();
+        namespace.clear();
         assert!(
             !gate
                 .verify(&req("t", "x", named("verifier:v")))
-                .await
-                .unwrap()
+                .await?
                 .passed
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn without_the_gate_a_named_verifier_grants_nothing() {
+    async fn without_the_gate_a_named_verifier_grants_nothing() -> Result<()> {
         // The spec a reference carries is not one CommandVerifier can run.
         assert!(
             !CommandVerifier
                 .verify(&req("t", "x", named("verifier:v")))
-                .await
-                .unwrap()
+                .await?
                 .passed
         );
+        Ok(())
     }
 }

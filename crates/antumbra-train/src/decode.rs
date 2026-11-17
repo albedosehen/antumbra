@@ -169,18 +169,20 @@ pub fn trim_chat_answer(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_core::Result;
 
     #[test]
-    fn stops_at_a_second_definition() {
+    fn stops_at_a_second_definition() -> Result<()> {
         let raw = "def add(a, b):\n    return a + b\ndef other():\n    pass\n";
         assert_eq!(
             truncate_at_stops(raw, DEFAULT_STOPS),
             "def add(a, b):\n    return a + b"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_chat_answer_keeps_its_fenced_code() {
+    fn a_chat_answer_keeps_its_fenced_code() -> Result<()> {
         let answer =
             "Here's the function:\n```python\ndef add(a, b):\n    return a + b\n```\nIt adds them.";
         assert_eq!(
@@ -192,47 +194,54 @@ mod tests {
             truncate_at_stops(answer, DEFAULT_STOPS),
             "Here's the function:"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_chat_answer_that_opens_with_a_fence_is_not_emptied() {
+    fn a_chat_answer_that_opens_with_a_fence_is_not_emptied() -> Result<()> {
         let answer = "```python\ndef f():\n    return 1\n```";
         assert_eq!(trim_chat_answer(answer), answer);
         assert_eq!(truncate_at_stops(answer, DEFAULT_STOPS), "");
+        Ok(())
     }
 
     #[test]
-    fn a_fence_cut_short_by_the_budget_keeps_what_there_is() {
+    fn a_fence_cut_short_by_the_budget_keeps_what_there_is() -> Result<()> {
         let answer = "```python\ndef f():\n    return";
         assert_eq!(trim_chat_answer(answer), answer);
+        Ok(())
     }
 
     #[test]
-    fn a_chat_answer_without_a_fence_is_trimmed_as_before() {
+    fn a_chat_answer_without_a_fence_is_trimmed_as_before() -> Result<()> {
         let answer = "deno install lodash\n\n\nThat is all.";
         assert_eq!(trim_chat_answer(answer), "deno install lodash");
+        Ok(())
     }
 
     #[test]
-    fn stops_at_a_fence() {
+    fn stops_at_a_fence() -> Result<()> {
         let raw = "def add(a, b):\n    return a + b\n```\nsome prose";
         assert_eq!(
             truncate_at_stops(raw, DEFAULT_STOPS),
             "def add(a, b):\n    return a + b"
         );
+        Ok(())
     }
 
     #[test]
-    fn keeps_clean_single_function() {
+    fn keeps_clean_single_function() -> Result<()> {
         let raw = "def reverse(s):\n    return s[::-1]";
         assert_eq!(truncate_at_stops(raw, DEFAULT_STOPS), raw);
+        Ok(())
     }
 
     #[test]
-    fn does_not_cut_indented_nested_def() {
+    fn does_not_cut_indented_nested_def() -> Result<()> {
         // a nested (indented) def is "\n    def", not "\ndef", so it survives.
         let raw = "def outer():\n    def inner():\n        return 1\n    return inner";
         assert_eq!(truncate_at_stops(raw, DEFAULT_STOPS), raw);
+        Ok(())
     }
 
     use rand::SeedableRng;
@@ -251,15 +260,16 @@ mod tests {
     }
 
     #[test]
-    fn greedy_picks_argmax() {
+    fn greedy_picks_argmax() -> Result<()> {
         // token 2 has the highest logit.
         let logits = vec![0.1, 0.2, 5.0, 0.3];
         let t = pick_token(logits, &[], &greedy(0.0, 1.0, 0), &mut rng());
         assert_eq!(t, 2);
+        Ok(())
     }
 
     #[test]
-    fn repetition_penalty_demotes_a_repeat() {
+    fn repetition_penalty_demotes_a_repeat() -> Result<()> {
         // Greedy would pick token 0 (highest), but it was already generated, so a
         // penalty divides its logit below token 1 -> the loop is broken.
         let logits = vec![3.0, 2.5, 0.1];
@@ -267,10 +277,11 @@ mod tests {
         assert_eq!(plain, 0, "without penalty greedy repeats token 0");
         let penalized = pick_token(logits, &[0], &greedy(0.0, 2.0, 0), &mut rng());
         assert_eq!(penalized, 1, "penalty pushes the repeat below token 1");
+        Ok(())
     }
 
     #[test]
-    fn no_repeat_ngram_blocks_the_loop() {
+    fn no_repeat_ngram_blocks_the_loop() -> Result<()> {
         // Generated ...a,b ; the only time "a" appeared it was followed by "b".
         // A bigram block (n=2) bans "b" after "a", forcing a different token even
         // though "b" has the top logit.
@@ -279,20 +290,22 @@ mod tests {
                                       // After "...2,3,2", the bigram prefix is [2]; 2 was followed by 3 before.
         let t = pick_token(logits, &generated, &greedy(0.0, 1.0, 2), &mut rng());
         assert_ne!(t, 3, "the n-gram that would repeat 2->3 is blocked");
+        Ok(())
     }
 
     #[test]
-    fn no_repeat_ngram_of_one_is_a_no_op() {
+    fn no_repeat_ngram_of_one_is_a_no_op() -> Result<()> {
         // A 1-gram block would forbid re-emitting any already-generated token,
         // which is degenerate; n < 2 must leave the logits untouched. Token 2 is
         // the argmax and was already generated, so it is still picked.
         let logits = vec![0.1, 0.2, 5.0, 0.3];
         let t = pick_token(logits, &[2u32], &greedy(0.0, 1.0, 1), &mut rng());
         assert_eq!(t, 2, "a 1-gram block must not ban the generated argmax");
+        Ok(())
     }
 
     #[test]
-    fn nucleus_truncates_the_tail() {
+    fn nucleus_truncates_the_tail() -> Result<()> {
         // One dominant token (mass ~0.99) and a long tail; top_p 0.9 keeps only the
         // head, so sampling is deterministic on it.
         let mut logits = vec![0.0f32; 100];
@@ -306,5 +319,6 @@ mod tests {
         for _ in 0..10 {
             assert_eq!(pick_token(logits.clone(), &[], &p, &mut rng()), 42);
         }
+        Ok(())
     }
 }

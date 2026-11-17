@@ -1,11 +1,12 @@
 use super::*;
+use anyhow::Context as _;
 
 fn names(v: &[String]) -> Vec<&str> {
     v.iter().map(String::as_str).collect()
 }
 
 #[test]
-fn which_files_are_manifests() {
+fn which_files_are_manifests() -> anyhow::Result<()> {
     for yes in [
         "package.json",
         "svc/Cargo.toml",
@@ -27,10 +28,11 @@ fn which_files_are_manifests() {
     ] {
         assert!(!is_manifest(no), "{no}");
     }
+    Ok(())
 }
 
 #[test]
-fn package_json_publishes_its_name_and_depends_on_every_table() {
+fn package_json_publishes_its_name_and_depends_on_every_table() -> anyhow::Result<()> {
     let m = read(
         "web/package.json",
         r#"{
@@ -41,7 +43,7 @@ fn package_json_publishes_its_name_and_depends_on_every_table() {
             "peerDependencies": { "@acme/ui": "*" }
         }"#,
     )
-    .unwrap();
+    .context("web/package.json reads as a manifest")?;
     assert_eq!(m.ecosystem, Ecosystem::Npm);
     assert_eq!(m.path, "web/package.json");
     assert_eq!(names(&m.publishes), ["@acme/web"]);
@@ -63,14 +65,15 @@ fn package_json_publishes_its_name_and_depends_on_every_table() {
             "package.json",
             &format!(r#"{{"repository": {repository}}}"#),
         )
-        .unwrap();
+        .context("package.json reads as a manifest")?;
         assert_eq!(m.home.as_deref(), home, "{repository}");
     }
     assert_eq!(read("package.json", "{ not json"), None);
+    Ok(())
 }
 
 #[test]
-fn cargo_reads_the_package_and_every_kind_of_dependency_table() {
+fn cargo_reads_the_package_and_every_kind_of_dependency_table() -> anyhow::Result<()> {
     let m = read(
         "Cargo.toml",
         r#"
@@ -99,7 +102,7 @@ nix = "0.29"
 default = ["std"]
 "#,
     )
-    .unwrap();
+    .context("Cargo.toml reads as a manifest")?;
     assert_eq!(m.ecosystem, Ecosystem::Cargo);
     assert_eq!(
         names(&m.publishes),
@@ -116,20 +119,22 @@ default = ["std"]
         "Cargo.toml",
         "[workspace.package]\nrepository = \"https://github.com/acme/mono\"\n\n[package]\nname = \"x\"\nrepository.workspace = true\n",
     )
-    .unwrap();
+    .context("Cargo.toml reads as a manifest")?;
     assert_eq!(inherited.home.as_deref(), Some("github.com/acme/mono"));
+    Ok(())
 }
 
 #[test]
-fn go_mod_publishes_its_module_and_depends_on_requires() {
+fn go_mod_publishes_its_module_and_depends_on_requires() -> anyhow::Result<()> {
     let m = read(
         "go.mod",
         "module github.com/acme/checkout\n\ngo 1.22\n\nrequire github.com/acme/orders v1.4.0 // indirect\n\nrequire (\n\tgithub.com/acme/pay/v2 v2.0.1\n\tgolang.org/x/sync v0.7.0\n)\n",
     )
-    .unwrap();
+    .context("go.mod reads as a manifest")?;
     assert_eq!(names(&m.publishes), ["github.com/acme/checkout"]);
     assert_eq!(m.home.as_deref(), Some("github.com/acme/checkout"));
-    let vanity = read("go.mod", "module golang.org/x/sync\n").unwrap();
+    let vanity =
+        read("go.mod", "module golang.org/x/sync\n").context("go.mod reads as a manifest")?;
     assert_eq!(vanity.home, None, "a vanity path names no repository");
     assert_eq!(
         names(&m.depends),
@@ -139,10 +144,11 @@ fn go_mod_publishes_its_module_and_depends_on_requires() {
             "golang.org/x/sync"
         ]
     );
+    Ok(())
 }
 
 #[test]
-fn python_reads_pep_621_poetry_and_requirements() {
+fn python_reads_pep_621_poetry_and_requirements() -> anyhow::Result<()> {
     let pep = read(
         "pyproject.toml",
         r#"
@@ -161,7 +167,7 @@ Homepage = "https://acme.example"
 "Source Code" = "https://github.com/acme/billing"
 "#,
     )
-    .unwrap();
+    .context("pyproject.toml reads as a manifest")?;
     assert_eq!(
         names(&pep.publishes),
         ["acme-billing"],
@@ -174,14 +180,14 @@ Homepage = "https://acme.example"
         "pyproject.toml",
         "[project]\nname = \"x\"\ndependencies = [\"a\", \"b>=1\"]\n",
     )
-    .unwrap();
+    .context("pyproject.toml reads as a manifest")?;
     assert_eq!(names(&inline.depends), ["a", "b"]);
 
     let poetry = read(
         "pyproject.toml",
         "[tool.poetry]\nname = \"acme-search\"\n\n[tool.poetry.dependencies]\npython = \"^3.11\"\n\"acme.orders\" = \"^1\"\nhttpx = \"*\"\n",
     )
-    .unwrap();
+    .context("pyproject.toml reads as a manifest")?;
     assert_eq!(names(&poetry.publishes), ["acme-search"]);
     assert_eq!(
         names(&poetry.depends),
@@ -193,9 +199,10 @@ Homepage = "https://acme.example"
         "requirements.txt",
         "# pinned\nAcme.Orders==1.2\n-r base.txt\ngit+https://example.com/x.git\nflask>=3 ; python_version>'3.8'\n",
     )
-    .unwrap();
+    .context("requirements.txt reads as a manifest")?;
     assert!(reqs.publishes.is_empty());
     assert_eq!(names(&reqs.depends), ["acme-orders", "flask"]);
+    Ok(())
 }
 
 fn repo(name: &str, manifests: Vec<Manifest>) -> (String, Vec<Manifest>) {
@@ -206,25 +213,27 @@ fn repo(name: &str, manifests: Vec<Manifest>) -> (String, Vec<Manifest>) {
 /// publishes in the same ecosystem; a repository's own packages are not an
 /// edge; Go matches a module path by prefix.
 #[test]
-fn declared_edges_join_dependencies_to_publications() {
+fn declared_edges_join_dependencies_to_publications() -> anyhow::Result<()> {
     let web = read(
         "package.json",
         r#"{"name":"@acme/web","dependencies":{"@acme/orders-client":"2","left-pad":"1"}}"#,
     )
-    .unwrap();
+    .context("package.json reads as a manifest")?;
     let orders_npm = read(
         "clients/js/package.json",
         r#"{"name":"@acme/orders-client"}"#,
     )
-    .unwrap();
-    let orders_go = read("go.mod", "module github.com/acme/orders\n").unwrap();
+    .context("clients/js/package.json reads as a manifest")?;
+    let orders_go =
+        read("go.mod", "module github.com/acme/orders\n").context("go.mod reads as a manifest")?;
     let checkout = read(
         "go.mod",
         "module github.com/acme/checkout\nrequire (\n\tgithub.com/acme/orders/api v1.0.0\n\tgithub.com/acme/checkout/internal v0.0.0\n)\n",
     )
-    .unwrap();
+    .context("go.mod reads as a manifest")?;
     // A Python package of the same name is a different package.
-    let unrelated = read("requirements.txt", "acme-orders-client==1\n").unwrap();
+    let unrelated = read("requirements.txt", "acme-orders-client==1\n")
+        .context("requirements.txt reads as a manifest")?;
 
     let claims = declared(&[
         repo("github.com/acme/web", vec![web]),
@@ -261,28 +270,29 @@ fn declared_edges_join_dependencies_to_publications() {
         ]
     );
     assert!(claims.iter().all(|(c, _)| c.source == Source::Declared));
+    Ok(())
 }
 
 /// A fork carries its upstream's name but does not publish it: a dependency
 /// on that name is a dependency on the upstream. A project that moved to
 /// another owner, keeping its name, still publishes what it publishes.
 #[test]
-fn a_fork_does_not_publish_its_upstreams_names() {
+fn a_fork_does_not_publish_its_upstreams_names() -> anyhow::Result<()> {
     let fork = read(
         "Cargo.toml",
         "[package]\nname = \"winit\"\nrepository = \"https://github.com/rust-windowing/winit\"\n",
     )
-    .unwrap();
+    .context("Cargo.toml reads as a manifest")?;
     let moved = read(
         "Cargo.toml",
         "[package]\nname = \"acme-orders\"\nrepository = \"https://github.com/acme/orders\"\n",
     )
-    .unwrap();
+    .context("Cargo.toml reads as a manifest")?;
     let engine = read(
         "Cargo.toml",
         "[package]\nname = \"engine\"\n\n[dependencies]\nwinit = \"0.30\"\nacme-orders = \"1\"\n",
     )
-    .unwrap();
+    .context("Cargo.toml reads as a manifest")?;
     let claims = declared(&[
         repo("github.com/me/winit-fork", vec![fork]),
         repo("github.com/me/orders", vec![moved]),
@@ -293,6 +303,7 @@ fn a_fork_does_not_publish_its_upstreams_names() {
         .map(|(c, _)| (c.from.as_str(), c.to.as_str()))
         .collect();
     assert_eq!(edges, [("github.com/me/engine", "github.com/me/orders")]);
+    Ok(())
 }
 
 fn set(repo: &str, commit: &str, manifests: Vec<Manifest>) -> ManifestSet {
@@ -313,14 +324,16 @@ fn edge(from: &str, to: &str) -> (String, String) {
 /// at, and retracts the ones no longer declared, but only between
 /// repositories whose manifests are known.
 #[test]
-fn a_repository_read_again_records_its_edges_and_retracts_the_dropped_ones() {
-    let orders = read("Cargo.toml", "[package]\nname = \"acme-orders\"\n").unwrap();
+fn a_repository_read_again_records_its_edges_and_retracts_the_dropped_ones() -> anyhow::Result<()> {
+    let orders = read("Cargo.toml", "[package]\nname = \"acme-orders\"\n")
+        .context("Cargo.toml reads as a manifest")?;
     let web = read(
         "Cargo.toml",
         "[package]\nname = \"acme-web\"\n\n[dependencies]\nacme-orders = \"1\"\n",
     )
-    .unwrap();
-    let checkout_now = read("Cargo.toml", "[package]\nname = \"acme-checkout\"\n").unwrap();
+    .context("Cargo.toml reads as a manifest")?;
+    let checkout_now = read("Cargo.toml", "[package]\nname = \"acme-checkout\"\n")
+        .context("Cargo.toml reads as a manifest")?;
     let sets = [
         set("github.com/acme/orders", "aaaaaaa", vec![orders]),
         set("github.com/Acme/Web", "bbbbbbb", vec![web]),
@@ -367,19 +380,22 @@ fn a_repository_read_again_records_its_edges_and_retracts_the_dropped_ones() {
         alone.retract.is_empty(),
         "with no other set known, nothing can be said to be gone"
     );
+    Ok(())
 }
 
 #[test]
-fn a_manifest_set_round_trips_as_json() {
+fn a_manifest_set_round_trips_as_json() -> anyhow::Result<()> {
     let m = read(
         "package.json",
         r#"{"name":"@acme/web","repository":"acme/web","dependencies":{"react":"18"}}"#,
     )
-    .unwrap();
-    let plain = read("go.mod", "module golang.org/x/sync\n").unwrap();
+    .context("package.json reads as a manifest")?;
+    let plain =
+        read("go.mod", "module golang.org/x/sync\n").context("go.mod reads as a manifest")?;
     let s = set("github.com/acme/web", "abc1234", vec![m, plain]);
-    let json = serde_json::to_value(&s).unwrap();
+    let json = serde_json::to_value(&s)?;
     assert_eq!(json["manifests"][0]["ecosystem"], "npm");
     assert!(json["manifests"][1].get("home").is_none());
-    assert_eq!(serde_json::from_value::<ManifestSet>(json).unwrap(), s);
+    assert_eq!(serde_json::from_value::<ManifestSet>(json)?, s);
+    Ok(())
 }

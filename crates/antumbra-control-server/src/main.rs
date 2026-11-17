@@ -14,11 +14,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand};
 
 use antumbra_control::Issuer;
 use antumbra_store::repo::invite;
-use antumbra_store::{ConnectionConfig, Store, EMBED_DIM};
+use antumbra_store::{Store, EMBED_DIM};
 
 use crate::http::{router, AppState, Cooldown};
 use crate::mailer::build_mailer;
@@ -49,40 +49,27 @@ enum Command {
     Probe(ProbeArgs),
 }
 
-/// How the service authenticates to SurrealDB.
-#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum DbAuth {
-    /// `--db-user`/`--db-pass` are instance-root credentials.
-    Root,
-    /// They are a `DEFINE USER ... ON DATABASE ... ROLES OWNER` user: least
-    /// privilege, containing a compromise of this internet-adjacent service to
-    /// the one database it works in.
-    Database,
-}
-
 #[derive(Args)]
 struct StoreArgs {
+    /// The SurrealDB this service works in: a server beside it, by default.
     #[arg(
         long,
         env = "ANTUMBRA_DB_URL",
         default_value = "ws://127.0.0.1:8000/rpc"
     )]
     url: String,
-    #[arg(long, env = "ANTUMBRA_DB_USER")]
-    db_user: Option<String>,
-    #[arg(long, env = "ANTUMBRA_DB_PASS")]
-    db_pass: Option<String>,
-    /// The authentication level of `--db-user` / `--db-pass`.
-    #[arg(long, env = "ANTUMBRA_DB_AUTH", value_enum, default_value = "root")]
-    db_auth: DbAuth,
+    /// The credentials, as every Antumbra binary takes them.
+    #[command(flatten)]
+    auth: antumbra_store::args::DbAuthArgs,
 }
 
 #[derive(Args)]
 struct MintInviteArgs {
     #[command(flatten)]
     store: StoreArgs,
-    /// Days until the invite expires; `0` mints a non-expiring code.
-    #[arg(long, default_value_t = 14)]
+    /// Days until the invite expires; `0` mints a non-expiring code. Bounded
+    /// at a century, so the date arithmetic behind it cannot overflow.
+    #[arg(long, default_value_t = 14, value_parser = clap::value_parser!(i64).range(0..=36_500))]
     ttl_days: i64,
 }
 
@@ -115,13 +102,25 @@ struct ServeArgs {
     #[arg(long, env = "ANTUMBRA_SIGNING_KEY")]
     signing_key: String,
     /// Secret signing the short-lived magic-link tokens (distinct from the RS256 key).
-    #[arg(long, env = "ANTUMBRA_MAGIC_SECRET")]
-    magic_secret: String,
+    #[arg(long, env = "ANTUMBRA_MAGIC_SECRET", hide_env_values = true)]
+    magic_secret: Option<String>,
+    /// Read the magic-link secret from this file instead (a Docker secret, a
+    /// Kubernetes secret, a Key Vault mount): it then appears in neither the
+    /// process arguments nor the environment.
+    #[arg(
+        long,
+        env = "ANTUMBRA_MAGIC_SECRET_FILE",
+        conflicts_with = "magic_secret"
+    )]
+    magic_secret_file: Option<std::path::PathBuf>,
     /// Audience claim on issued tokens (must match the MCP server's verifier).
     #[arg(long, env = "ANTUMBRA_AUDIENCE", default_value = "antumbra")]
     audience: String,
-    /// Issued bearer-token lifetime, in days.
-    #[arg(long, default_value_t = 30)]
+    /// Issued bearer-token lifetime, in days. A week: a token saved on a lost
+    /// machine stays valid at most that long, and `antumbra revoke-token`
+    /// ends one sooner; `antumbra setup check` says when a token is about to
+    /// expire.
+    #[arg(long, default_value_t = 7)]
     token_ttl_days: u64,
     /// Magic-link lifetime, in minutes.
     #[arg(long, default_value_t = 15)]
@@ -130,28 +129,22 @@ struct ServeArgs {
     /// cannon brake); `0` disables the cooldown.
     #[arg(long, default_value_t = 60)]
     link_cooldown_secs: u64,
+    /// Log sign-in links to stderr instead of emailing them, for development:
+    /// anyone who reads the logs can sign in. Ignored when `SMTP_HOST` is set
+    /// (then it is email, or the server refuses to start), and required when
+    /// it is not. From the environment, a switch: empty, `0`, `false`, `no`
+    /// and `off` are off, anything else is on, so a compose file can pass the
+    /// variable through unset.
+    #[arg(
+        long,
+        env = "ANTUMBRA_DEV_MAILER",
+        value_parser = clap::builder::FalseyValueParser::new()
+    )]
+    dev_mailer: bool,
 }
 
 async fn connect(s: &StoreArgs) -> anyhow::Result<Store> {
-    let builder = ConnectionConfig::builder()
-        .url(&s.url)
-        .namespace("antumbra")
-        .database("main");
-    match s.db_auth {
-        DbAuth::Database => {
-            let (Some(user), Some(pass)) = (s.db_user.as_deref(), s.db_pass.as_deref()) else {
-                anyhow::bail!("--db-auth database requires --db-user and --db-pass");
-            };
-            Ok(Store::connect_with_db_user(builder.build()?, user, pass, EMBED_DIM).await?)
-        }
-        DbAuth::Root => {
-            let builder = match (s.db_user.as_deref(), s.db_pass.as_deref()) {
-                (Some(user), Some(pass)) => builder.username(user).password(pass),
-                _ => builder,
-            };
-            Ok(Store::connect(builder.build()?, EMBED_DIM).await?)
-        }
-    }
+    Ok(s.auth.connect(&s.url, EMBED_DIM).await?)
 }
 
 /// The `.env.example` placeholder: a magic secret anyone can read out of the
@@ -174,19 +167,29 @@ fn validate_magic_secret(secret: &str) -> anyhow::Result<()> {
 }
 
 /// Resolve on SIGTERM (what `docker stop` sends PID 1) or ctrl-c, so axum can
-/// stop accepting and drain in-flight requests instead of dropping them.
+/// stop accepting and drain in-flight requests instead of dropping them. A
+/// handler the OS refuses to install is said on stderr, and that signal then
+/// never resolves this: the server runs until the other one, or a kill.
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("install ctrl-c handler");
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            eprintln!("antumbra-control-server: no ctrl-c handler ({e}); it will not stop on one");
+            std::future::pending::<()>().await;
+        }
     };
     #[cfg(unix)]
     let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("install SIGTERM handler")
-            .recv()
-            .await;
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut term) => {
+                term.recv().await;
+            }
+            Err(e) => {
+                eprintln!(
+                    "antumbra-control-server: no SIGTERM handler ({e}); it will not stop on one"
+                );
+                std::future::pending::<()>().await;
+            }
+        }
     };
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
@@ -218,8 +221,21 @@ fn probe(addr: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The magic-link secret, from the flag or its file, checked: a server
+/// without one cannot sign a link and does not start.
+fn magic_secret_of(
+    inline: Option<String>,
+    file: Option<&std::path::Path>,
+) -> anyhow::Result<Vec<u8>> {
+    let Some(secret) = antumbra_core::secrets::resolve(inline, file, "magic secret")? else {
+        anyhow::bail!("--magic-secret or --magic-secret-file is required");
+    };
+    validate_magic_secret(&secret)?;
+    Ok(secret.into_bytes())
+}
+
 async fn serve(a: ServeArgs) -> anyhow::Result<()> {
-    validate_magic_secret(&a.magic_secret)?;
+    let magic_secret = magic_secret_of(a.magic_secret, a.magic_secret_file.as_deref())?;
     let store = connect(&a.store).await?;
     let private_pem = std::fs::read(&a.signing_key)
         .map_err(|e| anyhow::anyhow!("read signing key {}: {e}", a.signing_key))?;
@@ -231,11 +247,15 @@ async fn serve(a: ServeArgs) -> anyhow::Result<()> {
     let state = AppState {
         store,
         issuer: Arc::new(issuer),
-        magic_secret: Arc::new(a.magic_secret.into_bytes()),
+        magic_secret: Arc::new(magic_secret),
         base_url: Arc::new(a.base_url),
         magic_ttl: Duration::from_secs(a.magic_ttl_mins * 60),
-        mailer: build_mailer(),
+        mailer: build_mailer(a.dev_mailer)?,
         cooldown: Arc::new(Cooldown::new(Duration::from_secs(a.link_cooldown_secs))),
+        limits: Arc::new(antumbra_core::limit::Limiter::new(
+            crate::http::LINKS_PER_CLIENT,
+            crate::http::LINKS_EVERYONE,
+        )),
     };
     let app = router(state);
     let listener = tokio::net::TcpListener::bind(&a.addr).await?;
@@ -243,6 +263,9 @@ async fn serve(a: ServeArgs) -> anyhow::Result<()> {
         "antumbra-control-server: listening on http://{}/ (signup / login / magic)",
         a.addr
     );
+    // With the peer's address on each request, so link requests are budgeted
+    // per client.
+    let app = app.into_make_service_with_connect_info::<std::net::SocketAddr>();
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
@@ -320,23 +343,184 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_placeholder_and_short_magic_secrets_are_refused() {
+    fn the_dev_mailer_is_a_flag_that_is_off_unless_given() -> anyhow::Result<()> {
+        let Command::Serve(off) = Cli::try_parse_from(SERVE)?.cmd else {
+            anyhow::bail!("not the serve command");
+        };
+        anyhow::ensure!(!off.dev_mailer, "off unless asked for");
+        let with_flag = SERVE.iter().copied().chain(["--dev-mailer"]);
+        let Command::Serve(on) = Cli::try_parse_from(with_flag)?.cmd else {
+            anyhow::bail!("not the serve command");
+        };
+        anyhow::ensure!(on.dev_mailer);
+        Ok(())
+    }
+
+    /// A `serve` command line with every required argument and nothing else.
+    const SERVE: [&str; 8] = [
+        "antumbra-control-server",
+        "serve",
+        "--base-url",
+        "https://control.example",
+        "--signing-key",
+        "signing.pem",
+        "--magic-secret",
+        "0123456789abcdef0123456789abcdef",
+    ];
+
+    // The compose file passes ANTUMBRA_DEV_MAILER through unset, as an empty
+    // string, so the variable has to read as a switch rather than as a strict
+    // `true`/`false`. The one test that touches the variable; it restores it.
+    #[test]
+    fn the_dev_mailer_variable_reads_like_a_switch() -> anyhow::Result<()> {
+        for (value, expected) in [
+            ("", false),
+            ("0", false),
+            ("false", false),
+            ("no", false),
+            ("1", true),
+            ("true", true),
+            ("yes", true),
+        ] {
+            std::env::set_var("ANTUMBRA_DEV_MAILER", value);
+            let parsed = Cli::try_parse_from(SERVE);
+            std::env::remove_var("ANTUMBRA_DEV_MAILER");
+            let Command::Serve(serve) = parsed?.cmd else {
+                anyhow::bail!("not the serve command");
+            };
+            anyhow::ensure!(
+                serve.dev_mailer == expected,
+                "ANTUMBRA_DEV_MAILER={value:?} read as {}",
+                serve.dev_mailer
+            );
+        }
+        Ok(())
+    }
+
+    // A day count is bounded at the parser, so the date arithmetic behind it
+    // cannot overflow on a typo: a usage error naming the range, not a panic.
+    #[test]
+    fn an_invite_ttl_past_a_century_is_a_usage_error() -> anyhow::Result<()> {
+        let mint = |ttl: &str| {
+            Cli::try_parse_from(["antumbra-control-server", "mint-invite", "--ttl-days", ttl])
+        };
+        let Err(e) = mint("999999999999999") else {
+            anyhow::bail!("a ttl past a century was accepted");
+        };
+        anyhow::ensure!(e.to_string().contains("0..=36500"), "{e}");
+        anyhow::ensure!(mint("-1").is_err(), "a negative ttl was accepted");
+        mint("0")?;
+        mint("36500")?;
+        Ok(())
+    }
+
+    // The store flags are the shared ones (#303), on every subcommand that
+    // reaches the store: the password's environment value is hidden in --help
+    // and the url reads its variable, as in every binary.
+    #[test]
+    fn the_store_flags_read_as_in_every_binary() -> anyhow::Result<()> {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        cmd.clone().debug_assert();
+        for name in ["serve", "mint-invite", "list-invites", "revoke-invite"] {
+            let sub = cmd
+                .find_subcommand(name)
+                .ok_or_else(|| anyhow::anyhow!("no subcommand {name}"))?;
+            let flag = |id: &str| {
+                sub.get_arguments().find(|a| a.get_id() == id).map(|a| {
+                    (
+                        a.get_env().map(|e| e.to_string_lossy().into_owned()),
+                        a.is_hide_env_values_set(),
+                    )
+                })
+            };
+            anyhow::ensure!(
+                flag("db_pass") == Some((Some("ANTUMBRA_DB_PASS".into()), true)),
+                "{name}: --db-pass"
+            );
+            anyhow::ensure!(
+                flag("url") == Some((Some("ANTUMBRA_DB_URL".into()), false)),
+                "{name}: --url"
+            );
+            anyhow::ensure!(
+                flag("db_auth").map(|f| f.0) == Some(Some("ANTUMBRA_DB_AUTH".into())),
+                "{name}: --db-auth"
+            );
+        }
+        Ok(())
+    }
+
+    /// The secret comes from its flag or its file, never both, and a server
+    /// given neither does not start; the flag's environment value stays out
+    /// of --help, as every secret's does.
+    #[test]
+    fn the_magic_secret_may_come_from_a_file_and_hides_its_value() -> anyhow::Result<()> {
+        use clap::CommandFactory;
+        let path = std::env::temp_dir().join(format!("antumbra-magic-{}", std::process::id()));
+        std::fs::write(&path, "oqRzkA0sZ1Yx9fJ2mB7cD4eF6gH8iK0l\n")?;
+        let from_file = magic_secret_of(None, Some(&path));
+        let _ = std::fs::remove_file(&path);
+        anyhow::ensure!(
+            from_file? == b"oqRzkA0sZ1Yx9fJ2mB7cD4eF6gH8iK0l".to_vec(),
+            "the secret is read from its file and trimmed"
+        );
+        anyhow::ensure!(
+            magic_secret_of(None, None).is_err(),
+            "a server without a secret does not start"
+        );
+        anyhow::ensure!(
+            Cli::try_parse_from([
+                "antumbra-control-server",
+                "serve",
+                "--base-url",
+                "https://control.example",
+                "--signing-key",
+                "key.pem",
+                "--magic-secret",
+                "oqRzkA0sZ1Yx9fJ2mB7cD4eF6gH8iK0l",
+                "--magic-secret-file",
+                "secret.txt",
+            ])
+            .is_err(),
+            "the flag and its file are refused together"
+        );
+        let cmd = Cli::command();
+        let serve = cmd
+            .find_subcommand("serve")
+            .ok_or_else(|| anyhow::anyhow!("no serve"))?;
+        for id in ["magic_secret", "db_pass"] {
+            let arg = serve
+                .get_arguments()
+                .find(|a| a.get_id() == id)
+                .ok_or_else(|| anyhow::anyhow!("no --{id}"))?;
+            anyhow::ensure!(arg.is_hide_env_values_set(), "--{id} shows its value");
+        }
+        for id in ["magic_secret_file", "db_pass_file"] {
+            anyhow::ensure!(
+                serve.get_arguments().any(|a| a.get_id() == id),
+                "serve has no --{id}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn the_placeholder_and_short_magic_secrets_are_refused() -> anyhow::Result<()> {
         assert!(validate_magic_secret(PLACEHOLDER_SECRET).is_err());
         assert!(validate_magic_secret("short").is_err());
         assert!(validate_magic_secret("oqRzkA0sZ1Yx9fJ2mB7cD4eF6gH8iK0l").is_ok());
+        Ok(())
     }
 
     // The probe round-trip against a real listener: healthy store -> exit Ok,
     // and a refused connection -> Err.
     #[tokio::test]
-    async fn probe_round_trips_against_a_live_server() {
+    async fn probe_round_trips_against_a_live_server() -> anyhow::Result<()> {
         use crate::http::{router, AppState, Cooldown};
         use std::sync::Arc;
 
         const RS_PRIV: &[u8] = include_bytes!("../../antumbra-control/tests/test_jwt_priv.pem");
-        let store = antumbra_store::Store::connect_memory(EMBED_DIM)
-            .await
-            .unwrap();
+        let store = antumbra_store::testing::mem_store().await?;
         let state = AppState {
             store,
             issuer: Arc::new(Issuer::new(
@@ -349,22 +533,27 @@ mod tests {
             magic_ttl: Duration::from_secs(60),
             mailer: Arc::new(crate::mailer::StderrMailer),
             cooldown: Arc::new(Cooldown::new(Duration::ZERO)),
+            limits: Arc::new(antumbra_core::limit::Limiter::new(
+                crate::http::LINKS_PER_CLIENT,
+                crate::http::LINKS_EVERYONE,
+            )),
         };
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap().to_string();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?.to_string();
         tokio::spawn(async move {
-            axum::serve(listener, router(state)).await.unwrap();
+            // The server outlives the test, so a failure to serve is only
+            // said here; it shows as a probe that does not round-trip.
+            if let Err(e) = axum::serve(listener, router(state)).await {
+                eprintln!("test server: {e}");
+            }
         });
 
-        let probed = tokio::task::spawn_blocking(move || probe(&addr))
-            .await
-            .unwrap();
+        let probed = tokio::task::spawn_blocking(move || probe(&addr)).await?;
         assert!(probed.is_ok(), "healthy server probes ok: {probed:?}");
 
         // Nothing listens on this port: the probe must fail, not hang.
-        let dead = tokio::task::spawn_blocking(|| probe("127.0.0.1:9"))
-            .await
-            .unwrap();
+        let dead = tokio::task::spawn_blocking(|| probe("127.0.0.1:9")).await?;
         assert!(dead.is_err());
+        Ok(())
     }
 }

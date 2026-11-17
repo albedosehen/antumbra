@@ -86,11 +86,10 @@ impl SessionKeeper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use antumbra_store::repo::principal;
-    use antumbra_store::EMBED_DIM;
+    use antumbra_store::testing::signed_in;
 
     #[test]
-    fn staleness_is_a_third_of_the_session() {
+    fn staleness_is_a_third_of_the_session() -> anyhow::Result<()> {
         assert_eq!(REFRESH_AFTER, Duration::from_secs(20 * 60));
         assert!(REFRESH_AFTER < TENANT_SESSION);
         // Forward from a real instant only: one less than the host's uptime
@@ -103,32 +102,27 @@ mod tests {
         ));
         assert!(SessionKeeper::is_stale(then, then + REFRESH_AFTER));
         assert!(SessionKeeper::is_stale(then, then + TENANT_SESSION));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_stale_session_is_signed_in_again_and_a_fresh_one_left_alone() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-        let tenant = TenantId::new("ws:t");
-        let user = UserId::new("user:u");
-        principal::provision(&store, &tenant, &user).await.unwrap();
-        store.signin(&tenant, &user).await.unwrap();
-        let keeper = SessionKeeper::new(store, tenant, user);
-        assert!(!keeper.refresh_if_stale().await.unwrap(), "just signed in");
+    async fn a_stale_session_is_signed_in_again_and_a_fresh_one_left_alone() -> anyhow::Result<()> {
+        let store = signed_in("ws:t", "user:u").await?;
+        let keeper = SessionKeeper::new(store, TenantId::new("ws:t"), UserId::new("user:u"));
+        assert!(!keeper.refresh_if_stale().await?, "just signed in");
         let later = Instant::now() + REFRESH_AFTER + Duration::from_secs(1);
         assert!(
-            keeper.refresh_if_stale_at(later).await.unwrap(),
+            keeper.refresh_if_stale_at(later).await?,
             "stale: re-signed in"
         );
-        assert!(
-            !keeper.refresh_if_stale_at(later).await.unwrap(),
-            "fresh again"
-        );
+        assert!(!keeper.refresh_if_stale_at(later).await?, "fresh again");
         // Stale by the old clock, fresh once an initialize restarts it.
         let much_later = later + TENANT_SESSION;
         keeper.mark_signed_in_at(much_later).await;
         assert!(
-            !keeper.refresh_if_stale_at(much_later).await.unwrap(),
+            !keeper.refresh_if_stale_at(much_later).await?,
             "an initialize restarted the clock"
         );
+        Ok(())
     }
 }

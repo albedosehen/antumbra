@@ -20,9 +20,10 @@
 
 use std::time::Instant;
 
+use antumbra_core::{AntumbraError, Result};
 use antumbra_train::grpo::GrpoLm;
 use antumbra_train::models::QwenCausalLm;
-use antumbra_train::RaftConfig;
+use antumbra_train::{RaftConfig, ServeQuant};
 use candle_core::Device;
 
 const PROMPTS: [&str; 3] = [
@@ -31,29 +32,36 @@ const PROMPTS: [&str; 3] = [
     "Create a git branch for issue #12, \"Add search\". Command only.",
 ];
 
+/// `what: error`, naming the stage of the check that failed.
+fn stage(what: &'static str) -> impl Fn(AntumbraError) -> AntumbraError {
+    move |e| AntumbraError::other(format!("{what}: {e}"))
+}
+
 /// Greedy generation over every prompt: the tokens produced, the seconds
 /// taken, and the first prompt's answer.
-async fn generate_all(model: &mut QwenCausalLm) -> (usize, f64, String) {
+async fn generate_all(model: &mut QwenCausalLm) -> Result<(usize, f64, String)> {
     let (mut tokens, mut secs, mut first) = (0, 0.0, String::new());
     for p in PROMPTS {
         let start = Instant::now();
-        let sample = model
+        let group = model
             .sample_group(p, 1)
             .await
-            .expect("generates on the CPU")
-            .remove(0);
+            .map_err(stage("generating on the CPU"))?;
+        let Some(sample) = group.into_iter().next() else {
+            return Err(AntumbraError::other("the model returned an empty group"));
+        };
         secs += start.elapsed().as_secs_f64();
         tokens += sample.tokens.len();
         if first.is_empty() {
             first = sample.completion;
         }
     }
-    (tokens, secs, first)
+    Ok((tokens, secs, first))
 }
 
 #[tokio::test]
 #[ignore = "live CPU: set ANTUMBRA_CPU_SERVE=1 and run with --release --ignored"]
-async fn an_expert_serves_on_the_cpu() {
+async fn an_expert_serves_on_the_cpu() -> Result<()> {
     assert!(
         std::env::var("ANTUMBRA_CPU_SERVE").is_ok(),
         "ANTUMBRA_CPU_SERVE=1 must be set to run this ignored live CPU test"
@@ -68,7 +76,11 @@ async fn an_expert_serves_on_the_cpu() {
         cfg.base_model = base;
     }
     if let Ok(quant) = std::env::var("ANTUMBRA_CPU_QUANT") {
-        cfg.serve_quant = Some(quant.parse().expect("ANTUMBRA_CPU_QUANT is q8_0 or q4_k"));
+        cfg.serve_quant = Some(
+            quant
+                .parse::<ServeQuant>()
+                .map_err(stage("ANTUMBRA_CPU_QUANT is q8_0 or q4_k"))?,
+        );
     }
     let form = cfg
         .serve_quant
@@ -82,13 +94,14 @@ async fn an_expert_serves_on_the_cpu() {
 
     // One expert, at the rank it was trained at, through load_adapter.
     let start = Instant::now();
-    let mut one = QwenCausalLm::load(Device::Cpu, cfg.clone()).expect("the base loads");
+    let mut one =
+        QwenCausalLm::load(Device::Cpu, cfg.clone()).map_err(stage("loading the base"))?;
     if let Some(a) = &adapter {
         one.load_adapter(a)
-            .expect("a bf16 expert loads into the f32 model");
+            .map_err(stage("loading a bf16 expert into the f32 model"))?;
     }
     let load_secs = start.elapsed().as_secs_f64();
-    let (tokens, secs, answer) = generate_all(&mut one).await;
+    let (tokens, secs, answer) = generate_all(&mut one).await?;
     drop(one);
     eprintln!("rank {}: {answer:?}", cfg.lora_rank);
     assert!(tokens > 0, "the expert produced no tokens");
@@ -101,12 +114,13 @@ async fn an_expert_serves_on_the_cpu() {
         lora_alpha: cfg.lora_alpha * 4.0,
         ..cfg.clone()
     };
-    let mut four = QwenCausalLm::load(Device::Cpu, blend_cfg).expect("the base loads");
+    let mut four = QwenCausalLm::load(Device::Cpu, blend_cfg).map_err(stage("loading the base"))?;
     if let Some(a) = &adapter {
         let specs = vec![(a.clone(), 0.25f32); 4];
-        four.load_blend(&specs).expect("the blend loads");
+        four.load_blend(&specs)
+            .map_err(stage("loading the blend"))?;
     }
-    let (blend_tokens, blend_secs, blend_answer) = generate_all(&mut four).await;
+    let (blend_tokens, blend_secs, blend_answer) = generate_all(&mut four).await?;
     eprintln!("rank {blend_rank}: {blend_answer:?}");
     assert!(blend_tokens > 0, "the blend produced no tokens");
 
@@ -118,4 +132,5 @@ async fn an_expert_serves_on_the_cpu() {
         tokens as f64 / secs,
         blend_tokens as f64 / blend_secs,
     );
+    Ok(())
 }

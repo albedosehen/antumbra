@@ -16,6 +16,8 @@ use jsonwebtoken::{
 };
 use serde::{Deserialize, Serialize};
 
+pub mod unverified;
+
 /// The verified identity carried by a request's bearer token: what becomes
 /// `$auth.tenant` / `$auth.user` for the session.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -28,6 +30,10 @@ pub struct Identity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Access {
     pub identity: Identity,
+    /// The token's own id, when it carries one: what a revocation names.
+    pub jti: Option<String>,
+    /// When the token expires, as seconds since the epoch.
+    pub expires_at: u64,
     /// Minted with `--operator`: the token may read the substrate's own state
     /// (shadows, boundaries, the loop) and act on it from the console. Kept out
     /// of [`Identity`], which keys the server's per-identity caches, so an
@@ -46,14 +52,20 @@ struct Claims {
     user: String,
     #[serde(default)]
     operator: bool,
+    /// The token's own id, which a revocation names. Every mint sets one; a
+    /// token from before ids were added carries none and cannot be revoked
+    /// short of rotating the key.
+    #[serde(default)]
+    jti: Option<String>,
+    exp: u64,
 }
 
 /// The claims a minted token carries (the inverse of [`Claims`]). `aud` is set
 /// only by the RS256 (hosted) mint so a token can be scoped to one server; the
 /// HS256 mint omits it (the offline verifier opts out of audience by default).
-/// `iat` and `jti` are forward hooks: issuance time for rotation/debugging and
-/// a unique id a future revocation list can key on. The verifier ignores both
-/// today (a token is judged by signature, expiry, and scope claims alone).
+/// `iat` is a forward hook (issuance time, for rotation and debugging); `jti`
+/// is the id the revocation list keys on, which the verifier hands back in
+/// [`Access`] for the server to check.
 #[derive(Debug, Serialize)]
 struct MintClaims<'a> {
     tenant: &'a str,
@@ -238,6 +250,8 @@ impl JwtVerifier {
                 tenant: c.tenant,
                 user: c.user,
             },
+            jti: c.jti,
+            expires_at: c.exp,
             operator: c.operator,
         })
     }
@@ -262,6 +276,7 @@ impl JwtVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
 
     #[derive(Serialize)]
     struct EncClaims {
@@ -274,19 +289,18 @@ mod tests {
 
     const SECRET: &[u8] = b"a-test-signing-secret-not-for-prod";
 
-    fn mint(tenant: &str, user: &str, exp: u64, aud: Option<&str>) -> String {
+    fn mint(tenant: &str, user: &str, exp: u64, aud: Option<&str>) -> Result<String> {
         let claims = EncClaims {
             tenant: tenant.into(),
             user: user.into(),
             exp,
             aud: aud.map(Into::into),
         };
-        encode(
+        Ok(encode(
             &Header::new(Algorithm::HS256),
             &claims,
             &EncodingKey::from_secret(SECRET),
-        )
-        .unwrap()
+        )?)
     }
 
     fn future() -> u64 {
@@ -294,9 +308,9 @@ mod tests {
     }
 
     #[test]
-    fn valid_token_yields_identity() {
+    fn valid_token_yields_identity() -> Result<()> {
         let v = JwtVerifier::hs256(SECRET);
-        let id = v.verify(&mint("ws:1", "user:a", future(), None)).unwrap();
+        let id = v.verify(&mint("ws:1", "user:a", future(), None)?)?;
         assert_eq!(
             id,
             Identity {
@@ -304,13 +318,15 @@ mod tests {
                 user: "user:a".into()
             }
         );
+        Ok(())
     }
 
     #[test]
-    fn wrong_secret_is_rejected() {
+    fn wrong_secret_is_rejected() -> Result<()> {
         let other = JwtVerifier::hs256(b"a-different-secret");
-        let err = other.verify(&mint("ws:1", "user:a", future(), None));
+        let err = other.verify(&mint("ws:1", "user:a", future(), None)?);
         assert!(matches!(err, Err(AuthError::Invalid(_))));
+        Ok(())
     }
 
     // A throwaway RSA-2048 keypair for the asymmetric mint↔verify round-trip:
@@ -357,7 +373,7 @@ dwIDAQAB
 ";
 
     #[test]
-    fn rs256_mint_verifies_against_the_server_public_key() {
+    fn rs256_mint_verifies_against_the_server_public_key() -> Result<()> {
         use std::time::Duration;
         let token = mint_rs256(
             RS_PRIV,
@@ -365,14 +381,11 @@ dwIDAQAB
             "user:a",
             Duration::from_secs(3600),
             Some("antumbra"),
-        )
-        .unwrap();
+        )?;
         // The MCP server verifies the issuer's token with the matching public key.
-        let v = JwtVerifier::rs256_pem(RS_PUB)
-            .unwrap()
-            .with_audience("antumbra");
+        let v = JwtVerifier::rs256_pem(RS_PUB)?.with_audience("antumbra");
         assert_eq!(
-            v.verify(&token).unwrap(),
+            v.verify(&token)?,
             Identity {
                 tenant: "ws:1".into(),
                 user: "user:a".into()
@@ -385,24 +398,25 @@ dwIDAQAB
             "user:a",
             Duration::from_secs(3600),
             Some("other"),
-        )
-        .unwrap();
+        )?;
         assert!(matches!(v.verify(&mismatched), Err(AuthError::Invalid(_))));
         // An empty scope is refused at mint time.
         assert!(mint_rs256(RS_PRIV, "", "user:a", Duration::from_secs(60), None).is_err());
+        Ok(())
     }
 
     #[test]
-    fn expired_token_is_rejected() {
+    fn expired_token_is_rejected() -> Result<()> {
         let v = JwtVerifier::hs256(SECRET);
         // Well past the library's default 60s expiry leeway.
         let past = get_current_timestamp() - 7200;
-        let err = v.verify(&mint("ws:1", "user:a", past, None));
+        let err = v.verify(&mint("ws:1", "user:a", past, None)?);
         assert!(matches!(err, Err(AuthError::Invalid(_))));
+        Ok(())
     }
 
     #[test]
-    fn missing_claim_is_rejected() {
+    fn missing_claim_is_rejected() -> Result<()> {
         // A token with no tenant/user claim fails to deserialize into Claims.
         #[derive(Serialize)]
         struct Thin {
@@ -412,43 +426,44 @@ dwIDAQAB
             &Header::new(Algorithm::HS256),
             &Thin { exp: future() },
             &EncodingKey::from_secret(SECRET),
-        )
-        .unwrap();
+        )?;
         let v = JwtVerifier::hs256(SECRET);
         assert!(matches!(v.verify(&token), Err(AuthError::Invalid(_))));
+        Ok(())
     }
 
     #[test]
-    fn empty_claim_is_rejected() {
+    fn empty_claim_is_rejected() -> Result<()> {
         let v = JwtVerifier::hs256(SECRET);
         assert!(matches!(
-            v.verify(&mint("ws:1", "", future(), None)),
+            v.verify(&mint("ws:1", "", future(), None)?),
             Err(AuthError::Invalid(_))
         ));
+        Ok(())
     }
 
     #[test]
-    fn audience_must_match_when_required() {
+    fn audience_must_match_when_required() -> Result<()> {
         let v = JwtVerifier::hs256(SECRET).with_audience("antumbra");
         assert!(v
-            .verify(&mint("ws:1", "user:a", future(), Some("antumbra")))
+            .verify(&mint("ws:1", "user:a", future(), Some("antumbra"))?)
             .is_ok());
         assert!(matches!(
-            v.verify(&mint("ws:1", "user:a", future(), Some("other-service"))),
+            v.verify(&mint("ws:1", "user:a", future(), Some("other-service"))?),
             Err(AuthError::Invalid(_))
         ));
+        Ok(())
     }
 
     #[test]
-    fn a_minted_token_verifies_to_its_identity() {
+    fn a_minted_token_verifies_to_its_identity() -> Result<()> {
         let token = mint_hs256(
             SECRET,
             "ws:1",
             "user:a",
             std::time::Duration::from_secs(3600),
-        )
-        .unwrap();
-        let id = JwtVerifier::hs256(SECRET).verify(&token).unwrap();
+        )?;
+        let id = JwtVerifier::hs256(SECRET).verify(&token)?;
         assert_eq!(
             id,
             Identity {
@@ -456,82 +471,99 @@ dwIDAQAB
                 user: "user:a".into()
             }
         );
+        Ok(())
     }
 
     #[test]
-    fn a_minted_token_is_rejected_by_a_different_secret() {
+    fn a_minted_token_is_rejected_by_a_different_secret() -> Result<()> {
         let token = mint_hs256(
             SECRET,
             "ws:1",
             "user:a",
             std::time::Duration::from_secs(3600),
-        )
-        .unwrap();
+        )?;
         let other = JwtVerifier::hs256(b"a-different-secret");
         assert!(matches!(other.verify(&token), Err(AuthError::Invalid(_))));
+        Ok(())
+    }
+
+    /// The verifier hands back the token's own id and expiry, so a server can
+    /// hold the id against its denylist and say when the token ends.
+    #[test]
+    fn a_verified_token_carries_its_id_and_expiry() -> Result<(), AuthError> {
+        let token = mint_hs256(
+            SECRET,
+            "ws:a",
+            "user:a",
+            std::time::Duration::from_secs(600),
+        )
+        .map_err(|e| AuthError::Invalid(e.to_string()))?;
+        let access = JwtVerifier::hs256(SECRET).verify_access(&token)?;
+        let Some(jti) = &access.jti else {
+            return Err(AuthError::Invalid("a minted token carries an id".into()));
+        };
+        assert_eq!(jti.len(), 32, "a simple uuid");
+        let now = get_current_timestamp();
+        assert!(access.expires_at > now && access.expires_at <= now + 600);
+        Ok(())
     }
 
     #[test]
-    fn minted_tokens_carry_unique_jti_and_an_issuance_time() {
+    fn minted_tokens_carry_unique_jti_and_an_issuance_time() -> Result<()> {
         #[derive(Deserialize)]
         struct Hooks {
             iat: u64,
             jti: String,
         }
         let ttl = std::time::Duration::from_secs(3600);
-        let decode_hooks = |token: &str| {
+        let decode_hooks = |token: &str| -> Result<Hooks> {
             let mut v = Validation::new(Algorithm::HS256);
             v.set_required_spec_claims(&["exp"]);
-            decode::<Hooks>(token, &DecodingKey::from_secret(SECRET), &v)
-                .unwrap()
-                .claims
+            Ok(decode::<Hooks>(token, &DecodingKey::from_secret(SECRET), &v)?.claims)
         };
-        let a = decode_hooks(&mint_hs256(SECRET, "ws:1", "user:a", ttl).unwrap());
-        let b = decode_hooks(&mint_hs256(SECRET, "ws:1", "user:a", ttl).unwrap());
+        let a = decode_hooks(&mint_hs256(SECRET, "ws:1", "user:a", ttl)?)?;
+        let b = decode_hooks(&mint_hs256(SECRET, "ws:1", "user:a", ttl)?)?;
         assert_ne!(a.jti, b.jti, "every mint gets its own token id");
         let now = get_current_timestamp();
         assert!(a.iat <= now && a.iat > now - 60, "iat is the mint time");
+        Ok(())
     }
 
     #[test]
-    fn only_a_token_minted_as_operator_is_one() {
+    fn only_a_token_minted_as_operator_is_one() -> Result<()> {
         let ttl = std::time::Duration::from_secs(3600);
         let v = JwtVerifier::hs256(SECRET);
-        let plain = v
-            .verify_access(&mint_hs256(SECRET, "ws:1", "user:a", ttl).unwrap())
-            .unwrap();
+        let plain = v.verify_access(&mint_hs256(SECRET, "ws:1", "user:a", ttl)?)?;
         assert!(!plain.operator);
-        let operator = v
-            .verify_access(&mint_hs256_operator(SECRET, "ws:1", "user:a", ttl).unwrap())
-            .unwrap();
+        let operator = v.verify_access(&mint_hs256_operator(SECRET, "ws:1", "user:a", ttl)?)?;
         assert!(operator.operator);
         assert_eq!(
             operator.identity, plain.identity,
             "the role is not part of the identity"
         );
         // A token minted before the claim existed carries no `operator` at all.
-        let older = v
-            .verify_header_access(Some(&format!(
-                "Bearer {}",
-                mint("ws:1", "user:a", future(), None)
-            )))
-            .unwrap();
+        let older = v.verify_header_access(Some(&format!(
+            "Bearer {}",
+            mint("ws:1", "user:a", future(), None)?
+        )))?;
         assert!(!older.operator);
         assert!(mint_hs256_operator(SECRET, "ws:1", " ", ttl).is_err());
+        Ok(())
     }
 
     #[test]
-    fn minting_an_empty_scope_is_refused() {
+    fn minting_an_empty_scope_is_refused() -> Result<()> {
         assert!(matches!(
             mint_hs256(SECRET, "ws:1", "  ", std::time::Duration::from_secs(60)),
             Err(AuthError::Invalid(_))
         ));
+        Ok(())
     }
 
     #[test]
-    fn header_parsing() {
+    fn header_parsing() -> Result<()> {
         let v = JwtVerifier::hs256(SECRET);
-        let token = mint("ws:1", "user:a", future(), None);
+        let token = mint("ws:1", "user:a", future(), None)?;
         assert!(v.verify_header(Some(&format!("Bearer {token}"))).is_ok());
         assert!(v.verify_header(Some(&format!("bearer {token}"))).is_ok());
         assert!(matches!(
@@ -539,5 +571,6 @@ dwIDAQAB
             Err(AuthError::Missing)
         ));
         assert!(matches!(v.verify_header(None), Err(AuthError::Missing)));
+        Ok(())
     }
 }

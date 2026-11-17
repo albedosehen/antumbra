@@ -230,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn knowledge_is_named_by_the_path_or_branch_that_ties_it_to_the_change() {
+    fn knowledge_is_named_by_the_path_or_branch_that_ties_it_to_the_change() -> anyhow::Result<()> {
         let memories = vec![
             memory(
                 "memory:retry",
@@ -307,10 +307,11 @@ mod tests {
             diff.touched["src/retry.rs"].memories[0].summary,
             "retries back off exponentially"
         );
+        Ok(())
     }
 
     #[test]
-    fn the_output_counts_both_and_says_what_merging_does() {
+    fn the_output_counts_both_and_says_what_merging_does() -> anyhow::Result<()> {
         let memories = vec![
             memory("memory:a", "a", Some(at(Some("src/a.rs"), None))),
             memory("memory:b", "b", Some(at(None, Some("feat/x")))),
@@ -343,10 +344,11 @@ mod tests {
         let none = KnowledgeDiff::default().render("feat/x", "main");
         assert_eq!(none.title, "No anchored knowledge touches this change");
         assert!(none.text.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn long_lists_are_cut_and_say_how_much_was_left_out() {
+    fn long_lists_are_cut_and_say_how_much_was_left_out() -> anyhow::Result<()> {
         let memories: Vec<Memory> = (0..20)
             .map(|i| {
                 memory(
@@ -366,5 +368,6 @@ mod tests {
         let out = diff.render("feat/x", "main");
         assert!(out.text.contains("- …and 5 more"));
         assert!(diff.touched["src/a.rs"].memories[0].summary.chars().count() <= SUMMARY_CHARS);
+        Ok(())
     }
 }

@@ -3,6 +3,7 @@
 //! trusted it, only for what it checks, and stops the moment it is
 //! quarantined or its trust lapses.
 
+use anyhow::Result;
 use chrono::{TimeDelta, Utc};
 
 use antumbra_core::ports::TrustedVerifiers;
@@ -12,7 +13,7 @@ use antumbra_core::{
 };
 use antumbra_store::repo::verifier::{self, Registry};
 use antumbra_store::repo::{expert, lifecycle};
-use antumbra_store::Store;
+use antumbra_store::testing;
 
 fn synthesized(task: Option<&str>) -> VerifierRecord {
     VerifierRecord::new(
@@ -38,42 +39,43 @@ fn sound_tally() -> Tally {
 }
 
 #[tokio::test]
-async fn proposing_the_same_content_twice_is_one_verifier() {
-    let store = Store::connect_memory(4).await.unwrap();
-    let first = verifier::propose(&store, &synthesized(None)).await.unwrap();
+async fn proposing_the_same_content_twice_is_one_verifier() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
+    let first = verifier::propose(&store, &synthesized(None)).await?;
     let mut again = synthesized(None);
     again.proposed_by = Some("someone else".into());
-    let second = verifier::propose(&store, &again).await.unwrap();
+    let second = verifier::propose(&store, &again).await?;
     assert_eq!(first.id, second.id);
     assert_eq!(second.proposed_by, None, "the one already there is kept");
-    assert_eq!(verifier::list(&store).await.unwrap().len(), 1);
-    let got = verifier::get(&store, &first.id).await.unwrap().unwrap();
+    assert_eq!(verifier::list(&store).await?.len(), 1);
+    let Some(got) = verifier::get(&store, &first.id).await? else {
+        anyhow::bail!("the proposed verifier does not read back");
+    };
     assert_eq!(got.spec, first.spec);
+    Ok(())
 }
 
 #[tokio::test]
-async fn a_record_whose_content_does_not_match_its_address_is_refused() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn a_record_whose_content_does_not_match_its_address_is_refused() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let mut forged = synthesized(None);
     forged.spec = serde_json::json!({ "program": "true" });
     assert!(verifier::propose(&store, &forged).await.is_err());
+    Ok(())
 }
 
 #[tokio::test]
-async fn only_a_sound_measurement_lets_a_synthesized_verifier_grant_reward() {
-    let store = Store::connect_memory(4).await.unwrap();
-    let record = verifier::propose(&store, &synthesized(Some("strings/swap")))
-        .await
-        .unwrap();
+async fn only_a_sound_measurement_lets_a_synthesized_verifier_grant_reward() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
+    let record = verifier::propose(&store, &synthesized(Some("strings/swap"))).await?;
     let registry = Registry::new(store.clone());
     assert_eq!(
-        verifier::state_of(&store, &record).await.unwrap(),
+        verifier::state_of(&store, &record).await?,
         TrustState::Proposed
     );
     assert!(registry
         .trusted_spec(&record.id, "strings/swap")
-        .await
-        .unwrap()
+        .await?
         .is_none());
     // A person cannot promote it.
     assert!(
@@ -84,26 +86,21 @@ async fn only_a_sound_measurement_lets_a_synthesized_verifier_grant_reward() {
 
     let policy = TrustPolicy::default();
     let sound = sound_tally().judge(&record.id, Utc::now(), &policy);
-    let moved = verifier::record_measurement(&store, &record, &sound)
-        .await
-        .unwrap()
-        .unwrap();
+    let Some(moved) = verifier::record_measurement(&store, &record, &sound).await? else {
+        anyhow::bail!("a sound measurement did not move the verifier");
+    };
     assert_eq!(
         (moved.transition.from, moved.transition.to),
         (TrustState::Proposed, TrustState::Trusted)
     );
     assert_eq!(
-        registry
-            .trusted_spec(&record.id, "strings/swap")
-            .await
-            .unwrap(),
+        registry.trusted_spec(&record.id, "strings/swap").await?,
         Some(record.spec.clone())
     );
     // Not for a task it does not check.
     assert!(registry
         .trusted_spec(&record.id, "strings/other")
-        .await
-        .unwrap()
+        .await?
         .is_none());
 
     // A re-measurement that finds false positives quarantines it at once.
@@ -114,26 +111,21 @@ async fn only_a_sound_measurement_lets_a_synthesized_verifier_grant_reward() {
         unsound.verdict,
         TrustVerdict::FalsePositives { .. }
     ));
-    let moved = verifier::record_measurement(&store, &record, &unsound)
-        .await
-        .unwrap()
-        .unwrap();
+    let Some(moved) = verifier::record_measurement(&store, &record, &unsound).await? else {
+        anyhow::bail!("an unsound measurement did not move the verifier");
+    };
     assert_eq!(moved.transition.to, TrustState::Quarantined);
     assert!(registry
         .trusted_spec(&record.id, "strings/swap")
-        .await
-        .unwrap()
+        .await?
         .is_none());
     // A later sound measurement does not undo it; a person may revoke it.
     let again = sound_tally().judge(&record.id, Utc::now(), &policy);
     assert!(verifier::record_measurement(&store, &record, &again)
-        .await
-        .unwrap()
+        .await?
         .is_none());
-    verifier::transition(&store, &record.id, TrustState::Revoked, Some("done".into()))
-        .await
-        .unwrap();
-    let history = verifier::history(&store, &record.id).await.unwrap();
+    verifier::transition(&store, &record.id, TrustState::Revoked, Some("done".into())).await?;
+    let history = verifier::history(&store, &record.id).await?;
     let path: Vec<TrustState> = history.iter().map(|t| t.to).collect();
     assert_eq!(
         path,
@@ -143,49 +135,43 @@ async fn only_a_sound_measurement_lets_a_synthesized_verifier_grant_reward() {
             TrustState::Revoked
         ]
     );
-    assert_eq!(
-        verifier::measurements(&store, &record.id)
-            .await
-            .unwrap()
-            .len(),
-        3
-    );
+    assert_eq!(verifier::measurements(&store, &record.id).await?.len(), 3);
+    Ok(())
 }
 
 #[tokio::test]
-async fn a_flaky_proposal_is_revoked_outright() {
-    let store = Store::connect_memory(4).await.unwrap();
-    let record = verifier::propose(&store, &synthesized(None)).await.unwrap();
+async fn a_flaky_proposal_is_revoked_outright() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
+    let record = verifier::propose(&store, &synthesized(None)).await?;
     let mut flaky = sound_tally();
     flaky.flaky = vec!["case-3".into()];
     let m = flaky.judge(&record.id, Utc::now(), &TrustPolicy::default());
-    let moved = verifier::record_measurement(&store, &record, &m)
-        .await
-        .unwrap()
-        .unwrap();
+    let Some(moved) = verifier::record_measurement(&store, &record, &m).await? else {
+        anyhow::bail!("a flaky measurement did not move the verifier");
+    };
     assert_eq!(moved.transition.to, TrustState::Revoked);
+    Ok(())
 }
 
 #[tokio::test]
-async fn trust_that_is_not_re_measured_lapses() {
-    let store = Store::connect_memory(4).await.unwrap();
-    let record = verifier::propose(&store, &synthesized(None)).await.unwrap();
+async fn trust_that_is_not_re_measured_lapses() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
+    let record = verifier::propose(&store, &synthesized(None)).await?;
     let long_ago = Utc::now() - TimeDelta::days(30);
     let m = sound_tally().judge(&record.id, long_ago, &TrustPolicy::default());
-    verifier::record_measurement(&store, &record, &m)
-        .await
-        .unwrap();
+    verifier::record_measurement(&store, &record, &m).await?;
     assert_eq!(
-        verifier::state_of(&store, &record).await.unwrap(),
+        verifier::state_of(&store, &record).await?,
         TrustState::Trusted
     );
-    assert!(!verifier::grants(&store, &record, Utc::now()).await.unwrap());
-    assert!(verifier::grants(&store, &record, long_ago).await.unwrap());
+    assert!(!verifier::grants(&store, &record, Utc::now()).await?);
+    assert!(verifier::grants(&store, &record, long_ago).await?);
+    Ok(())
 }
 
 #[tokio::test]
-async fn an_authored_verifier_grants_by_authorship_until_a_person_moves_it() {
-    let store = Store::connect_memory(4).await.unwrap();
+async fn an_authored_verifier_grants_by_authorship_until_a_person_moves_it() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
     let authored = VerifierRecord::new(
         "strings",
         None,
@@ -194,21 +180,18 @@ async fn an_authored_verifier_grants_by_authorship_until_a_person_moves_it() {
         serde_json::json!({ "program": "judge" }),
         Utc::now(),
     );
-    let record = verifier::propose(&store, &authored).await.unwrap();
+    let record = verifier::propose(&store, &authored).await?;
     let registry = Registry::new(store.clone());
     assert!(registry
         .trusted_spec(&record.id, "strings/any")
-        .await
-        .unwrap()
+        .await?
         .is_some());
-    verifier::transition(&store, &record.id, TrustState::Quarantined, None)
-        .await
-        .unwrap();
+    verifier::transition(&store, &record.id, TrustState::Quarantined, None).await?;
     assert!(registry
         .trusted_spec(&record.id, "strings/any")
-        .await
-        .unwrap()
+        .await?
         .is_none());
+    Ok(())
 }
 
 fn expert_under(id: &str, verifiers: &[&VerifierId]) -> Expert {
@@ -232,9 +215,9 @@ fn expert_under(id: &str, verifiers: &[&VerifierId]) -> Expert {
 }
 
 #[tokio::test]
-async fn quarantining_a_verifier_archives_what_it_taught_and_nothing_else() {
-    let store = Store::connect_memory(4).await.unwrap();
-    let record = verifier::propose(&store, &synthesized(None)).await.unwrap();
+async fn quarantining_a_verifier_archives_what_it_taught_and_nothing_else() -> Result<()> {
+    let store = testing::mem_store_of(4).await?;
+    let record = verifier::propose(&store, &synthesized(None)).await?;
     let other = VerifierId::new("verifier:other");
     for e in [
         expert_under("expert:taught", &[&record.id]),
@@ -243,28 +226,23 @@ async fn quarantining_a_verifier_archives_what_it_taught_and_nothing_else() {
         expert_under("expert:elsewhere", &[&other]),
         expert_under("expert:none", &[]),
     ] {
-        expert::insert(&store, &e).await.unwrap();
+        expert::insert(&store, &e).await?;
     }
     let dormant = ExpertId::new("expert:dormant");
     let operator = TransitionCause::Operator { note: None };
-    lifecycle::transition(&store, &dormant, ExpertStatus::Dormant, operator, None)
-        .await
-        .unwrap();
+    lifecycle::transition(&store, &dormant, ExpertStatus::Dormant, operator, None).await?;
 
     let sound = sound_tally().judge(&record.id, Utc::now(), &TrustPolicy::default());
-    let trusted = verifier::record_measurement(&store, &record, &sound)
-        .await
-        .unwrap()
-        .unwrap();
+    let Some(trusted) = verifier::record_measurement(&store, &record, &sound).await? else {
+        anyhow::bail!("a sound measurement did not move the verifier");
+    };
     assert!(trusted.archived.is_empty(), "trust archives nothing");
 
-    let moved = verifier::transition(&store, &record.id, TrustState::Quarantined, None)
-        .await
-        .unwrap();
+    let moved = verifier::transition(&store, &record.id, TrustState::Quarantined, None).await?;
     let mut archived: Vec<&str> = moved.archived.iter().map(|e| e.as_str()).collect();
     archived.sort();
     assert_eq!(archived, ["expert:both", "expert:dormant", "expert:taught"]);
-    let statuses = lifecycle::statuses(&store).await.unwrap();
+    let statuses = lifecycle::statuses(&store).await?;
     assert_eq!(
         statuses.get(&ExpertId::new("expert:taught")),
         Some(&ExpertStatus::Archived)
@@ -274,18 +252,18 @@ async fn quarantining_a_verifier_archives_what_it_taught_and_nothing_else() {
         None,
         "still active"
     );
-    let history = lifecycle::history(&store, &ExpertId::new("expert:taught"))
-        .await
-        .unwrap();
+    let history = lifecycle::history(&store, &ExpertId::new("expert:taught")).await?;
+    let Some(last) = history.last() else {
+        anyhow::bail!("the archived expert has no lifecycle history");
+    };
     assert_eq!(
-        history.last().unwrap().cause,
+        last.cause,
         TransitionCause::Quarantined {
             verifier: record.id.clone()
         }
     );
     // Revoking it afterwards finds nothing left to archive.
-    let revoked = verifier::transition(&store, &record.id, TrustState::Revoked, None)
-        .await
-        .unwrap();
+    let revoked = verifier::transition(&store, &record.id, TrustState::Revoked, None).await?;
     assert!(revoked.archived.is_empty());
+    Ok(())
 }

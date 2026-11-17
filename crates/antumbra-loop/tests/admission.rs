@@ -11,10 +11,12 @@ use antumbra_core::ports::{
 use antumbra_core::slice::Holdout;
 use antumbra_core::testing::ScriptedTrainer;
 use antumbra_core::{
-    Expert, ExpertId, ExpertStatus, Generation, Result, RunId, ShadowStatus, TransitionCause,
+    AntumbraError, Expert, ExpertId, ExpertStatus, Generation, Result, RunId, ShadowStatus,
+    TransitionCause,
 };
 use antumbra_loop::{Admission, AdmissionPolicy, GenerationLoop, LoopConfig};
 use antumbra_store::repo::{expert, lifecycle, shadow};
+use antumbra_store::testing::mem_store_of;
 use antumbra_store::Store;
 
 const DIM: usize = 4;
@@ -89,7 +91,7 @@ async fn with_an_alpha_expert() -> Result<Store> {
 
 /// An old expert whose capability is `v`.
 async fn with_an_old_expert(v: Vec<f32>) -> Result<Store> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = mem_store_of(DIM).await?;
     expert::insert(
         &store,
         &Expert {
@@ -166,7 +168,10 @@ async fn a_twin_that_scores_better_replaces_the_one_it_duplicates() -> Result<()
         incumbent,
     }) = report.admission
     else {
-        panic!("superseded, got {:?}", report.admission);
+        return Err(AntumbraError::other(format!(
+            "superseded, got {:?}",
+            report.admission
+        )));
     };
     assert_eq!(archived, ExpertId::new("expert:old"));
     assert!(similarity > 0.99);
@@ -213,7 +218,7 @@ async fn a_twin_that_scores_no_better_is_not_admitted() -> Result<()> {
     assert!(expert::get(&store, &candidate()).await?.is_none());
     let sh = shadow::get(&store, &report.shadow)
         .await?
-        .expect("a shadow");
+        .ok_or_else(|| AntumbraError::other("the candidate left no shadow"))?;
     assert_eq!(sh.status, ShadowStatus::Pruned);
     assert_eq!(
         lifecycle::status_of(&store, &ExpertId::new("expert:old")).await?,

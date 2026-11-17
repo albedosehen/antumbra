@@ -20,25 +20,105 @@
 //! the bytes from copal on the server, and sends them as an attachment under a
 //! `sandbox` policy, so this origin never runs what a relic holds.
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::rejection::ExtensionRejection;
+use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
+use tokio::sync::Mutex;
 
 use antumbra_core::relic::{html_to_markdown, is_valid_slug};
 use antumbra_core::{Relic, Visibility};
 use antumbra_store::repo::relic as store_relic;
 
-use super::HttpState;
+use antumbra_core::limit;
+
+use super::{Bounded, HttpState, Serving};
 use crate::auth::Identity;
 
 const GALLERY: &str = include_str!("dashboard/relics.html");
 const VIEWER: &str = include_str!("dashboard/relic.html");
+
+/// What one client may ask of the public lookup. A page load reads it once,
+/// so thirty at once and two a second after that is a great deal of reloading.
+pub(super) const PUBLIC_READS_PER_CLIENT: limit::Rate = limit::Rate {
+    burst: 30,
+    per_minute: 120,
+};
+/// What everyone together may ask of the public lookup.
+pub(super) const PUBLIC_READS_EVERYONE: limit::Rate = limit::Rate {
+    burst: 300,
+    per_minute: 3_000,
+};
+/// What one client may have printed: a print is up to a minute of the
+/// renderer's time, and a version prints once (see [`Guards::pdfs`]).
+pub(super) const EXPORTS_PER_CLIENT: limit::Rate = limit::Rate {
+    burst: 3,
+    per_minute: 6,
+};
+/// What everyone together may have printed.
+pub(super) const EXPORTS_EVERYONE: limit::Rate = limit::Rate {
+    burst: 20,
+    per_minute: 60,
+};
+/// A print this size or smaller is kept for the next request of its version.
+const MAX_CACHED_PDF_BYTES: usize = 8 * 1024 * 1024;
+/// How many printed versions are kept.
+const CACHED_PDFS: usize = 16;
+
+/// Printed PDFs by (slug, version).
+type PrintedPdfs = Mutex<Bounded<(String, u32), Arc<Vec<u8>>>>;
+
+/// What bounds the routes here that answer without a token.
+pub(super) struct Guards {
+    /// The budgets for `GET /relic/{slug}/public`.
+    pub(super) public_reads: limit::Limiter,
+    /// The budgets for printing a relic as PDF.
+    pub(super) exports: limit::Limiter,
+    /// Printed PDFs by (slug, version), so a repeat request of the same version
+    /// is answered without printing again.
+    pub(super) pdfs: PrintedPdfs,
+}
+
+impl Guards {
+    pub(super) fn new() -> Self {
+        Self {
+            public_reads: limit::Limiter::new(PUBLIC_READS_PER_CLIENT, PUBLIC_READS_EVERYONE),
+            exports: limit::Limiter::new(EXPORTS_PER_CLIENT, EXPORTS_EVERYONE),
+            pdfs: Mutex::new(Bounded::new(CACHED_PDFS)),
+        }
+    }
+}
+
+/// The client a request comes from, for its bucket: its peer address when the
+/// server was started with connection info, else one shared key, so a request
+/// through `oneshot` in a test, or behind a proxy that hides the peer, still
+/// meets everyone's bound.
+fn client_of(peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>) -> String {
+    match peer {
+        Ok(ConnectInfo(addr)) => addr.ip().to_string(),
+        Err(_) => "unknown".to_string(),
+    }
+}
+
+/// The answer to a request past its budget.
+fn too_many() -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [
+            (header::RETRY_AFTER, "10"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        Json(json!({ "error": "too many requests; try again in a few seconds" })),
+    )
+        .into_response()
+}
 
 /// The pages' policy: the dashboard's, plus framing copal's render origin.
 /// Without a render origin nothing may be framed and the pages say so.
@@ -101,7 +181,14 @@ async fn viewer(State(state): State<Arc<HttpState>>, Path(slug): Path<String>) -
 /// What a viewer without a token needs to show a public relic: its title,
 /// version, when it changed, and the address that displays it. Never who owns
 /// it, which tenant it is in, or that a private relic by this name exists.
-async fn public_relic(State(state): State<Arc<HttpState>>, Path(slug): Path<String>) -> Response {
+async fn public_relic(
+    State(state): State<Arc<HttpState>>,
+    Path(slug): Path<String>,
+    peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>,
+) -> Response {
+    if !state.relics.public_reads.allow(&client_of(peer)) {
+        return too_many();
+    }
     let not_found = || {
         (
             StatusCode::NOT_FOUND,
@@ -140,16 +227,23 @@ async fn public_relic(State(state): State<Arc<HttpState>>, Path(slug): Path<Stri
 
 /// The public relic `slug`, read as the owner, or nothing: a private relic and
 /// a missing one alike.
-async fn public_row(state: &HttpState, slug: &str) -> Option<Relic> {
+pub(super) async fn public_row(state: &HttpState, slug: &str) -> Option<Relic> {
     if !is_valid_slug(slug) {
         return None;
     }
-    // The shared connection may be signed in as whichever identity the last
-    // request was; this read is the owner's, under the lock that every
-    // identity switch takes.
-    let _guard = state.auth.lock().await;
-    state.store.signin_root().await.ok()?;
-    let relic = store_relic::get_public(&state.store, slug).await.ok()??;
+    let relic = match &state.serving {
+        // The owner connection is every identity's connection too, signed in
+        // as whichever identity's call ran last; this read is the owner's,
+        // under the lock every call takes.
+        Serving::Shared(_) => {
+            let _guard = state.auth.lock().await;
+            state.store.signin_root().await.ok()?;
+            store_relic::get_public(&state.store, slug).await.ok()??
+        }
+        // The owner connection is no one else's: it stays in the owner view,
+        // and a read on it waits on nothing.
+        Serving::PerIdentity { .. } => store_relic::get_public(&state.store, slug).await.ok()??,
+    };
     (relic.visibility == Visibility::Public).then_some(relic)
 }
 
@@ -216,10 +310,16 @@ async fn export(
     Path(slug): Path<String>,
     Query(query): Query<ExportQuery>,
     headers: HeaderMap,
+    peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>,
 ) -> Response {
     let Some(format) = Format::parse(query.format.as_deref().unwrap_or("html")) else {
         return problem(StatusCode::BAD_REQUEST, "format is one of html, md or pdf");
     };
+    // A print is the costly export, so it is the budgeted one, before any
+    // other work is done for it.
+    if format == Format::Pdf && !state.relics.exports.allow(&client_of(peer)) {
+        return too_many();
+    }
     if format == Format::Pdf && state.pdf.is_none() {
         return problem(
             StatusCode::NOT_IMPLEMENTED,
@@ -232,7 +332,7 @@ async fn export(
     };
     let relic = match headers.get(header::AUTHORIZATION) {
         Some(value) => {
-            let Ok(identity) = state.verifier.verify_header(value.to_str().ok()) else {
+            let Ok(identity) = state.identity_of(value.to_str().ok()) else {
                 return problem(StatusCode::UNAUTHORIZED, "the token was refused");
             };
             match signed_in_row(&state, &identity, &slug).await {
@@ -247,6 +347,16 @@ async fn export(
     let Some(relic) = relic else {
         return no_relic();
     };
+    // A version already printed is answered from the copy kept, without a
+    // read from copal or a second print.
+    if format == Format::Pdf {
+        if let Some(current) = relic.current() {
+            let key = (relic.slug.clone(), current.number);
+            if let Some(pdf) = state.relics.pdfs.lock().await.get(&key) {
+                return file(format, &relic.slug, current.number, pdf.as_ref().clone());
+            }
+        }
+    }
     // The bytes are read and converted with no connection held.
     let source = match crate::server::read_relic(&archive, &relic).await {
         Ok(source) => source,
@@ -266,7 +376,17 @@ async fn export(
                 return no_relic();
             };
             match renderer.render(source.html).await {
-                Ok(pdf) => pdf,
+                Ok(pdf) => {
+                    if pdf.len() <= MAX_CACHED_PDF_BYTES {
+                        state
+                            .relics
+                            .pdfs
+                            .lock()
+                            .await
+                            .insert((source.slug.clone(), source.version), Arc::new(pdf.clone()));
+                    }
+                    pdf
+                }
                 Err(e) => {
                     eprintln!("antumbra-mcp: PDF of relic {slug}: {e}");
                     return problem(StatusCode::BAD_GATEWAY, &format!("could not print it: {e}"));
@@ -274,6 +394,12 @@ async fn export(
             }
         }
     };
+    file(format, &source.slug, source.version, body)
+}
+
+/// `body` as the file an export hands over: named for the relic and version,
+/// never a page this origin runs.
+fn file(format: Format, slug: &str, version: u32, body: Vec<u8>) -> Response {
     (
         [
             (header::CONTENT_TYPE, format.content_type().to_string()),
@@ -281,9 +407,7 @@ async fn export(
                 header::CONTENT_DISPOSITION,
                 // The slug is letters, digits and hyphens: safe as written.
                 format!(
-                    "attachment; filename=\"{}-v{}.{}\"",
-                    source.slug,
-                    source.version,
+                    "attachment; filename=\"{slug}-v{version}.{}\"",
                     format.extension()
                 ),
             ),
@@ -336,22 +460,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_pages_may_frame_the_render_origin_and_nothing_else() {
-        let framed = policy(Some("http://10.0.0.130:8083"));
+    fn the_pages_may_frame_the_render_origin_and_nothing_else() -> anyhow::Result<()> {
+        let framed = policy(Some("http://render.example:8083"));
         assert!(
-            framed.contains("frame-src http://10.0.0.130:8083;"),
+            framed.contains("frame-src http://render.example:8083;"),
             "{framed}"
         );
         assert!(framed.contains("frame-ancestors 'none'"));
         assert!(framed.contains("script-src 'self';"));
         assert!(policy(None).contains("frame-src 'none';"));
+        Ok(())
     }
 
     /// The pages hold nothing the policy would refuse, and load only the
     /// relics script and the dashboard's style, by paths that resolve from
     /// where each page is served.
     #[test]
-    fn the_pages_have_nothing_the_policy_would_refuse() {
+    fn the_pages_have_nothing_the_policy_would_refuse() -> anyhow::Result<()> {
         for (name, page, prefix) in [
             ("relics.html", GALLERY, "dashboard/"),
             ("relic.html", VIEWER, "../dashboard/"),
@@ -376,5 +501,6 @@ mod tests {
                 "{name}"
             );
         }
+        Ok(())
     }
 }

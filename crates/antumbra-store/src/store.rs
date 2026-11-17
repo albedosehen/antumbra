@@ -6,8 +6,9 @@ use serde::de::DeserializeOwned;
 use surql::connection::auth::{DatabaseCredentials, RootCredentials, ScopeCredentials};
 use surql::connection::ConnectionConfig;
 use surql::query::builder::Query;
-use surql::query::crud::query_records;
+use surql::query::crud::{get_record, query_records, upsert_record};
 use surql::types::operators::Operator;
+use surql::types::RecordID;
 use surql::DatabaseClient;
 
 use antumbra_core::{AntumbraError, Result, TenantId, UserId};
@@ -274,6 +275,35 @@ impl Store {
         self.query_rows(&surql, vars).await
     }
 
+    /// Write `row` as the record `key` of `table`, creating or replacing it:
+    /// the one shape of every repository's upsert (the record id, the row as
+    /// JSON, the write, the error mapped), which thirty of them spelled out.
+    pub(crate) async fn put<T: serde::Serialize>(
+        &self,
+        table: &str,
+        key: &str,
+        row: &T,
+    ) -> Result<()> {
+        let rid = RecordID::<()>::new(table, key).map_err(map)?;
+        let data: serde_json::Value = serde_json::to_value(row)?;
+        upsert_record(&self.client, &rid, data).await.map_err(map)?;
+        Ok(())
+    }
+
+    /// The record `key` of `table` as `T`, `None` when there is none: the one
+    /// shape of every repository's point read.
+    pub(crate) async fn get_row<T: DeserializeOwned>(
+        &self,
+        table: &str,
+        key: &str,
+    ) -> Result<Option<T>> {
+        let rid = RecordID::<()>::new(table, key).map_err(map)?;
+        match get_record(&self.client, &rid).await.map_err(map)? {
+            Some(value) => Ok(Some(serde_json::from_value(value)?)),
+            None => Ok(None),
+        }
+    }
+
     /// The rows of a one-statement raw query, with its variables bound, as
     /// `T`: for the queries the builder cannot write.
     pub(crate) async fn query_rows<T: DeserializeOwned>(
@@ -382,7 +412,7 @@ mod tests {
     /// repeating a row.
     #[tokio::test]
     async fn paging_returns_every_row_exactly_once() -> Result<()> {
-        let store = Store::connect_memory(EMBED_DIM).await?;
+        let store = crate::testing::mem_store().await?;
         store
             .client()
             .query(
@@ -426,11 +456,11 @@ mod tests {
             .is_some_and(|kids| kids.iter().any(|kid| reaches_index(kid, index)))
     }
 
-    fn plan_of(answer: &serde_json::Value) -> &serde_json::Value {
+    fn plan_of(answer: &serde_json::Value) -> Result<&serde_json::Value> {
         answer
             .get(0)
             .filter(|v| v.get("operator").is_some())
-            .unwrap_or_else(|| panic!("expected a plan, got {answer}"))
+            .ok_or_else(|| AntumbraError::other(format!("expected a plan, got {answer}")))
     }
 
     /// The recall paths reach their indexes, and the form they used to
@@ -451,30 +481,31 @@ mod tests {
     /// width: the planner resolves the index before it reads the
     /// literal.
     #[tokio::test]
-    async fn every_vector_table_is_reachable_through_its_index() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn every_vector_table_is_reachable_through_its_index() -> Result<()> {
+        let store = crate::testing::mem_store().await?;
 
         for (table, column, index) in VECTOR_TABLES {
             let indexed = format!("SELECT * FROM {table} WHERE {column} <|4,64|> [0] EXPLAIN");
-            let answer = store.client().query(&indexed).await.unwrap();
+            let answer = store.client().query(&indexed).await.map_err(map)?;
             assert!(
-                reaches_index(plan_of(&answer), index),
+                reaches_index(plan_of(&answer)?, index),
                 "{table}.{column} did not reach {index}: {answer}",
             );
 
             let exhaustive =
                 format!("SELECT * FROM {table} WHERE {column} <|4,COSINE|> [0] EXPLAIN");
-            let answer = store.client().query(&exhaustive).await.unwrap();
+            let answer = store.client().query(&exhaustive).await.map_err(map)?;
             assert!(
-                !reaches_index(plan_of(&answer), index),
+                !reaches_index(plan_of(&answer)?, index),
                 "the metric form now reaches {index}, so the reason these repos \
                  render the indexed form has changed: {answer}",
             );
         }
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_db_scoped_connect_refuses_config_credentials() {
+    async fn a_db_scoped_connect_refuses_config_credentials() -> Result<()> {
         // Config credentials would sign the session in at ROOT on connect,
         // silently defeating the point of the database-scoped user.
         let config = ConnectionConfig::builder()
@@ -484,23 +515,25 @@ mod tests {
             .username("root")
             .password("root")
             .build()
-            .unwrap();
+            .map_err(map)?;
         let Err(err) = Store::connect_with_db_user(config, "ctrl", "pw", EMBED_DIM).await else {
-            panic!("config credentials must be refused");
+            return Err(AntumbraError::other("config credentials must be refused"));
         };
         assert!(err.to_string().contains("credential-less"));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn embedded_store_reports_its_dim_and_owner_access_falls_back() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn embedded_store_reports_its_dim_and_owner_access_falls_back() -> Result<()> {
+        let store = crate::testing::mem_store().await?;
         assert_eq!(store.embed_dim(), EMBED_DIM);
         // On an embedded store there are no configured credentials, so owner
         // access (`signin_root`) takes the `invalidate` fallback; anonymous *is*
         // the owner there. Both are no-ops here but must not error.
-        store.signin_root().await.unwrap();
-        store.invalidate().await.unwrap();
+        store.signin_root().await?;
+        store.invalidate().await?;
         // Schema application is idempotent, safe to re-run.
-        store.ensure_schema().await.unwrap();
+        store.ensure_schema().await?;
+        Ok(())
     }
 }

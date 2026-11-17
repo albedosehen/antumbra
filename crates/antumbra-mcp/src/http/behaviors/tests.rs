@@ -18,7 +18,7 @@ fn spec(rule: &str) -> Spec {
 }
 
 #[test]
-fn a_behavior_that_could_never_be_admitted_starts_no_training() {
+fn a_behavior_that_could_never_be_admitted_starts_no_training() -> anyhow::Result<()> {
     // Recorded with three examples, before four were required: training holds
     // none of them out, so the expert would be refused after a GPU pass.
     let mut three = recorded("memory:3", "Rule 3.", Status::Accepted, "everywhere");
@@ -30,6 +30,7 @@ fn a_behavior_that_could_never_be_admitted_starts_no_training() {
     assert_eq!(need(&taught, None, None), Need::Nothing);
     let planned = plan_user(&[three], &[], &Failed::new(), "ws:a", "user:a");
     assert!(planned.iter().all(|p| p.need == Need::Nothing));
+    Ok(())
 }
 
 fn recorded(id: &str, rule: &str, status: Status, scope: &str) -> Memory {
@@ -66,7 +67,7 @@ fn standing(scope: &str, behaviors: &[&str]) -> Expert {
 }
 
 #[test]
-fn a_scope_in_step_needs_nothing_and_one_behind_is_trained() {
+fn a_scope_in_step_needs_nothing_and_one_behind_is_trained() -> anyhow::Result<()> {
     let trained = vec![recorded(
         "memory:t",
         "Rule t.",
@@ -89,10 +90,11 @@ fn a_scope_in_step_needs_nothing_and_one_behind_is_trained() {
         need(&taught, Some(&expert), None),
         Need::Train(fingerprint(&taught))
     );
+    Ok(())
 }
 
 #[test]
-fn a_set_that_failed_is_not_tried_again_until_it_changes() {
+fn a_set_that_failed_is_not_tried_again_until_it_changes() -> anyhow::Result<()> {
     let accepted = vec![recorded(
         "memory:n",
         "Rule n.",
@@ -116,10 +118,11 @@ fn a_set_that_failed_is_not_tried_again_until_it_changes() {
         "a changed rule is a different set"
     );
     assert!(matches!(need(&taught, None, Some(&print)), Need::Train(_)));
+    Ok(())
 }
 
 #[test]
-fn a_set_refused_before_a_restart_is_not_trained_again() {
+fn a_set_refused_before_a_restart_is_not_trained_again() -> anyhow::Result<()> {
     let mut accepted = vec![
         recorded("memory:a", "Rule a.", Status::Accepted, "everywhere"),
         recorded("memory:b", "Rule b.", Status::Accepted, "everywhere"),
@@ -154,10 +157,11 @@ fn a_set_refused_before_a_restart_is_not_trained_again() {
         matches!(planned[0].need, Need::Train(_)),
         "a behavior added since is a new set, trained"
     );
+    Ok(())
 }
 
 #[test]
-fn an_expert_admitted_without_a_behavior_it_missed_is_left_be() {
+fn an_expert_admitted_without_a_behavior_it_missed_is_left_be() -> anyhow::Result<()> {
     let memories = vec![
         recorded("memory:l", "Rule l.", Status::Trained, "everywhere"),
         recorded("memory:m", "Rule m.", Status::Accepted, "everywhere"),
@@ -183,10 +187,11 @@ fn an_expert_admitted_without_a_behavior_it_missed_is_left_be() {
         matches!(need(&taught, Some(&expert), None), Need::Train(_)),
         "a behavior added since is a new set"
     );
+    Ok(())
 }
 
 #[test]
-fn a_set_refused_while_one_missed_behavior_refused_all_is_trained_again() {
+fn a_set_refused_while_one_missed_behavior_refused_all_is_trained_again() -> anyhow::Result<()> {
     // Noted under the earlier rule, when one behavior not learned kept the
     // rest out: today the same set may be admitted.
     let mut accepted = vec![recorded(
@@ -201,10 +206,11 @@ fn a_set_refused_while_one_missed_behavior_refused_all_is_trained_again() {
     ));
     let taught = behavior::learnable(&accepted, "everywhere");
     assert!(matches!(need(&taught, None, None), Need::Train(_)));
+    Ok(())
 }
 
 #[test]
-fn an_expert_with_nothing_left_to_teach_is_dropped() {
+fn an_expert_with_nothing_left_to_teach_is_dropped() -> anyhow::Result<()> {
     let retired = vec![recorded(
         "memory:t",
         "Rule t.",
@@ -215,10 +221,11 @@ fn an_expert_with_nothing_left_to_teach_is_dropped() {
     let expert = standing("everywhere", &["memory:t"]);
     assert_eq!(need(&taught, Some(&expert), None), Need::Drop);
     assert_eq!(need(&taught, None, None), Need::Nothing);
+    Ok(())
 }
 
 #[test]
-fn every_scope_of_a_user_is_planned() {
+fn every_scope_of_a_user_is_planned() -> anyhow::Result<()> {
     let memories = vec![
         recorded("memory:e", "Rule e.", Status::Accepted, "everywhere"),
         recorded("memory:r", "Rule r.", Status::Accepted, "github.com/o/r"),
@@ -237,9 +244,12 @@ fn every_scope_of_a_user_is_planned() {
             ("github.com/o/gone".to_string(), false),
         ]
     );
-    let gone = plan_user(&memories, &experts, &Failed::new(), "ws:a", "user:a")
+    let Some(gone) = plan_user(&memories, &experts, &Failed::new(), "ws:a", "user:a")
         .into_iter()
         .find(|p| p.scope == "github.com/o/gone")
-        .unwrap();
+    else {
+        anyhow::bail!("the scope whose expert has nothing left to teach was not planned");
+    };
     assert_eq!(gone.need, Need::Drop);
+    Ok(())
 }

@@ -1,21 +1,20 @@
 use super::*;
 use crate::repo::{memory_policy, principal};
-use crate::schema::EMBED_DIM;
 use antumbra_core::{MemoryPolicy, UserId};
 
 fn ids(names: &[&str]) -> Vec<MemoryId> {
     names.iter().map(|n| MemoryId::new(*n)).collect()
 }
 
-fn find<'a>(seen: &'a [MemoryUse], id: &str) -> &'a MemoryUse {
+fn find<'a>(seen: &'a [MemoryUse], id: &str) -> anyhow::Result<&'a MemoryUse> {
     seen.iter()
         .find(|u| u.memory.as_str() == id)
-        .unwrap_or_else(|| panic!("{id} not seen"))
+        .ok_or_else(|| anyhow::anyhow!("{id} not seen"))
 }
 
 #[tokio::test]
-async fn counts_start_on_first_sight_and_add_up() -> Result<()> {
-    let s = Store::connect_memory(EMBED_DIM).await?;
+async fn counts_start_on_first_sight_and_add_up() -> anyhow::Result<()> {
+    let s = crate::testing::mem_store().await?;
     let ws = TenantId::new("ws:a");
     let now = Utc::now();
     record(
@@ -39,11 +38,11 @@ async fn counts_start_on_first_sight_and_add_up() -> Result<()> {
 
     let seen = all(&s, &ws).await?;
     assert_eq!(seen.len(), 2);
-    let one = find(&seen, "memory:1");
+    let one = find(&seen, "memory:1")?;
     // A repeated id in one observation counts once.
     assert_eq!((one.recalled, one.judged, one.used), (2, 1, 1));
     assert!(one.last_used_at.is_some() && one.last_recalled_at.is_some());
-    let two = find(&seen, "memory:2");
+    let two = find(&seen, "memory:2")?;
     assert_eq!((two.recalled, two.judged, two.used), (1, 1, 0));
     assert_eq!(two.passed_over(), 1);
     assert!(
@@ -55,7 +54,7 @@ async fn counts_start_on_first_sight_and_add_up() -> Result<()> {
 
 #[tokio::test]
 async fn an_agents_judgment_and_a_restatement_count_as_uses() -> Result<()> {
-    let s = Store::connect_memory(EMBED_DIM).await?;
+    let s = crate::testing::mem_store().await?;
     let ws = TenantId::new("ws:a");
     let now = Utc::now();
     record(&s, &ws, &ids(&["memory:1"]), Seen::GOOD, now).await?;
@@ -75,8 +74,8 @@ async fn an_agents_judgment_and_a_restatement_count_as_uses() -> Result<()> {
 }
 
 #[tokio::test]
-async fn a_workspace_counts_and_reads_only_its_own() -> Result<()> {
-    let s = Store::connect_memory(EMBED_DIM).await?;
+async fn a_workspace_counts_and_reads_only_its_own() -> anyhow::Result<()> {
+    let s = crate::testing::mem_store().await?;
     let a = TenantId::new("ws:a");
     let b = TenantId::new("ws:b");
     let user = UserId::new("user:a");
@@ -101,6 +100,6 @@ async fn a_workspace_counts_and_reads_only_its_own() -> Result<()> {
     let _ = memory_policy::set(&s, &a, &turned).await;
     s.signin_root().await?;
     assert_eq!(memory_policy::get(&s, &a).await?, MemoryPolicy::default());
-    assert_eq!(find(&all(&s, &b).await?, "memory:shared").recalled, 1);
+    assert_eq!(find(&all(&s, &b).await?, "memory:shared")?.recalled, 1);
     Ok(())
 }

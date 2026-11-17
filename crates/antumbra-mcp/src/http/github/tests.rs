@@ -11,7 +11,8 @@ use antumbra_core::{orphan_of, GitProvenance, Memory, MemoryNetwork, TenantId};
 use antumbra_github::sign;
 use antumbra_github::testing::{FakeTransport, APP_PRIVATE_KEY_PEM};
 use antumbra_store::repo::document;
-use antumbra_store::{Store, EMBED_DIM};
+use antumbra_store::testing::mem_store;
+use antumbra_store::EMBED_DIM;
 use axum::http::header;
 use serde_json::json;
 use tower::ServiceExt;
@@ -26,16 +27,16 @@ const MERGE_SHA: &str = "fedcba9876543210fedcba9876543210fedcba98";
 const HEAD_SHA: &str = "1111111111111111111111111111111111111111";
 const API: &str = "https://api.github.com";
 
-async fn state(github: Option<GithubConfig>) -> Arc<HttpState> {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
-    Arc::new(HttpState {
+async fn state(github: Option<GithubConfig>) -> anyhow::Result<Arc<HttpState>> {
+    let store = mem_store().await?;
+    Ok(Arc::new(HttpState {
         serving: Serving::Shared(store.clone()),
         store,
         host: "test".into(),
         verifier: crate::auth::JwtVerifier::hs256(b"test-secret"),
         embedder: Arc::new(FixedEmbedder::new(EMBED_DIM)),
         embedders: Mutex::new(Bounded::new(MAX_EMBEDDERS)),
-        auth: Mutex::new(()),
+        auth: Arc::new(Mutex::new(())),
         auto_propose: None,
         recipe: antumbra_core::behavior::Recipe::default(),
         tune_confidence: false,
@@ -44,26 +45,28 @@ async fn state(github: Option<GithubConfig>) -> Arc<HttpState> {
         decider: None,
         copal: None,
         pdf: None,
+        relics: crate::http::relics::Guards::new(),
         profile: None,
         github: github.map(Arc::new),
+        revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
         registry: crate::notify::PeerRegistry::new(),
         steward: Arc::default(),
-    })
+    }))
 }
 
 fn plain() -> GithubConfig {
     GithubConfig::new(SECRET, RepoMap::all(TENANT))
 }
 
-fn with_app(fake: FakeTransport) -> GithubConfig {
-    plain()
-        .with_app(AppCredentials::new("123", APP_PRIVATE_KEY_PEM).unwrap())
-        .with_api(GithubApi::with_transport(API, Arc::new(fake)))
+fn with_app(fake: FakeTransport) -> anyhow::Result<GithubConfig> {
+    Ok(plain()
+        .with_app(AppCredentials::new("123", APP_PRIVATE_KEY_PEM)?)
+        .with_api(GithubApi::with_transport(API, Arc::new(fake))))
 }
 
-fn delivery(kind: &str, body: &[u8], signature: Option<String>) -> Request<Body> {
+fn delivery(kind: &str, body: &[u8], signature: Option<String>) -> anyhow::Result<Request<Body>> {
     let mut b = Request::builder()
         .method("POST")
         .uri("/github/webhook")
@@ -73,31 +76,27 @@ fn delivery(kind: &str, body: &[u8], signature: Option<String>) -> Request<Body>
     if let Some(s) = signature {
         b = b.header(SIGNATURE_HEADER, s);
     }
-    b.body(Body::from(body.to_vec())).unwrap()
+    Ok(b.body(Body::from(body.to_vec()))?)
 }
 
-fn signed(kind: &str, payload: &serde_json::Value) -> Request<Body> {
-    let body = serde_json::to_vec(payload).unwrap();
+fn signed(kind: &str, payload: &serde_json::Value) -> anyhow::Result<Request<Body>> {
+    let body = serde_json::to_vec(payload)?;
     let signature = sign(SECRET, &body);
     delivery(kind, &body, Some(signature))
 }
 
-async fn outcome(resp: Response) -> Outcome {
+async fn outcome(resp: Response) -> anyhow::Result<Outcome> {
     assert_eq!(resp.status(), StatusCode::OK);
-    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
-        .await
-        .unwrap();
-    serde_json::from_slice(&bytes).unwrap()
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await?;
+    Ok(serde_json::from_slice(&bytes)?)
 }
 
-async fn deliver(st: &Arc<HttpState>, kind: &str, payload: &serde_json::Value) -> Outcome {
-    outcome(
-        router(st.clone())
-            .oneshot(signed(kind, payload))
-            .await
-            .unwrap(),
-    )
-    .await
+async fn deliver(
+    st: &Arc<HttpState>,
+    kind: &str,
+    payload: &serde_json::Value,
+) -> anyhow::Result<Outcome> {
+    outcome(router(st.clone()).oneshot(signed(kind, payload)?).await?).await
 }
 
 fn merged_pr() -> serde_json::Value {
@@ -127,7 +126,7 @@ fn branch_delete(branch: &str) -> serde_json::Value {
     })
 }
 
-async fn seed(state: &HttpState, id: &str, evidence: &str) {
+async fn seed(state: &HttpState, id: &str, evidence: &str) -> anyhow::Result<()> {
     let m = Memory::new(
         id,
         TENANT,
@@ -137,51 +136,51 @@ async fn seed(state: &HttpState, id: &str, evidence: &str) {
         Utc::now(),
     )
     .with_evidence(vec![evidence.to_string()]);
-    memory::upsert(&state.store, &m).await.unwrap();
+    memory::upsert(&state.store, &m).await?;
+    Ok(())
 }
 
-async fn evidence_of(state: &HttpState, id: &str) -> Vec<String> {
-    memory::get(
+async fn evidence_of(state: &HttpState, id: &str) -> anyhow::Result<Vec<String>> {
+    let Some(m) = memory::get(
         &state.store,
         &TenantId::new(TENANT),
         &antumbra_core::MemoryId::new(id),
     )
-    .await
-    .unwrap()
-    .expect("the memory exists")
-    .evidence
+    .await?
+    else {
+        anyhow::bail!("{id} is not in the store");
+    };
+    Ok(m.evidence)
 }
 
 /// Wait for the detached ingest task to land `titles`, or fail.
-async fn wait_for_titles(state: &HttpState, titles: &[&str]) -> Vec<String> {
+async fn wait_for_titles(state: &HttpState, titles: &[&str]) -> anyhow::Result<Vec<String>> {
     let tenant = TenantId::new(TENANT);
     for _ in 0..100 {
-        let have = document::list_titles(&state.store, &tenant).await.unwrap();
+        let have = document::list_titles(&state.store, &tenant).await?;
         if titles.iter().all(|t| have.iter().any(|h| h == t)) {
-            return have;
+            return Ok(have);
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
-    panic!(
+    anyhow::bail!(
         "titles {titles:?} never appeared; have {:?}",
-        document::list_titles(&state.store, &tenant).await.unwrap()
-    );
+        document::list_titles(&state.store, &tenant).await?
+    )
 }
 
 #[tokio::test]
-async fn an_unsigned_or_missigned_delivery_is_unauthorized() {
-    let st = state(Some(plain())).await;
-    let body = serde_json::to_vec(&merged_pr()).unwrap();
+async fn an_unsigned_or_missigned_delivery_is_unauthorized() -> anyhow::Result<()> {
+    let st = state(Some(plain())).await?;
+    let body = serde_json::to_vec(&merged_pr())?;
     let resp = router(st.clone())
-        .oneshot(delivery("pull_request", &body, None))
-        .await
-        .unwrap();
+        .oneshot(delivery("pull_request", &body, None)?)
+        .await?;
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     let forged = sign(b"another secret", &body);
     let resp = router(st.clone())
-        .oneshot(delivery("pull_request", &body, Some(forged)))
-        .await
-        .unwrap();
+        .oneshot(delivery("pull_request", &body, Some(forged))?)
+        .await?;
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     // A tampered body no longer matches its signature.
     let signature = sign(SECRET, &body);
@@ -190,42 +189,42 @@ async fn an_unsigned_or_missigned_delivery_is_unauthorized() {
     let resp = router(st)
         .oneshot(delivery(
             "pull_request",
-            &serde_json::to_vec(&tampered).unwrap(),
+            &serde_json::to_vec(&tampered)?,
             Some(signature),
-        ))
-        .await
-        .unwrap();
+        )?)
+        .await?;
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    Ok(())
 }
 
 #[tokio::test]
-async fn an_unconfigured_receiver_is_not_found() {
-    let st = state(None).await;
+async fn an_unconfigured_receiver_is_not_found() -> anyhow::Result<()> {
+    let st = state(None).await?;
     let resp = router(st)
-        .oneshot(signed("ping", &json!({"zen": "x"})))
-        .await
-        .unwrap();
+        .oneshot(signed("ping", &json!({"zen": "x"}))?)
+        .await?;
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    Ok(())
 }
 
 #[tokio::test]
-async fn a_merge_reanchors_the_branch_and_remembers_the_pull_request() {
-    let st = state(Some(plain())).await;
+async fn a_merge_reanchors_the_branch_and_remembers_the_pull_request() -> anyhow::Result<()> {
+    let st = state(Some(plain())).await?;
     seed(
         &st,
         "memory:feat",
         &format!("git:{REPO}@2222222#feat/outbox:src/orders.rs"),
     )
-    .await;
-    seed(&st, "memory:main", &format!("git:{REPO}@1111111#main")).await;
+    .await?;
+    seed(&st, "memory:main", &format!("git:{REPO}@1111111#main")).await?;
     seed(
         &st,
         "memory:elsewhere",
         "git:github.com/acme/billing@2222222#feat/outbox",
     )
-    .await;
+    .await?;
 
-    let out = deliver(&st, "pull_request", &merged_pr()).await;
+    let out = deliver(&st, "pull_request", &merged_pr()).await?;
     assert_eq!(out.event, "pull_request");
     assert_eq!(out.repo.as_deref(), Some(REPO));
     assert_eq!(out.tenant.as_deref(), Some(TENANT));
@@ -240,81 +239,107 @@ async fn a_merge_reanchors_the_branch_and_remembers_the_pull_request() {
     );
     assert_eq!(out.ignored, None);
 
-    let feat = evidence_of(&st, "memory:feat").await;
-    let anchor = GitProvenance::from_evidence(&feat).unwrap();
+    let feat = evidence_of(&st, "memory:feat").await?;
+    let Some(anchor) = GitProvenance::from_evidence(&feat) else {
+        anyhow::bail!("the moved memory carries no git anchor: {feat:?}");
+    };
     assert_eq!(anchor.commit, MERGE_SHA);
     assert_eq!(anchor.branch.as_deref(), Some("main"));
     assert_eq!(anchor.path.as_deref(), Some("src/orders.rs"));
     assert_eq!(feat.len(), 2, "the old anchor is kept as history");
-    assert_eq!(evidence_of(&st, "memory:main").await.len(), 1);
-    assert_eq!(evidence_of(&st, "memory:elsewhere").await.len(), 1);
+    assert_eq!(evidence_of(&st, "memory:main").await?.len(), 1);
+    assert_eq!(evidence_of(&st, "memory:elsewhere").await?.len(), 1);
 
-    let pr = memory::get(
+    let Some(pr) = memory::get(
         &st.store,
         &TenantId::new(TENANT),
         &antumbra_core::MemoryId::new("memory:github-pr-github-com-acme-orders-42"),
     )
-    .await
-    .unwrap()
-    .expect("the pull request memory");
+    .await?
+    else {
+        anyhow::bail!("the pull request memory was not stored");
+    };
     assert!(pr.content.contains("Pull request #42 merged into main"));
     assert!(pr.embedding.is_some(), "embedded so recall can find it");
     assert_eq!(pr.author.as_ref().map(|u| u.as_str()), Some(SYSTEM_USER));
     assert_eq!(pr.evidence[1], "https://github.com/Acme/Orders/pull/42");
 
     // Redelivery: nothing left to move, the same memory revised in place.
-    let again = deliver(&st, "pull_request", &merged_pr()).await;
+    let again = deliver(&st, "pull_request", &merged_pr()).await?;
     assert_eq!(again.reanchored, 0);
     assert_eq!(again.stored.len(), 1);
-    assert_eq!(evidence_of(&st, "memory:feat").await.len(), 2);
+    assert_eq!(evidence_of(&st, "memory:feat").await?.len(), 2);
+    Ok(())
 }
 
 #[tokio::test]
-async fn a_branch_delete_orphans_its_memories_but_not_reanchored_ones() {
-    let st = state(Some(plain())).await;
+async fn a_branch_delete_orphans_its_memories_but_not_reanchored_ones() -> anyhow::Result<()> {
+    let st = state(Some(plain())).await?;
     seed(
         &st,
         "memory:feat",
         &format!("git:{REPO}@2222222#feat/outbox"),
     )
-    .await;
+    .await?;
     seed(
         &st,
         "memory:other",
         &format!("git:{REPO}@3333333#feat/other"),
     )
-    .await;
+    .await?;
 
     // Merge first (GitHub's delete-after-merge order), then delete.
-    deliver(&st, "pull_request", &merged_pr()).await;
-    let out = deliver(&st, "delete", &branch_delete("feat/outbox")).await;
+    deliver(&st, "pull_request", &merged_pr()).await?;
+    let out = deliver(&st, "delete", &branch_delete("feat/outbox")).await?;
     assert_eq!(out.event, "delete");
     assert_eq!(out.orphaned, 0, "the merge already moved it to main");
-    assert_eq!(orphan_of(&evidence_of(&st, "memory:feat").await), None);
+    assert_eq!(orphan_of(&evidence_of(&st, "memory:feat").await?), None);
 
-    let out = deliver(&st, "delete", &branch_delete("feat/other")).await;
+    let out = deliver(&st, "delete", &branch_delete("feat/other")).await?;
     assert_eq!(out.orphaned, 1);
-    let other = evidence_of(&st, "memory:other").await;
+    let other = evidence_of(&st, "memory:other").await?;
     assert_eq!(
         orphan_of(&other).map(|o| o.branch),
         Some("feat/other".to_string())
     );
     // Redelivery is a no-op.
-    let out = deliver(&st, "delete", &branch_delete("feat/other")).await;
+    let out = deliver(&st, "delete", &branch_delete("feat/other")).await?;
     assert_eq!(out.orphaned, 0);
+    Ok(())
+}
+
+// A merge commit that is not a commit sha, as only a sender holding the webhook
+// secret could send one, is reported as ignored: never sliced, never fetched.
+#[tokio::test]
+async fn a_merge_with_a_non_hex_sha_is_ignored() -> anyhow::Result<()> {
+    let st = state(Some(plain())).await?;
+    for odd in ["ééééééé", "not-a-sha", "abc"] {
+        let mut pr = merged_pr();
+        pr["pull_request"]["merge_commit_sha"] = json!(odd);
+        let out = deliver(&st, "pull_request", &pr).await?;
+        anyhow::ensure!(out.reanchored == 0 && out.stored.is_empty(), "{odd:?}");
+        anyhow::ensure!(
+            out.ignored
+                .as_deref()
+                .is_some_and(|why| why.contains("commit sha")),
+            "{odd:?}: {:?}",
+            out.ignored
+        );
+    }
+    Ok(())
 }
 
 #[tokio::test]
-async fn pings_unhandled_events_and_unmapped_repositories_are_acknowledged() {
-    let repos = RepoMap::from_json(r#"{"github.com/acme/billing": "ws:acme"}"#).unwrap();
-    let st = state(Some(GithubConfig::new(SECRET, repos))).await;
-    let out = deliver(&st, "ping", &json!({"zen": "Keep it logically awesome."})).await;
+async fn pings_unhandled_events_and_unmapped_repositories_are_acknowledged() -> anyhow::Result<()> {
+    let repos = RepoMap::from_json(r#"{"github.com/acme/billing": "ws:acme"}"#)?;
+    let st = state(Some(GithubConfig::new(SECRET, repos))).await?;
+    let out = deliver(&st, "ping", &json!({"zen": "Keep it logically awesome."})).await?;
     assert_eq!(out.ignored.as_deref(), Some("pong"));
-    let out = deliver(&st, "issues", &json!({"action": "opened"})).await;
+    let out = deliver(&st, "issues", &json!({"action": "opened"})).await?;
     assert_eq!(out.event, "issues");
     assert!(out.ignored.is_some());
     // The orders repository is not in the map: acknowledged, untouched.
-    let out = deliver(&st, "pull_request", &merged_pr()).await;
+    let out = deliver(&st, "pull_request", &merged_pr()).await?;
     assert_eq!(out.reanchored, 0);
     assert!(out.stored.is_empty());
     assert_eq!(
@@ -324,14 +349,14 @@ async fn pings_unhandled_events_and_unmapped_repositories_are_acknowledged() {
     // A close without a merge, and a tag deletion, do nothing.
     let mut closed = merged_pr();
     closed["pull_request"]["merged"] = json!(false);
-    let out = deliver(&st, "pull_request", &closed).await;
+    let out = deliver(&st, "pull_request", &closed).await?;
     assert_eq!(
         out.ignored.as_deref(),
         Some("action 'closed' is not a merge")
     );
     let mut tag = branch_delete("v1");
     tag["ref_type"] = json!("tag");
-    let out = deliver(&st, "delete", &tag).await;
+    let out = deliver(&st, "delete", &tag).await?;
     assert_eq!(
         out.ignored.as_deref(),
         Some("a deleted tag orphans nothing")
@@ -343,22 +368,21 @@ async fn pings_unhandled_events_and_unmapped_repositories_are_acknowledged() {
         &json!({"action": "created", "installation": {"id": 77},
                 "repositories": [{"full_name": "Acme/Billing"}]}),
     )
-    .await;
+    .await?;
     assert_eq!(out.ingest_queued, 0);
-    assert!(out
-        .ignored
-        .as_deref()
-        .unwrap()
-        .contains("no App credentials"));
+    let Some(why) = out.ignored.as_deref() else {
+        anyhow::bail!("an installation without App credentials was not reported as ignored");
+    };
+    assert!(why.contains("no App credentials"));
     // Garbage that verifies is still the sender's fault.
     let body = b"not json".to_vec();
     let signature = sign(SECRET, &body);
-    let st = state(Some(plain())).await;
+    let st = state(Some(plain())).await?;
     let resp = router(st)
-        .oneshot(delivery("pull_request", &body, Some(signature)))
-        .await
-        .unwrap();
+        .oneshot(delivery("pull_request", &body, Some(signature))?)
+        .await?;
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    Ok(())
 }
 
 fn token_route(fake: FakeTransport) -> FakeTransport {
@@ -421,7 +445,7 @@ async fn a_merge_ingests_the_changed_documents_at_the_merge_commit() -> anyhow::
             200,
             "# Orders\n\nOrders are written through an outbox.\n",
         );
-    let st = state(Some(with_app(fake))).await;
+    let st = state(Some(with_app(fake)?)).await?;
     // What earlier ingests left behind: this repository's README and the
     // document that is about to be renamed, and ANOTHER repository's README in
     // the same workspace, which this merge has no business touching.
@@ -432,11 +456,11 @@ async fn a_merge_ingests_the_changed_documents_at_the_merge_commit() -> anyhow::
     seed_document(&st, &delivery, "parcels leave at noon").await?;
     seed_document(&st, other_readme, "billing readme").await?;
 
-    let out = deliver(&st, "pull_request", &merged_pr()).await;
+    let out = deliver(&st, "pull_request", &merged_pr()).await?;
     assert_eq!(out.ingest_queued, 3, "three documents survived the filter");
     let orders = format!("{REPO}:docs/orders.md");
     let shipping = format!("{REPO}:docs/shipping.md");
-    let titles = wait_for_titles(&st, &[&orders, &shipping]).await;
+    let titles = wait_for_titles(&st, &[&orders, &shipping]).await?;
     assert_eq!(
         titles,
         vec![other_readme.to_string(), orders.clone(), shipping.clone(),],
@@ -472,7 +496,7 @@ async fn a_merge_ingests_the_changed_documents_at_the_merge_commit() -> anyhow::
 /// Installing the App on a repository cold-starts it: every knowledge
 /// document at the head of the default branch is ingested.
 #[tokio::test]
-async fn an_installation_cold_starts_the_repository() {
+async fn an_installation_cold_starts_the_repository() -> anyhow::Result<()> {
     let fake = token_route(FakeTransport::new())
         .json(
             "GET",
@@ -512,18 +536,18 @@ async fn an_installation_cold_starts_the_repository() {
         );
     // An explicit map: the second repository the installation names is not
     // in it, and an unmapped repository is reported, never read.
-    let repos = RepoMap::from_json(r#"{"github.com/acme/orders": "ws:acme"}"#).unwrap();
+    let repos = RepoMap::from_json(r#"{"github.com/acme/orders": "ws:acme"}"#)?;
     let cfg = GithubConfig::new(SECRET, repos)
-        .with_app(AppCredentials::new("123", APP_PRIVATE_KEY_PEM).unwrap())
+        .with_app(AppCredentials::new("123", APP_PRIVATE_KEY_PEM)?)
         .with_api(GithubApi::with_transport(API, Arc::new(fake)));
-    let st = state(Some(cfg)).await;
+    let st = state(Some(cfg)).await?;
     let out = deliver(
         &st,
         "installation",
         &json!({"action": "created", "installation": {"id": 77},
                 "repositories": [{"full_name": FULL}, {"full_name": "Other/Unmapped"}]}),
     )
-    .await;
+    .await?;
     assert_eq!(out.event, "installation");
     assert_eq!(out.ingest_queued, 2);
     assert_eq!(
@@ -537,28 +561,33 @@ async fn an_installation_cold_starts_the_repository() {
             &format!("{REPO}:docs/adr/0001-outbox.md"),
         ],
     )
-    .await;
+    .await?;
     assert_eq!(titles.len(), 2);
     let embedder = FixedEmbedder::new(EMBED_DIM);
     let hits = document::recall(
         &st.store,
         &TenantId::new(TENANT),
-        &embedder.embed("ADR outbox").await.unwrap(),
+        &embedder.embed("ADR outbox").await?,
         5,
     )
-    .await
-    .unwrap();
-    assert!(hits
-        .iter()
-        .any(|h| h.source.as_deref().unwrap().ends_with(&format!(
-            "git:{REPO}@{HEAD_SHA}#main:docs/adr/0001-outbox.md"
-        ))));
+    .await?;
+    let mut sources = Vec::with_capacity(hits.len());
+    for h in &hits {
+        let Some(source) = h.source.as_deref() else {
+            anyhow::bail!("a recalled chunk of `{}` carries no source", h.title);
+        };
+        sources.push(source);
+    }
+    assert!(sources.iter().any(|source| source.ends_with(&format!(
+        "git:{REPO}@{HEAD_SHA}#main:docs/adr/0001-outbox.md"
+    ))));
+    Ok(())
 }
 
 /// The planner and the runner, directly: a size cap and a read error are
 /// per-document outcomes, and the token is minted once per installation.
 #[tokio::test]
-async fn the_runner_reports_per_document_and_reuses_the_token() {
+async fn the_runner_reports_per_document_and_reuses_the_token() -> anyhow::Result<()> {
     let big = "x".repeat(antumbra_github::MAX_DOCUMENT_BYTES + 1);
     let fake = token_route(FakeTransport::new())
         .route(
@@ -581,15 +610,19 @@ async fn the_runner_reports_per_document_and_reuses_the_token() {
         );
     let fake = Arc::new(fake);
     let cfg = plain()
-        .with_app(AppCredentials::new("123", APP_PRIVATE_KEY_PEM).unwrap())
+        .with_app(AppCredentials::new("123", APP_PRIVATE_KEY_PEM)?)
         .with_api(GithubApi::with_transport(API, fake.clone()));
-    let st = state(Some(cfg)).await;
-    let cfg = st.github.as_ref().unwrap();
-    let token = cfg.installation_token(77).await.unwrap().unwrap();
+    let st = state(Some(cfg)).await?;
+    let Some(cfg) = st.github.as_ref() else {
+        anyhow::bail!("the state carries no GitHub configuration");
+    };
+    let Some(token) = cfg.installation_token(77).await? else {
+        anyhow::bail!("App credentials were configured, but no token was minted");
+    };
     assert_eq!(token, "ghs_test");
     assert_eq!(
-        cfg.installation_token(77).await.unwrap().unwrap(),
-        "ghs_test"
+        cfg.installation_token(77).await?.as_deref(),
+        Some("ghs_test")
     );
     assert_eq!(
         fake.calls()
@@ -625,10 +658,11 @@ async fn the_runner_reports_per_document_and_reuses_the_token() {
     assert_eq!(report.failed.len(), 1);
     assert_eq!(report.failed[0].0, "docs/forbidden.md");
     assert!(report.failed[0].1.contains("403"), "{}", report.failed[0].1);
+    Ok(())
 }
 
 #[test]
-fn from_flags_requires_matching_halves() {
+fn from_flags_requires_matching_halves() -> anyhow::Result<()> {
     let none = |secret: Option<&str>, tenant: Option<&str>, app: Option<&str>| {
         GithubConfig::from_flags(
             secret.map(str::to_string),
@@ -639,14 +673,22 @@ fn from_flags_requires_matching_halves() {
             DEFAULT_API_URL,
         )
     };
-    assert!(none(None, None, None).unwrap().is_none());
-    let err = none(Some("s"), None, None).unwrap_err();
+    assert!(none(None, None, None)?.is_none());
+    let Err(err) = none(Some("s"), None, None) else {
+        anyhow::bail!("a secret without a tenant was accepted");
+    };
     assert!(err.to_string().contains("--github-tenant"), "{err}");
-    let err = none(None, Some("ws:x"), None).unwrap_err();
+    let Err(err) = none(None, Some("ws:x"), None) else {
+        anyhow::bail!("a tenant without a secret was accepted");
+    };
     assert!(err.to_string().contains("--github-webhook-secret"), "{err}");
-    let err = none(Some("s"), Some("ws:x"), Some("123")).unwrap_err();
+    let Err(err) = none(Some("s"), Some("ws:x"), Some("123")) else {
+        anyhow::bail!("an App id without its key was accepted");
+    };
     assert!(err.to_string().contains("go together"), "{err}");
-    let cfg = none(Some("s"), Some(" ws:x "), None).unwrap().unwrap();
+    let Some(cfg) = none(Some("s"), Some(" ws:x "), None)? else {
+        anyhow::bail!("a secret and a tenant configured nothing");
+    };
     assert!(!cfg.reads_contents());
     assert_eq!(
         cfg.repos.tenant_for("github.com/a/b").map(|t| t.as_str()),
@@ -655,46 +697,50 @@ fn from_flags_requires_matching_halves() {
 
     let dir = std::env::temp_dir();
     let map = dir.join(format!("antumbra-github-repos-{}.json", std::process::id()));
-    std::fs::write(&map, r#"{"github.com/acme/orders": "ws:acme"}"#).unwrap();
+    std::fs::write(&map, r#"{"github.com/acme/orders": "ws:acme"}"#)?;
     let key = dir.join(format!("antumbra-github-key-{}.pem", std::process::id()));
-    std::fs::write(&key, APP_PRIVATE_KEY_PEM).unwrap();
-    let cfg = GithubConfig::from_flags(
+    std::fs::write(&key, APP_PRIVATE_KEY_PEM)?;
+    let Some(cfg) = GithubConfig::from_flags(
         Some("s".into()),
         None,
         Some(&map),
         Some("123".into()),
         Some(&key),
         "https://ghe.acme.internal/api/v3/",
-    )
-    .unwrap()
-    .unwrap();
+    )?
+    else {
+        anyhow::bail!("a repository map and an App key configured nothing");
+    };
     assert!(cfg.reads_contents());
     assert_eq!(cfg.repos.mapped(), Some(1));
     assert_eq!(cfg.api().web_host(), "ghe.acme.internal");
     assert!(!format!("{cfg:?}").contains("PRIVATE"), "{cfg:?}");
-    let err = GithubConfig::from_flags(
+    let Err(err) = GithubConfig::from_flags(
         Some("s".into()),
         Some("ws:x".into()),
         Some(&map),
         None,
         None,
         DEFAULT_API_URL,
-    )
-    .unwrap_err();
+    ) else {
+        anyhow::bail!("a tenant and a repository map together were accepted");
+    };
     assert!(err.to_string().contains("not both"), "{err}");
     std::fs::remove_file(map).ok();
     std::fs::remove_file(key).ok();
     let missing = dir.join("antumbra-github-repos-missing.json");
-    let err = GithubConfig::from_flags(
+    let Err(err) = GithubConfig::from_flags(
         Some("s".into()),
         None,
         Some(&missing),
         None,
         None,
         DEFAULT_API_URL,
-    )
-    .unwrap_err();
+    ) else {
+        anyhow::bail!("a repository map that cannot be read was accepted");
+    };
     assert!(err.to_string().contains("cannot read"), "{err}");
+    Ok(())
 }
 
 fn opened_pr() -> serde_json::Value {
@@ -725,25 +771,25 @@ async fn an_opened_pull_request_gets_a_knowledge_diff() -> anyhow::Result<()> {
             .json("POST", &checks, 201, &json!({"id": 1})),
     );
     let cfg = plain()
-        .with_app(AppCredentials::new("123", APP_PRIVATE_KEY_PEM).unwrap())
+        .with_app(AppCredentials::new("123", APP_PRIVATE_KEY_PEM)?)
         .with_api(GithubApi::with_transport(API, fake.clone()))
         .with_knowledge_diff(true);
-    let st = state(Some(cfg)).await;
+    let st = state(Some(cfg)).await?;
     seed(
         &st,
         "memory:orders",
         &format!("git:{REPO}@abc1234#main:src/orders.rs"),
     )
-    .await;
+    .await?;
     seed(
         &st,
         "memory:outbox",
         &format!("git:{REPO}@abc1234#feat/outbox"),
     )
-    .await;
+    .await?;
     seed_document(&st, &format!("{REPO}:docs/orders.md"), "orders doc").await?;
 
-    let out = deliver(&st, "pull_request", &opened_pr()).await;
+    let out = deliver(&st, "pull_request", &opened_pr()).await?;
     assert!(out.knowledge_diff_queued, "{:?}", out.ignored);
     assert_eq!(out.reanchored, 0, "an open pull request moves nothing");
     let mut posted = false;
@@ -756,8 +802,8 @@ async fn an_opened_pull_request_gets_a_knowledge_diff() -> anyhow::Result<()> {
     }
     assert!(posted, "no check run was posted: {:?}", fake.calls());
 
-    let off = state(Some(plain())).await;
-    let out = deliver(&off, "pull_request", &opened_pr()).await;
+    let off = state(Some(plain())).await?;
+    let out = deliver(&off, "pull_request", &opened_pr()).await?;
     assert!(!out.knowledge_diff_queued);
     assert_eq!(
         out.ignored.as_deref(),

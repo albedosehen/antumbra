@@ -2,7 +2,6 @@
 //! changes what it names and reports an absent target instead of inventing one.
 
 use super::*;
-use crate::schema::EMBED_DIM;
 use antumbra_core::{
     EdgeType, Expert, FailureBoundary, Generation, GenerationHead, Memory, MemoryEdge, MemoryId,
     MemoryNetwork, MemoryPolicy, RunId, Shadow,
@@ -50,7 +49,7 @@ fn boundary(id: &str) -> FailureBoundary {
 }
 
 async fn seeded() -> Result<Store> {
-    let s = Store::connect_memory(EMBED_DIM).await?;
+    let s = crate::testing::mem_store().await?;
     expert::insert(&s, &expert("expert:a")).await?;
     shadow::upsert(
         &s,
@@ -102,7 +101,7 @@ async fn everything_reads_both_parts_and_marks_an_operator() -> Result<()> {
 }
 
 #[tokio::test]
-async fn each_action_changes_what_it_names() -> Result<()> {
+async fn each_action_changes_what_it_names() -> anyhow::Result<()> {
     let s = seeded().await?;
     let shadow_id = ShadowId::new("shadow:a");
     let expert_id = ExpertId::new("expert:a");
@@ -118,7 +117,9 @@ async fn each_action_changes_what_it_names() -> Result<()> {
         )
         .await?
     );
-    let graduated = shadow::get(&s, &shadow_id).await?.expect("kept");
+    let Some(graduated) = shadow::get(&s, &shadow_id).await? else {
+        anyhow::bail!("the graduated shadow is kept");
+    };
     assert_eq!(graduated.status, ShadowStatus::Graduated);
     assert!(
         apply(
@@ -130,7 +131,9 @@ async fn each_action_changes_what_it_names() -> Result<()> {
         )
         .await?
     );
-    let pruned = shadow::get(&s, &shadow_id).await?.expect("kept");
+    let Some(pruned) = shadow::get(&s, &shadow_id).await? else {
+        anyhow::bail!("the pruned shadow is kept");
+    };
     assert_eq!(pruned.status, ShadowStatus::Pruned);
 
     assert!(
@@ -143,11 +146,10 @@ async fn each_action_changes_what_it_names() -> Result<()> {
         )
         .await?
     );
-    assert!(expert::get(&s, &expert_id)
-        .await?
-        .expect("kept")
-        .frozen_at
-        .is_some());
+    let Some(frozen) = expert::get(&s, &expert_id).await? else {
+        anyhow::bail!("the frozen expert is kept");
+    };
+    assert!(frozen.frozen_at.is_some());
     assert!(
         apply(
             &s,
@@ -158,11 +160,10 @@ async fn each_action_changes_what_it_names() -> Result<()> {
         )
         .await?
     );
-    assert!(expert::get(&s, &expert_id)
-        .await?
-        .expect("kept")
-        .frozen_at
-        .is_none());
+    let Some(thawed) = expert::get(&s, &expert_id).await? else {
+        anyhow::bail!("the thawed expert is kept");
+    };
+    assert!(thawed.frozen_at.is_none());
 
     assert!(apply(&s, &ws(), &Action::HaltLoop { run: run.clone() }).await?);
     assert!(everything(&s, &ws()).await?.loop_halt_pending);

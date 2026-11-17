@@ -90,9 +90,9 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "ammonia"
-version = "4.2.4"
+version = "4.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f45dfa685e1ec33b1bf1a3b93b8047cbdbef41b6040deebbe6bea7720a45574"
+checksum = "b34ca49e407c06daac53f0c4debe8ff5df9cc2a4e9369d164a5d86ef8c219319"
 dependencies = [
  "cssparser",
  "html5ever",
@@ -170,8 +170,10 @@ name = "antumbra-auth"
 version = "0.2.7"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "jsonwebtoken 11.0.0",
  "serde",
+ "serde_json",
  "uuid",
 ]
 
@@ -203,12 +205,14 @@ dependencies = [
 name = "antumbra-cli"
 version = "0.2.7"
 dependencies = [
+ "antumbra-auth",
  "antumbra-boundary",
  "antumbra-copal",
  "antumbra-core",
  "antumbra-critic",
  "antumbra-embed",
  "antumbra-gate",
+ "antumbra-http",
  "antumbra-ingest",
  "antumbra-loop",
  "antumbra-serve",
@@ -246,6 +250,9 @@ name = "antumbra-copal"
 version = "0.2.7"
 dependencies = [
  "antumbra-core",
+ "antumbra-http",
+ "anyhow",
+ "clap",
  "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.20",
@@ -257,6 +264,7 @@ dependencies = [
 name = "antumbra-core"
 version = "0.2.7"
 dependencies = [
+ "anyhow",
  "async-trait",
  "chrono",
  "fancy-regex 0.17.0",
@@ -283,6 +291,7 @@ name = "antumbra-eclipse"
 version = "0.2.7"
 dependencies = [
  "antumbra-core",
+ "anyhow",
  "serde",
  "serde_json",
 ]
@@ -292,8 +301,11 @@ name = "antumbra-embed"
 version = "0.2.7"
 dependencies = [
  "antumbra-core",
+ "antumbra-http",
  "antumbra-store",
+ "anyhow",
  "async-trait",
+ "clap",
  "serde_json",
  "tokio",
  "ureq",
@@ -304,6 +316,7 @@ name = "antumbra-gate"
 version = "0.2.7"
 dependencies = [
  "antumbra-core",
+ "anyhow",
  "chrono",
  "serde_json",
 ]
@@ -313,6 +326,8 @@ name = "antumbra-github"
 version = "0.2.7"
 dependencies = [
  "antumbra-core",
+ "antumbra-http",
+ "anyhow",
  "chrono",
  "hex",
  "hmac",
@@ -322,6 +337,16 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.20",
  "tokio",
+ "ureq",
+]
+
+[[package]]
+name = "antumbra-http"
+version = "0.2.7"
+dependencies = [
+ "antumbra-core",
+ "anyhow",
+ "serde_json",
  "ureq",
 ]
 
@@ -364,6 +389,7 @@ dependencies = [
  "antumbra-core",
  "antumbra-embed",
  "antumbra-github",
+ "antumbra-http",
  "antumbra-ingest",
  "antumbra-rerank",
  "antumbra-serve",
@@ -397,6 +423,8 @@ name = "antumbra-rerank"
 version = "0.2.7"
 dependencies = [
  "antumbra-core",
+ "antumbra-http",
+ "anyhow",
  "async-trait",
  "serde_json",
  "tokio",
@@ -412,6 +440,7 @@ dependencies = [
  "antumbra-critic",
  "antumbra-store",
  "antumbra-train",
+ "anyhow",
  "async-trait",
  "candle-core",
  "candle-nn",
@@ -420,6 +449,7 @@ dependencies = [
  "hf-hub",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "tokenizers",
  "tokio",
 ]
@@ -431,8 +461,11 @@ dependencies = [
  "antumbra-boundary",
  "antumbra-core",
  "antumbra-gate",
+ "antumbra-store",
+ "anyhow",
  "async-trait",
  "chrono",
+ "clap",
  "futures",
  "oneiriq-surql",
  "serde",
@@ -479,7 +512,9 @@ name = "antumbra-tui"
 version = "0.2.7"
 dependencies = [
  "ab_glyph",
+ "antumbra-auth",
  "antumbra-core",
+ "antumbra-http",
  "antumbra-store",
  "anyhow",
  "base64 0.22.1",
@@ -1313,7 +1348,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2239,7 +2274,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3365,7 +3400,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -5446,16 +5481,16 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.5.15"
+version = "0.5.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35a133f956daabe89a61a685c2649f13d82d5aa4bd5d12d1277e1072a21c0694"
+checksum = "af66907df18639dcf4db56ca65490cabc4b27a97dbadd96f2926cca73298f016"
 dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6076,9 +6111,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "3.1.4"
+version = "3.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a15bc53261a9dc37e105df006e4656c598379a8f9581f8950debb130f27a7cf"
+checksum = "b5949e504d5ab9944a168259afc0c39ac0230627b6ec5367ace194c59bcbe163"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -6089,6 +6124,7 @@ dependencies = [
  "http-body",
  "http-body-util",
  "indexmap",
+ "libc",
  "pastey",
  "pin-project-lite",
  "rand 0.10.2",
@@ -6096,6 +6132,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "sse-stream",
  "thiserror 2.0.20",
  "tokio",
@@ -6108,9 +6145,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp-macros"
-version = "3.1.4"
+version = "3.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a85d45508e9b4ba024fe996c2638799635d75b6dd0ba8f32ccf08f8026f0c780"
+checksum = "b98a686693ee91b665c6f89f182fca6e141c8a63dc113b11b38c1bf3491606b7"
 dependencies = [
  "darling 0.24.1",
  "proc-macro2",
@@ -6300,7 +6337,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6359,7 +6396,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6532,7 +6569,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7847,10 +7884,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -9097,7 +9134,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

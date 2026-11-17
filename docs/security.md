@@ -21,9 +21,9 @@ Isolation is **engine-enforced**, defense-in-depth:
 
 ### Networked MCP
 
-- Per-request **JWT** verification before any DB access; `exp` is **mandatory** (a non-expiring token is a standing key). HS256 (shared secret, self-hosted) or RS256 (against an auth service). Audience is required so a token minted for another verifier is rejected.
+- Per-request **JWT** verification before any DB access; `exp` is **mandatory** (a non-expiring token is a standing key). HS256 (shared secret, self-hosted) or RS256 (against an auth service). The audience check is **deployment-dependent**: a server started with `--jwt-audience` rejects a token minted for another verifier, and the hosted control plane always mints one (the compose stack passes the flag); a self-hosted server started without the flag verifies no audience, so a token minted for another of your servers with the same key is accepted there. Set it wherever two verifiers share a key.
 - The verified token **is** the identity; there is no token→identity table, so a leaked token grants exactly its claimed `(tenant, user)` scope and nothing more.
-- Each request signs the shared connection in as its identity, serialized by an auth lock: no session reuse or confused-deputy across tenants.
+- On an embedded store, where every identity shares one connection, each **tool call** signs the connection in as its identity under an auth lock and holds the lock until the tool returns. The signin travels with the call, not with the HTTP request that carried it, because a call over `/mcp` runs after that request is answered. A remote deployment gives each identity its own signed-in connection and holds no lock on the hot path.
 
 ## Trust boundaries / operator-supplied inputs
 
@@ -31,20 +31,31 @@ Isolation is **engine-enforced**, defense-in-depth:
   - explicit args (no shell), so there is no shell-string injection. If you ever run corpora from a shared/community source, sandbox the verifier and/or allowlist the program first.
 - **Embeddings endpoint** (`antumbra-embed`): the URL and bearer key are operator-configured (`--embedder-url` / `ANTUMBRA_EMBEDDER_URL` / `ANTUMBRA_EMBEDDER_KEY`), never derived from tenant or stored data, so not an SSRF sink. If a future feature lets a request choose the URL, validate it against localhost/private ranges first.
 - **The console's routes** (`/console/snapshot`, `/console/action`): the snapshot's workspace part is read on the caller's scoped connection, so the engine's permissions confine it as they do every tool. Its substrate part and every action are read and written as the owner, and only for a token carrying the `operator` claim, checked on each request; the claim rides beside the identity rather than in it, so the per-identity caches never mix an operator's session with a plain one. Only the self-hosted HS256 mint writes the claim (`--mint-token --operator`); the hosted RS256 mint never does, and a token minted before the claim existed reads as not an operator's. Each action is written to the server's stderr with the identity that took it.
+- **The PDF renderer** (`--pdf-renderer`, a Gotenberg service): headless Chromium beside the server, which fetches what a relic's page references while it prints. It must be started with `--chromium-deny-private-ips=true`, as the compose profile starts it, so a relic cannot reach the network the server sits on; and before every print the server replaces a reference to a private, loopback or link-local address, literal or resolved, with `about:blank`, so that holds where the renderer was started otherwise.
 - **Artifact paths**: the loop's regression fingerprint reads `adapter_uri` from disk; the URI is trainer-/operator-derived and the run-id-derived filename is sanitised. On a missing file it now falls back to a digest **of the uri** (deterministic, distinct per adapter) rather than echoing the raw path.
 
 ## Secrets handling
 
-- The DB root credentials, the JWT signing secret, and the embeddings bearer key are **operator-configured** (env/CLI) and never persisted to the store.
-- No secret-bearing struct derives a leaky `Debug`: `HttpEmbedder` has no `Debug` impl; the JWT `TokenVerifier` holds an opaque `DecodingKey`; `AuthError` is deliberately coarse so wire responses don't leak detail. The signing secret is used transiently (`&[u8]`).
+- The DB root credentials, the JWT signing secret, and the server default embedder's bearer key are **operator-configured** (env/CLI) and never persisted to the store. The one secret the store holds is a workspace's own embedder key (`embedder_config.api_key`, set by the operator's CLI for a hosted workspace that brings its own endpoint): its row is readable and writable by the owner view alone, never by a member's record session.
+- No secret-bearing struct derives a leaky `Debug`: `HttpEmbedder` has no `Debug` impl; `EmbedderConfig`'s hand-written `Debug` says whether a key is set and never what it is; the JWT `TokenVerifier` holds an opaque `DecodingKey`; `AuthError` is deliberately coarse so wire responses don't leak detail. The signing secret is used transiently (`&[u8]`).
 - Error messages carry only non-secret context (e.g. the embeddings URL, never the key, which rides the `Authorization` header).
 
 ## SurrealQL injection
 
-None. Every query goes through the surql-rs builders / `crud` helpers; there is **no hand-authored, string-interpolated SurrealQL** anywhere in antumbra's code (the only exception is the schema `PERMISSIONS` predicates, which are static and contain no user input).
+No value that comes from a request, a tenant or a stored row is ever interpolated into a statement. Most queries go through the surql-rs builders and `crud` helpers. A handful of statements are hand-authored where the builders cannot express them: the dense and full-text recall queries (`antumbra-store/src/repo/memory.rs`, `repo/memory_chunk.rs`, `lexical.rs`), the keyed reads (`store.rs`), the sync reads and the schema's `PERMISSIONS` predicates. What they interpolate is static: table and field names from the code, projection lists the code assembles, and integers the code has already clamped (a page size, a `LIMIT`, a search effort). Every caller-supplied value in them (a key, a tenant, a query vector, the search terms) is bound as a `$variable`, never spliced into the text. A reviewer can find them all with `grep -rn 'format!(' crates/antumbra-store/src | grep -i 'select\|from'`.
+
+## What the operator must configure
+
+The controls above hold for every deployment. These hold only where the operator sets them:
+
+- **The audience** (`antumbra-mcp --jwt-audience`): without it a self-hosted verifier accepts a token minted for any audience under the same key. The compose stack and the hosted mint set it.
+- **HTTPS in front of the networked server**: the server speaks plain HTTP; a token on a cleartext network is a token in the open. `antumbra setup check` reports a cleartext address, and `setup` records an explicit `--allow-http` when one was accepted on purpose.
+- **The PDF renderer's private-address deny list** (`--chromium-deny-private-ips=true` on the Gotenberg service, as the compose profile starts it): the server's own replacement of private references is the second layer, not the first.
+- **The control plane's mail**: a hosted control plane needs real SMTP (`SMTP_HOST`/`PORT`/`USER`/`PASS`/`FROM`) for its sign-in links; `--dev-mailer`, which writes the links to its log, is for a developer's machine only and is refused unless asked for by name.
+- **Secrets from files** where the deployment can mount them (`--jwt-secret-file`, `--db-pass-file`, `--github-webhook-secret-file`, `--magic-secret-file`): an inline flag or an environment variable is readable by whoever can inspect the process or the container.
 
 ## Operational recommendations
 
-- Mint short-TTL, scope-bound JWTs for sensitive tenants; rotate the RS256 key at the auth service and restart to revoke.
+- Tokens are short-lived by default: a hosted token lives seven days (`antumbra-control-server --token-ttl-days`), a hook token a year (`antumbra-mcp --mint-token --token-ttl-days`). `antumbra revoke-token` (the token saved on this machine, `--token-file`, or `--jti`) ends one before then: its id goes on the store's `revoked_token` list, and every networked server refuses it within thirty seconds. Rotating the RS256 key at the auth service still ends every token at once. `antumbra setup check` says when the saved token is about to expire.
 - Only run `--corpus` files you trust (they are executable config); sandbox the verifier if a corpus may come from an untrusted source.
 - Keep the embeddings endpoint operator-controlled; if it ever becomes request-selectable, add egress validation.

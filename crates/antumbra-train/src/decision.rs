@@ -85,41 +85,42 @@ mod tests {
     const ENCODER_DIM: usize = 8;
     const HIDDEN: usize = 16;
 
-    fn head(answers: usize, dev: &Device) -> (DecisionHead, VarMap) {
+    fn head(answers: usize, dev: &Device) -> Result<(DecisionHead, VarMap)> {
         let varmap = VarMap::new();
         let vb = VarBuilder::from_varmap(&varmap, DType::F32, dev);
-        let h = DecisionHead::new(ENCODER_DIM, HIDDEN, answers, vb).unwrap();
-        (h, varmap)
+        let h = DecisionHead::new(ENCODER_DIM, HIDDEN, answers, vb)?;
+        Ok((h, varmap))
     }
 
     /// Whatever the weights, the output is a distribution. A caller reads this as
     /// a probability and thresholds it, so this is the property everything else
     /// depends on.
     #[test]
-    fn the_output_is_a_distribution() {
+    fn the_output_is_a_distribution() -> Result<()> {
         let dev = Device::Cpu;
-        let (h, _vm) = head(3, &dev);
-        let pooled = Tensor::randn(0f32, 1.0, (4, ENCODER_DIM), &dev).unwrap();
-        let probs = h.probs(&pooled).unwrap();
-        assert_eq!(probs.dims2().unwrap(), (4, 3));
-        let sums = probs.sum(1).unwrap().to_vec1::<f32>().unwrap();
+        let (h, _vm) = head(3, &dev)?;
+        let pooled = Tensor::randn(0f32, 1.0, (4, ENCODER_DIM), &dev)?;
+        let probs = h.probs(&pooled)?;
+        assert_eq!(probs.dims2()?, (4, 3));
+        let sums = probs.sum(1)?.to_vec1::<f32>()?;
         for s in sums {
             assert!((s - 1.0).abs() < 1e-5, "each row must sum to 1, got {s}");
         }
-        let flat = probs.flatten_all().unwrap().to_vec1::<f32>().unwrap();
+        let flat = probs.flatten_all()?.to_vec1::<f32>()?;
         assert!(
             flat.iter().all(|p| (0.0..=1.0).contains(p)),
             "every probability is in [0, 1]"
         );
+        Ok(())
     }
 
     /// The head learns. A toy problem the encoder dimension can separate, trained
     /// against the Brier objective, must drive the loss down and end up answering
     /// correctly -- otherwise the wiring is decorative.
     #[test]
-    fn it_learns_a_separable_decision_from_verifier_labels() {
+    fn it_learns_a_separable_decision_from_verifier_labels() -> Result<()> {
         let dev = Device::Cpu;
-        let (h, varmap) = head(2, &dev);
+        let (h, varmap) = head(2, &dev)?;
         // Two clusters: first feature positive means answer 0, negative means 1.
         // Stands in for "this memory answers the query" / "it does not".
         let xs = Tensor::from_vec(
@@ -131,29 +132,26 @@ mod tests {
             ],
             (4, ENCODER_DIM),
             &dev,
-        )
-        .unwrap();
+        )?;
         let ys = Tensor::from_vec(
             vec![1.0f32, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0],
             (4, 2),
             &dev,
-        )
-        .unwrap();
+        )?;
 
-        let before = h.loss(&xs, &ys).unwrap().to_scalar::<f32>().unwrap();
+        let before = h.loss(&xs, &ys)?.to_scalar::<f32>()?;
         let mut opt = AdamW::new(
             varmap.all_vars(),
             ParamsAdamW {
                 lr: 0.05,
                 ..Default::default()
             },
-        )
-        .unwrap();
+        )?;
         for _ in 0..300 {
-            let loss = h.loss(&xs, &ys).unwrap();
-            opt.backward_step(&loss).unwrap();
+            let loss = h.loss(&xs, &ys)?;
+            opt.backward_step(&loss)?;
         }
-        let after = h.loss(&xs, &ys).unwrap().to_scalar::<f32>().unwrap();
+        let after = h.loss(&xs, &ys)?.to_scalar::<f32>()?;
         assert!(
             after < before,
             "training must reduce the loss: {before} -> {after}"
@@ -164,12 +162,13 @@ mod tests {
         );
 
         // And the answers are right, not merely low-loss.
-        let probs = h.probs(&xs).unwrap().to_vec2::<f32>().unwrap();
+        let probs = h.probs(&xs)?.to_vec2::<f32>()?;
         assert!(probs[0][0] > 0.5 && probs[1][0] > 0.5, "first cluster -> 0");
         assert!(
             probs[2][1] > 0.5 && probs[3][1] > 0.5,
             "second cluster -> 1"
         );
+        Ok(())
     }
 
     /// Trained on a soft label, the head reports the RATE rather than collapsing
@@ -177,15 +176,15 @@ mod tests {
     /// chosen for, and the reason the head can be thresholded at all: a verifier
     /// that says "right about 70% of the time" should produce ~0.7, not 1.0.
     #[test]
-    fn a_soft_label_is_learned_as_a_rate_and_not_rounded_up() {
+    fn a_soft_label_is_learned_as_a_rate_and_not_rounded_up() -> Result<()> {
         let dev = Device::Cpu;
-        let (h, varmap) = head(2, &dev);
+        let (h, varmap) = head(2, &dev)?;
         // A unit vector, as a pooled embedding is. A vector of ones is 20 times
         // longer, and from about 3 random starts in 100 the head overshot to
         // p = 1.0 on it (seen in CI on 2026-10-04, then 9 runs in 300 locally).
         let unit = 1.0 / (ENCODER_DIM as f32).sqrt();
-        let xs = Tensor::from_vec(vec![unit; ENCODER_DIM], (1, ENCODER_DIM), &dev).unwrap();
-        let ys = Tensor::from_vec(vec![0.7f32, 0.3], (1, 2), &dev).unwrap();
+        let xs = Tensor::from_vec(vec![unit; ENCODER_DIM], (1, ENCODER_DIM), &dev)?;
+        let ys = Tensor::from_vec(vec![0.7f32, 0.3], (1, 2), &dev)?;
 
         let mut opt = AdamW::new(
             varmap.all_vars(),
@@ -193,28 +192,29 @@ mod tests {
                 lr: 0.05,
                 ..Default::default()
             },
-        )
-        .unwrap();
+        )?;
         for _ in 0..400 {
-            let loss = h.loss(&xs, &ys).unwrap();
-            opt.backward_step(&loss).unwrap();
+            let loss = h.loss(&xs, &ys)?;
+            opt.backward_step(&loss)?;
         }
-        let p = h.probs(&xs).unwrap().to_vec2::<f32>().unwrap()[0][0];
+        let p = h.probs(&xs)?.to_vec2::<f32>()?[0][0];
         assert!(
             (p - 0.7).abs() < 0.05,
             "the head must report the rate it was shown, got {p} for a label of 0.7"
         );
+        Ok(())
     }
 
     /// A `Noul` is a two-answer question, so the same head serves it: the
     /// probability the caller floors on is simply the first column.
     #[test]
-    fn a_noul_is_a_two_answer_head() {
+    fn a_noul_is_a_two_answer_head() -> Result<()> {
         let dev = Device::Cpu;
-        let (h, _vm) = head(2, &dev);
-        let pooled = Tensor::randn(0f32, 1.0, (1, ENCODER_DIM), &dev).unwrap();
-        let p = h.probs(&pooled).unwrap().to_vec2::<f32>().unwrap()[0].clone();
+        let (h, _vm) = head(2, &dev)?;
+        let pooled = Tensor::randn(0f32, 1.0, (1, ENCODER_DIM), &dev)?;
+        let p = h.probs(&pooled)?.to_vec2::<f32>()?[0].clone();
         assert_eq!(p.len(), 2);
         assert!((p[0] + p[1] - 1.0).abs() < 1e-5);
+        Ok(())
     }
 }

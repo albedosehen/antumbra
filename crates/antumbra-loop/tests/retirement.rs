@@ -14,7 +14,7 @@ use antumbra_core::testing::ScriptedTrainer;
 use antumbra_core::{Expert, ExpertId, ExpertStatus, Generation, Result, RunId, TransitionCause};
 use antumbra_loop::{ContributionPolicy, GenerationLoop, LoopConfig, RetirementPolicy};
 use antumbra_store::repo::{expert, lifecycle};
-use antumbra_store::Store;
+use antumbra_store::testing::mem_store_of;
 
 const DIM: usize = 4;
 
@@ -105,7 +105,7 @@ fn retiring() -> LoopConfig {
 
 #[tokio::test]
 async fn a_persistently_useless_expert_is_demoted_and_a_useful_one_is_not() -> Result<()> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = mem_store_of(DIM).await?;
     expert::insert(&store, &shared("expert:alpha", 0)).await?;
     expert::insert(&store, &shared("expert:beta", 1)).await?;
     let (alpha, beta) = (ExpertId::new("expert:alpha"), ExpertId::new("expert:beta"));
@@ -159,7 +159,7 @@ async fn a_persistently_useless_expert_is_demoted_and_a_useful_one_is_not() -> R
 
 #[tokio::test]
 async fn without_a_policy_nothing_is_demoted() -> Result<()> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = mem_store_of(DIM).await?;
     expert::insert(&store, &shared("expert:beta", 1)).await?;
     let cfg = LoopConfig {
         retirement: None,

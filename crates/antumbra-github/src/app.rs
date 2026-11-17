@@ -82,6 +82,7 @@ impl AppCredentials {
 mod tests {
     use super::*;
     use crate::testing::{APP_PRIVATE_KEY_PEM, APP_PUBLIC_KEY_PEM};
+    use anyhow::bail;
     use jsonwebtoken::{decode, DecodingKey, Validation};
     use serde::Deserialize;
 
@@ -93,19 +94,18 @@ mod tests {
     }
 
     #[test]
-    fn the_app_token_verifies_with_the_public_key_and_carries_the_claims() {
-        let app = AppCredentials::new(" 12345 ", APP_PRIVATE_KEY_PEM).unwrap();
+    fn the_app_token_verifies_with_the_public_key_and_carries_the_claims() -> anyhow::Result<()> {
+        let app = AppCredentials::new(" 12345 ", APP_PRIVATE_KEY_PEM)?;
         assert_eq!(app.app_id(), "12345");
         let now = Utc::now();
-        let token = app.jwt(now).unwrap();
+        let token = app.jwt(now)?;
         let mut validation = Validation::new(Algorithm::RS256);
         validation.set_issuer(&["12345"]);
         let seen = decode::<Seen>(
             &token,
-            &DecodingKey::from_rsa_pem(APP_PUBLIC_KEY_PEM).unwrap(),
+            &DecodingKey::from_rsa_pem(APP_PUBLIC_KEY_PEM)?,
             &validation,
-        )
-        .unwrap()
+        )?
         .claims;
         assert_eq!(seen.iss, "12345");
         assert_eq!(seen.iat, now.timestamp() - CLOCK_SKEW_SECS);
@@ -115,17 +115,19 @@ mod tests {
             !format!("{app:?}").contains("PRIVATE"),
             "the key never prints"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_bad_key_or_empty_id_is_refused() {
-        assert_eq!(
-            AppCredentials::new("", APP_PRIVATE_KEY_PEM).unwrap_err(),
-            AppError::EmptyId
-        );
-        assert!(matches!(
-            AppCredentials::new("1", b"not a pem").unwrap_err(),
-            AppError::Key(_)
-        ));
+    fn a_bad_key_or_empty_id_is_refused() -> anyhow::Result<()> {
+        let Err(empty) = AppCredentials::new("", APP_PRIVATE_KEY_PEM) else {
+            bail!("an empty App id was accepted");
+        };
+        assert_eq!(empty, AppError::EmptyId);
+        let Err(bad_key) = AppCredentials::new("1", b"not a pem") else {
+            bail!("a key that is not a PEM was accepted");
+        };
+        assert!(matches!(bad_key, AppError::Key(_)));
+        Ok(())
     }
 }

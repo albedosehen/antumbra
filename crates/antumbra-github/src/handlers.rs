@@ -43,7 +43,9 @@ pub struct Merge {
 
 impl Merge {
     /// The merge a `pull_request` delivery describes; `None` unless it is a
-    /// merge with a merge commit and a recognizable repository.
+    /// merge with a merge commit that is a commit sha and a recognizable
+    /// repository. GitHub sends forty hex digits; what else a sender with the
+    /// webhook secret might send is refused here rather than carried on.
     pub fn from_event(event: &PullRequestEvent) -> Option<Self> {
         if !event.is_merge() {
             return None;
@@ -53,7 +55,10 @@ impl Merge {
             repo: event.repository.slug()?,
             head_branch: pr.head.name.clone(),
             base_branch: pr.base.name.clone(),
-            merge_commit: pr.merge_commit_sha.clone()?,
+            merge_commit: pr
+                .merge_commit_sha
+                .clone()
+                .filter(|sha| antumbra_core::provenance::is_commit_sha(sha))?,
         })
     }
 
@@ -177,6 +182,7 @@ mod tests {
     use super::*;
     use crate::event::{Actor, GitRef, PullRequest, Repository};
     use antumbra_core::orphan_of;
+    use anyhow::Context;
 
     const REPO: &str = "github.com/acme/orders";
 
@@ -231,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn a_merge_reanchors_only_the_merged_branch_in_that_repo() {
+    fn a_merge_reanchors_only_the_merged_branch_in_that_repo() -> anyhow::Result<()> {
         let now = Utc::now();
         let memories = vec![
             memory(
@@ -253,7 +259,8 @@ mod tests {
         let ids: Vec<&str> = changed.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, vec!["memory:a", "memory:e"]);
         let a = &changed[0];
-        let anchor = GitProvenance::from_evidence(&a.evidence).unwrap();
+        let anchor = GitProvenance::from_evidence(&a.evidence)
+            .context("the re-anchored memory keeps an anchor")?;
         assert_eq!(anchor.commit, "fedcba9876543210");
         assert_eq!(anchor.branch.as_deref(), Some("main"));
         assert_eq!(
@@ -273,10 +280,11 @@ mod tests {
         assert_eq!(a.updated_at, now);
         // Redelivery: everything already sits at the merge commit.
         assert!(reanchor_merged(changed, &merge(), now).is_empty());
+        Ok(())
     }
 
     #[test]
-    fn a_branch_delete_orphans_only_that_branch() {
+    fn a_branch_delete_orphans_only_that_branch() -> anyhow::Result<()> {
         let now = Utc::now();
         let memories = vec![
             memory(
@@ -297,10 +305,11 @@ mod tests {
             orphan_branch(changed, REPO, "feat/outbox", now).is_empty(),
             "already marked"
         );
+        Ok(())
     }
 
     #[test]
-    fn merge_then_delete_leaves_the_reanchored_memory_alone() {
+    fn merge_then_delete_leaves_the_reanchored_memory_alone() -> anyhow::Result<()> {
         let now = Utc::now();
         let memories = vec![memory(
             "memory:a",
@@ -312,10 +321,11 @@ mod tests {
             orphan_branch(merged, REPO, "feat/outbox", now).is_empty(),
             "GitHub's delete-after-merge must not orphan what the merge just re-anchored"
         );
+        Ok(())
     }
 
     #[test]
-    fn the_pull_request_memory_is_anchored_deterministic_and_readable() {
+    fn the_pull_request_memory_is_anchored_deterministic_and_readable() -> anyhow::Result<()> {
         let now = Utc::now();
         let tenant = TenantId::new("ws:acme");
         let compartment = CompartmentId::new("comp:ws:acme:user:github:default");
@@ -331,7 +341,8 @@ mod tests {
              pattern. Opened by shon, merged by unknown; 3 commits, 5 files changed (+120 / -?) from \
              branch feat/outbox."
         );
-        let anchor = GitProvenance::from_evidence(&m.evidence).unwrap();
+        let anchor = GitProvenance::from_evidence(&m.evidence)
+            .context("the pull request memory is anchored")?;
         assert_eq!(anchor.commit, "fedcba9876543210");
         assert_eq!(anchor.branch.as_deref(), Some("main"));
         assert_eq!(m.evidence[1], "https://github.com/Acme/Orders/pull/42");
@@ -339,10 +350,11 @@ mod tests {
             pull_request_memory_id("GitHub.com/Acme/Orders.git", 7),
             "memory:github-pr-github-com-acme-orders-7"
         );
+        Ok(())
     }
 
     #[test]
-    fn merge_from_event_needs_a_merge_commit_and_a_slug() {
+    fn merge_from_event_needs_a_merge_commit_and_a_slug() -> anyhow::Result<()> {
         assert_eq!(Merge::from_event(&event()), Some(merge()));
         let mut unmerged = event();
         unmerged.pull_request.merged = false;
@@ -350,9 +362,16 @@ mod tests {
         let mut no_sha = event();
         no_sha.pull_request.merge_commit_sha = None;
         assert_eq!(Merge::from_event(&no_sha), None);
+        // Not a commit sha: too short, not hex, or not ASCII at all.
+        for odd in ["abc", "not-a-sha", "ééééééé"] {
+            let mut odd_sha = event();
+            odd_sha.pull_request.merge_commit_sha = Some(odd.into());
+            assert_eq!(Merge::from_event(&odd_sha), None, "{odd:?}");
+        }
         let mut no_slug = event();
         no_slug.repository.html_url = None;
         no_slug.repository.full_name = "orders".into();
         assert_eq!(Merge::from_event(&no_slug), None);
+        Ok(())
     }
 }

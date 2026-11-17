@@ -32,13 +32,11 @@ mod auth {
     pub use antumbra_auth::*;
 }
 mod dependencies;
-mod embed;
 mod hardware;
 mod http;
 mod notify;
 mod pdf;
 mod profile;
-mod secrets;
 mod server;
 mod session;
 mod telemetry;
@@ -54,7 +52,11 @@ use server::McpServer;
 struct Cli {
     /// SurrealDB url: `surrealkv://./data/antumbra.skv` (persistent),
     /// `mem://` (ephemeral), or `ws://host:8000/rpc`.
-    #[arg(long, default_value = "surrealkv://./data/antumbra.skv")]
+    #[arg(
+        long,
+        env = "ANTUMBRA_DB_URL",
+        default_value = "surrealkv://./data/antumbra.skv"
+    )]
     url: String,
     /// The workspace (tenant) this stdio server serves. Ignored with `--http`,
     /// where the tenant comes from each request's verified JWT.
@@ -89,18 +91,8 @@ struct Cli {
     /// Required JWT audience claim (this server's identifier), if set.
     #[arg(long)]
     jwt_audience: Option<String>,
-    /// Root username for an authenticated remote SurrealDB (`ws://`). Omit for an
-    /// embedded store or an unauthenticated server. The DB credential is the
-    /// server's *own* login (it then signs in per request as each tenant); it is
-    /// distinct from the JWTs that authenticate clients.
-    #[arg(long, env = "ANTUMBRA_DB_USER")]
-    db_user: Option<String>,
-    /// Root password for the remote SurrealDB.
-    #[arg(long, env = "ANTUMBRA_DB_PASS", hide_env_values = true)]
-    db_pass: Option<String>,
-    /// Read the root password from this file instead (see --jwt-secret-file).
-    #[arg(long, env = "ANTUMBRA_DB_PASS_FILE", conflicts_with = "db_pass")]
-    db_pass_file: Option<std::path::PathBuf>,
+    #[command(flatten)]
+    db: antumbra_store::args::DbAuthArgs,
     /// Enable the autonomous propose trigger: once a user's unorganized inbox
     /// reaches this many memories, a write auto-clusters it into proposed
     /// compartments (reversible; the user curates). Off when unset.
@@ -176,24 +168,8 @@ struct Cli {
     /// Validity, in days, of a `--mint-token` token.
     #[arg(long, default_value_t = 365)]
     token_ttl_days: u64,
-    /// Embed via an OpenAI-compatible `/embeddings` endpoint (e.g. a local
-    /// text-embeddings-inference / Ollama server) instead of the built-in
-    /// embedder. It must return `EMBED_DIM`-wide vectors. Off when unset.
-    #[arg(long, env = "ANTUMBRA_EMBEDDER_URL")]
-    embedder_url: Option<String>,
-    /// Model name sent to `--embedder-url` (must produce the index dimension).
-    #[arg(long, default_value = "all-MiniLM-L6-v2")]
-    embedder_model: String,
-    /// Optional bearer key for `--embedder-url`.
-    #[arg(long, env = "ANTUMBRA_EMBEDDER_KEY", hide_env_values = true)]
-    embedder_key: Option<String>,
-    /// Use the deterministic byte-histogram stand-in instead of a real embedder.
-    /// Recall is then NOT semantic (it matches character statistics), so this is
-    /// for smoke tests and demos only. Without `--features models`, the server
-    /// refuses to start with neither this nor `--embedder-url` rather than
-    /// silently degrading recall.
-    #[arg(long, env = "ANTUMBRA_FAKE_EMBEDDER", default_value_t = false)]
-    fake_embedder: bool,
+    #[command(flatten)]
+    embedder: antumbra_embed::args::EmbedderArgs,
     /// Rerank hybrid-recall candidates with a cross-encoder via a TEI/Cohere-style
     /// `/rerank` endpoint (the precision stage after RRF). Off when unset.
     #[arg(long, env = "ANTUMBRA_RERANK_URL")]
@@ -212,34 +188,8 @@ struct Cli {
     /// Optional bearer key for `--rerank-url`.
     #[arg(long, env = "ANTUMBRA_RERANK_KEY", hide_env_values = true)]
     rerank_key: Option<String>,
-    /// Archive each ingested document's ORIGINAL content to a copal file
-    /// service (the document of record): bare `host:port` or a full URL base.
-    /// The upload happens before any chunk is stored (a dead copal fails the
-    /// ingest), and every chunk carries the copal file id + digest. Off when
-    /// unset: ingest keeps only the chunks, exactly as before.
-    #[arg(long, env = "ANTUMBRA_COPAL_ADDR")]
-    copal_addr: Option<String>,
-    /// Land every workspace's documents under this ONE copal tenant, named by
-    /// the `x-copal-tenant` header (copal `header` auth mode). Omit all three
-    /// tenancy args for the default: per-workspace tenancy over header auth,
-    /// where each workspace presents ITSELF as the copal tenant (its own
-    /// quotas, listings, and search scope). Either way the archive identity is
-    /// (workspace, title). At most one of --copal-tenant / --copal-key /
-    /// --copal-keys.
-    #[arg(long, env = "ANTUMBRA_COPAL_TENANT")]
-    copal_tenant: Option<String>,
-    /// One `ck1` copal API key for every workspace: shared tenancy under
-    /// copal's deployed `keys` auth mode, where the tenant is bound to the
-    /// credential (the key's tenant is THE tenant).
-    #[arg(long, env = "ANTUMBRA_COPAL_KEY", hide_env_values = true)]
-    copal_key: Option<String>,
-    /// Path to a JSON file mapping workspace tenant -> `ck1` copal API key
-    /// (e.g. `{"ws:acme": "ck1..."}`): per-workspace tenancy under copal's
-    /// `keys` auth mode. Loaded once at startup (restart to pick up newly
-    /// minted keys); a workspace absent from the map fails its ingest rather
-    /// than landing in another tenant.
-    #[arg(long, env = "ANTUMBRA_COPAL_KEYS")]
-    copal_keys: Option<std::path::PathBuf>,
+    #[command(flatten)]
+    copal: antumbra_copal::args::CopalArgs,
     /// The origin copal's render listener answers on (its
     /// `COPAL_RENDER_ORIGIN`), e.g. `http://10.0.0.130:8083`: where relics are
     /// displayed, and the one origin the relic pages may frame. Relics need it
@@ -247,6 +197,18 @@ struct Cli {
     /// refused and the gallery is empty.
     #[arg(long, env = "ANTUMBRA_COPAL_RENDER_ORIGIN")]
     copal_render_origin: Option<String>,
+    /// Let the networked server name copal tenants in a request header the
+    /// archive trusts as given (copal's header auth mode, the tenancy default).
+    /// Many identities write through one networked server, so isolation at the
+    /// archive then rests on the network between them alone; say so, or use
+    /// --copal-key or --copal-keys, which prove the tenant with a credential.
+    #[arg(
+        long,
+        env = "ANTUMBRA_COPAL_TRUST_HEADERS",
+        default_value_t = false,
+        value_parser = clap::builder::FalseyValueParser::new()
+    )]
+    copal_trust_headers: bool,
     /// A Gotenberg service (gotenberg.dev) that prints relics as PDF for the
     /// viewer's download, e.g. `http://pdf:3000` with the Compose `pdf`
     /// profile. Without one, relics still download as HTML and Markdown.
@@ -310,18 +272,10 @@ struct Cli {
     github_knowledge_diff: bool,
 }
 
-async fn connect(url: &str, db_user: Option<&str>, db_pass: Option<&str>) -> Result<Store> {
-    let mut builder = ConnectionConfig::builder()
-        .url(url)
-        .namespace("antumbra")
-        .database("main");
-    // Root login for an authenticated remote (`ws://`); embedded/unauthenticated
-    // stores need none. The server signs in per request as each tenant on top.
-    if let (Some(user), Some(pass)) = (db_user, db_pass) {
-        builder = builder.username(user).password(pass);
-    }
-    let config = builder.build()?;
-    Ok(Store::connect(config, EMBED_DIM).await?)
+/// The owner connection, with the schema applied: the credentials are the
+/// server's own login, and it signs in per request as each tenant on top.
+async fn connect(url: &str, db: &antumbra_store::args::DbAuthArgs) -> Result<Store> {
+    Ok(db.connect(url, EMBED_DIM).await?)
 }
 
 /// A credential-less **serving** connection to an already-provisioned remote: it
@@ -337,16 +291,10 @@ pub(crate) async fn connect_serving(url: &str) -> Result<Store> {
     Ok(Store::connect_without_schema(config, EMBED_DIM).await?)
 }
 
-/// The built-in embedder when no `--embedder-url` is configured: the real candle
-/// BERT under `--features models`; `--fake-embedder` still selects the
-/// byte-histogram stand-in for smoke tests. Both produce `EMBED_DIM`-wide vectors.
+/// The built-in embedder when the flags name none: the real candle BERT under
+/// `--features models`. It produces `EMBED_DIM`-wide vectors.
 #[cfg(feature = "models")]
-fn make_embedder(fake: bool) -> Result<Box<dyn Embedder>> {
-    if fake {
-        return Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(
-            EMBED_DIM,
-        )));
-    }
+fn builtin_embedder() -> Result<Box<dyn Embedder>> {
     Ok(Box::new(antumbra_serve::BertEmbedder::load()?))
 }
 
@@ -355,15 +303,8 @@ fn make_embedder(fake: bool) -> Result<Box<dyn Embedder>> {
 /// Refusing to start beats a server whose recall silently matches character
 /// statistics instead of meaning.
 #[cfg(not(feature = "models"))]
-fn make_embedder(fake: bool) -> Result<Box<dyn Embedder>> {
-    if fake {
-        return Ok(Box::new(antumbra_core::testing::FixedEmbedder::new(
-            EMBED_DIM,
-        )));
-    }
-    anyhow::bail!(
-        "no embedder configured: pass --embedder-url <OpenAI-compatible /embeddings endpoint \n         returning {EMBED_DIM}-d vectors> (for example Ollama serving all-minilm), or \n         --fake-embedder to accept the non-semantic byte-histogram stand-in (demos only)"
-    )
+fn builtin_embedder() -> Result<Box<dyn Embedder>> {
+    Err(antumbra_embed::args::NoEmbedder.into())
 }
 
 /// Owner-side provisioning for an identity: ensure the principal exists and the
@@ -443,8 +384,7 @@ pub(crate) async fn register_node(store: &Store, tenant: &TenantId, user: &UserI
 #[allow(clippy::too_many_arguments)]
 async fn build_session(
     url: &str,
-    db_user: Option<&str>,
-    db_pass: Option<&str>,
+    db: &antumbra_store::args::DbAuthArgs,
     tenant: TenantId,
     user: UserId,
     host: String,
@@ -452,7 +392,7 @@ async fn build_session(
     recipe: antumbra_core::behavior::Recipe,
     serve_quant: &str,
 ) -> Result<McpServer> {
-    let store = connect(url, db_user, db_pass).await?;
+    let store = connect(url, db).await?;
     let default_compartment = provision_identity(&store, &tenant, &user).await?;
     store.signin(&tenant, &user).await?;
     register_node(&store, &tenant, &user, &host).await;
@@ -604,6 +544,28 @@ fn main() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("antumbra-mcp worker thread panicked"))?
 }
 
+/// Header-mode tenancy tells the archive the tenant in a request header it
+/// trusts as given, so isolation between workspaces at the archive rests on
+/// the network path alone. On the networked surface, where many identities
+/// write through one server, that trust has to be stated (`--copal-trust-
+/// headers`); the keyed tenancies prove the tenant and need nothing. A stdio
+/// server serves one identity and is trusted as that identity already.
+fn copal_headers_allowed(
+    networked: bool,
+    copal: Option<&antumbra_copal::CopalArchive>,
+    trusted: bool,
+) -> Result<()> {
+    match copal {
+        Some(archive) if networked && archive.trusts_headers() && !trusted => anyhow::bail!(
+            "the copal archive is told each workspace's tenant in a header it trusts as given, \
+             which on a networked server leaves isolation at the archive to the network between \
+             them; pass --copal-trust-headers if that network is yours alone, or use --copal-key \
+             or --copal-keys, which prove the tenant with a credential"
+        ),
+        _ => Ok(()),
+    }
+}
+
 impl Cli {
     /// The optional endpoints as the operator meant them. docker compose
     /// passes an unset variable through as an empty one (`${VAR:-}`), and
@@ -615,10 +577,7 @@ impl Cli {
         let set = |value: Option<String>| value.filter(|v| !v.trim().is_empty());
         self.rerank_url = set(self.rerank_url);
         self.rerank_key = set(self.rerank_key);
-        self.copal_addr = set(self.copal_addr);
-        self.copal_tenant = set(self.copal_tenant);
-        self.copal_key = set(self.copal_key);
-        self.copal_keys = self.copal_keys.filter(|p| !p.as_os_str().is_empty());
+        self.copal = self.copal.without_empty_settings();
         self.copal_render_origin = set(self.copal_render_origin);
         self.pdf_renderer = set(self.pdf_renderer);
         self
@@ -631,16 +590,12 @@ async fn run() -> Result<()> {
     antumbra_serve::seed_generation(cli.generation_seed);
     // Secrets resolve once, from the inline flag or its file, and only the
     // resolved value is used from here on.
-    let jwt_secret = secrets::resolve(
+    let jwt_secret = antumbra_core::secrets::resolve(
         cli.jwt_secret.clone(),
         cli.jwt_secret_file.as_deref(),
         "JWT secret",
     )?;
-    let db_pass = secrets::resolve(
-        cli.db_pass.clone(),
-        cli.db_pass_file.as_deref(),
-        "database password",
-    )?;
+    let db = cli.db.resolved()?;
 
     // Mint a hook token and exit -- no DB or embedder needed. HS256 only: the
     // server holds the symmetric secret; an RS256 deployment mints via its auth
@@ -651,6 +606,8 @@ async fn run() -> Result<()> {
                 "--mint-token needs --jwt-secret (HS256); RS256 tokens are minted by your auth service"
             )
         })?;
+        // A token minted under a weak secret is one anyone can mint.
+        validate_jwt_secret(secret)?;
         let ttl = std::time::Duration::from_secs(cli.token_ttl_days * 24 * 60 * 60);
         let mint = if cli.operator {
             auth::mint_hs256_operator
@@ -671,13 +628,9 @@ async fn run() -> Result<()> {
     // A configured endpoint embeds on the tenant's side; otherwise the
     // built-in embedder (candle BERT under `models`; the byte-histogram stand-in
     // only when asked for explicitly). Either way the vectors are EMBED_DIM-wide.
-    let embedder: Arc<dyn Embedder> = match cli.embedder_url {
-        Some(url) => Arc::new(embed::HttpEmbedder::new(
-            url,
-            cli.embedder_model,
-            cli.embedder_key,
-        )),
-        None => Arc::from(make_embedder(cli.fake_embedder)?),
+    let embedder: Arc<dyn Embedder> = match cli.embedder.configured() {
+        Some(embedder) => Arc::from(embedder),
+        None => Arc::from(builtin_embedder()?),
     };
 
     // Optional cross-encoder rerank stage. Operator-configured endpoint; the
@@ -768,12 +721,11 @@ async fn run() -> Result<()> {
 
     // Optional copal document-of-record archive. Operator-configured; absent,
     // ingest keeps only the chunks (the v0 behavior, unchanged).
-    let copal = antumbra_copal::CopalArchive::from_flags(
-        cli.copal_addr.as_deref(),
-        cli.copal_tenant,
-        cli.copal_key,
-        cli.copal_keys.as_deref(),
-        cli.copal_render_origin,
+    let copal = cli.copal.archive(cli.copal_render_origin)?;
+    copal_headers_allowed(
+        cli.http.is_some(),
+        copal.as_deref(),
+        cli.copal_trust_headers,
     )?;
     // The relic viewer's PDF download, printed by a renderer beside the
     // server; only the networked surface has a viewer.
@@ -790,7 +742,7 @@ async fn run() -> Result<()> {
     // The GitHub App webhook receiver: its secret resolves like every other
     // secret, and a repository must map to a workspace before an event can
     // touch anything. Webhooks arrive over the network, so HTTP only.
-    let github_secret = secrets::resolve(
+    let github_secret = antumbra_core::secrets::resolve(
         cli.github_webhook_secret.clone(),
         cli.github_webhook_secret_file.as_deref(),
         "GitHub webhook secret",
@@ -831,8 +783,7 @@ async fn run() -> Result<()> {
         return http::serve(
             addr,
             cli.url,
-            cli.db_user,
-            db_pass,
+            db,
             host,
             embedder,
             verifier,
@@ -854,8 +805,7 @@ async fn run() -> Result<()> {
     // stdio: one fixed identity for the life of the process.
     let mut service = build_session(
         &cli.url,
-        cli.db_user.as_deref(),
-        db_pass.as_deref(),
+        &db,
         TenantId::new(cli.tenant),
         UserId::new(cli.user),
         host,
@@ -886,8 +836,34 @@ async fn run() -> Result<()> {
     Ok(())
 }
 
+/// The `.env.example` placeholder: a secret anyone can read out of the repo,
+/// so refusing it outright beats serving with tokens anyone can mint.
+const PLACEHOLDER_JWT_SECRET: &str = "change-me-base64-32-bytes";
+
+/// The fewest bytes an HS256 secret may have: the key is the only thing between
+/// a token's claims and anyone who wants to write them, and below this an
+/// offline search finds it.
+const MIN_JWT_SECRET_BYTES: usize = 32;
+
+/// Refuse an HS256 secret that is the placeholder or too short, naming the fix.
+fn validate_jwt_secret(secret: &str) -> Result<()> {
+    anyhow::ensure!(
+        secret != PLACEHOLDER_JWT_SECRET,
+        "ANTUMBRA_JWT_SECRET is still the .env.example placeholder; generate a real one: \
+         openssl rand -base64 32"
+    );
+    anyhow::ensure!(
+        secret.len() >= MIN_JWT_SECRET_BYTES,
+        "the HS256 secret (--jwt-secret / ANTUMBRA_JWT_SECRET) is too short ({} bytes, want at \
+         least {MIN_JWT_SECRET_BYTES}); generate one: openssl rand -base64 32",
+        secret.len()
+    );
+    Ok(())
+}
+
 /// Resolve the JWT verifier from the configured key material. RS256 (a PEM
-/// public key) takes precedence over an HS256 secret; one is required.
+/// public key) takes precedence over an HS256 secret; one is required, and an
+/// HS256 secret must be one worth the name ([`validate_jwt_secret`]).
 fn build_verifier(
     secret: &Option<String>,
     public_key: &Option<std::path::PathBuf>,
@@ -898,7 +874,10 @@ fn build_verifier(
             let pem = std::fs::read(pem_path)?;
             auth::JwtVerifier::rs256_pem(&pem)?
         }
-        (None, Some(secret)) => auth::JwtVerifier::hs256(secret.as_bytes()),
+        (None, Some(secret)) => {
+            validate_jwt_secret(secret)?;
+            auth::JwtVerifier::hs256(secret.as_bytes())
+        }
         (None, None) => anyhow::bail!(
             "--http needs a JWT key: pass --jwt-secret (HS256) or --jwt-public-key <pem> (RS256)"
         ),
@@ -912,11 +891,77 @@ fn build_verifier(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_store::testing::mem_store;
+
+    // The store flags are the shared ones (#303): the password's environment
+    // value is hidden in --help, and the url reads its variable, as in every
+    // binary; --db-pass-file still excludes --db-pass across the flatten.
+    #[test]
+    fn the_store_flags_read_as_in_every_binary() -> Result<()> {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        cmd.clone().debug_assert();
+        let flag = |id: &str| {
+            cmd.get_arguments().find(|a| a.get_id() == id).map(|a| {
+                (
+                    a.get_env().map(|e| e.to_string_lossy().into_owned()),
+                    a.is_hide_env_values_set(),
+                )
+            })
+        };
+        assert_eq!(
+            flag("db_pass"),
+            Some((Some("ANTUMBRA_DB_PASS".into()), true))
+        );
+        assert_eq!(flag("url"), Some((Some("ANTUMBRA_DB_URL".into()), false)));
+        assert!(
+            Cli::try_parse_from(["antumbra-mcp", "--db-pass", "x", "--db-pass-file", "f"]).is_err()
+        );
+        Ok(())
+    }
+
+    // The verifier refuses a secret an offline search would find, and the
+    // placeholder anyone can read out of the repository, and says what to do.
+    #[test]
+    fn the_verifier_refuses_a_short_or_placeholder_secret() -> Result<()> {
+        for weak in [
+            "short",
+            "0123456789abcdef0123456789abcde",
+            PLACEHOLDER_JWT_SECRET,
+        ] {
+            let Err(e) = build_verifier(&Some(weak.to_string()), &None, &None) else {
+                anyhow::bail!("{weak:?} was accepted as an HS256 secret");
+            };
+            anyhow::ensure!(e.to_string().contains("openssl rand -base64 32"), "{e}");
+        }
+        let Err(e) = validate_jwt_secret("short") else {
+            anyhow::bail!("a short secret passed validation");
+        };
+        anyhow::ensure!(e.to_string().contains("5 bytes"), "{e}");
+        Ok(())
+    }
+
+    #[test]
+    fn the_verifier_takes_a_secret_of_32_bytes_or_more() -> Result<()> {
+        build_verifier(
+            &Some("0123456789abcdef0123456789abcdef".to_string()),
+            &None,
+            &None,
+        )?;
+        build_verifier(
+            &Some("oqRzkA0sZ1Yx9fJ2mB7cD4eF6gH8iK0lMnOpQrStUvWx".to_string()),
+            &None,
+            &Some("antumbra".to_string()),
+        )?;
+        Ok(())
+    }
 
     /// What compose hands over for an unset endpoint is an empty string, and
     /// clap keeps it; the server treats it as no endpoint at all.
     #[test]
-    fn an_empty_endpoint_setting_is_an_unset_one() {
+    fn an_empty_endpoint_setting_is_an_unset_one() -> Result<()> {
+        use anyhow::Context as _;
+
         let cli = Cli::try_parse_from([
             "antumbra-mcp",
             "--rerank-url",
@@ -928,11 +973,11 @@ mod tests {
             "--copal-render-origin",
             "",
         ])
-        .expect("empty values parse")
+        .context("empty values parse")?
         .without_empty_settings();
         assert_eq!(cli.rerank_url, None);
-        assert_eq!(cli.copal_addr, None);
-        assert_eq!(cli.copal_tenant, None);
+        assert_eq!(cli.copal.copal_addr, None);
+        assert_eq!(cli.copal.copal_tenant, None);
         assert_eq!(cli.copal_render_origin, None);
 
         let cli = Cli::try_parse_from([
@@ -942,19 +987,39 @@ mod tests {
             "--copal-addr",
             "http://copal:8080",
         ])
-        .expect("set values parse")
+        .context("set values parse")?
         .without_empty_settings();
         assert_eq!(cli.rerank_url.as_deref(), Some("http://rerank/rerank"));
-        assert_eq!(cli.copal_addr.as_deref(), Some("http://copal:8080"));
+        assert_eq!(cli.copal.copal_addr.as_deref(), Some("http://copal:8080"));
+        Ok(())
+    }
+
+    /// Header-mode tenancy on the networked surface is the operator's to
+    /// trust, by name; the keyed modes and the stdio server need nothing.
+    #[test]
+    fn header_mode_with_http_needs_the_flag() -> anyhow::Result<()> {
+        use antumbra_copal::{CopalArchive, CopalTenancy};
+        let header_mode = CopalArchive::new("127.0.0.1:9010", CopalTenancy::PerWorkspace);
+        let keyed = CopalArchive::new("127.0.0.1:9010", CopalTenancy::SharedKey("ck1_x".into()));
+        anyhow::ensure!(
+            copal_headers_allowed(true, Some(&header_mode), false).is_err(),
+            "header mode on the networked server without the flag is refused"
+        );
+        copal_headers_allowed(true, Some(&header_mode), true)?;
+        copal_headers_allowed(true, Some(&keyed), false)?;
+        copal_headers_allowed(false, Some(&header_mode), false)?;
+        copal_headers_allowed(true, None, false)?;
+        Ok(())
     }
 
     #[test]
-    fn an_empty_population_still_names_a_base() {
+    fn an_empty_population_still_names_a_base() -> Result<()> {
         assert_eq!(serving_base(None, "org/base"), "org/base");
         assert_eq!(
             serving_base(Some("org/trained-on"), "org/base"),
             "org/trained-on"
         );
+        Ok(())
     }
 
     /// A node puts itself in the user's fabric on start, under its own record
@@ -963,7 +1028,7 @@ mod tests {
     /// as the owner.
     #[tokio::test]
     async fn a_node_registers_itself_as_the_user_it_serves() -> Result<()> {
-        let store = Store::connect_memory(antumbra_store::EMBED_DIM).await?;
+        let store = mem_store().await?;
         let tenant = TenantId::new("ws:fabric");
         let user = UserId::new("user:lily");
         provision_identity(&store, &tenant, &user).await?;
@@ -1001,7 +1066,7 @@ mod tests {
     #[cfg(feature = "models")]
     #[tokio::test]
     async fn a_fresh_node_gets_a_serving_engine() -> Result<()> {
-        let store = Store::connect_memory(antumbra_store::EMBED_DIM).await?;
+        let store = mem_store().await?;
         let Some(serve) = build_serve(
             &store,
             "test-host",
@@ -1016,6 +1081,60 @@ mod tests {
         assert!(!serve.can_serve(&minted));
         serve.register_expert(&minted, "adapters/fresh_g0.safetensors");
         assert!(serve.can_serve(&minted), "hot-registration has a target");
+        Ok(())
+    }
+
+    // The embedder and copal flags are the shared ones (#304): the model reads
+    // its variable (a server started with it set no longer ignores it), the
+    // keys hide their environment values in --help, every flag keeps its name
+    // and default.
+    #[test]
+    fn the_embedder_and_copal_flags_read_as_in_every_binary() -> Result<()> {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        cmd.clone().debug_assert();
+        let flag = |id: &str| {
+            cmd.get_arguments().find(|a| a.get_id() == id).map(|a| {
+                (
+                    a.get_long().map(str::to_owned),
+                    a.get_env().map(|e| e.to_string_lossy().into_owned()),
+                    a.is_hide_env_values_set(),
+                    a.get_default_values()
+                        .iter()
+                        .map(|v| v.to_string_lossy().into_owned())
+                        .collect::<Vec<_>>(),
+                )
+            })
+        };
+        assert_eq!(
+            flag("embedder_model"),
+            Some((
+                Some("embedder-model".into()),
+                Some("ANTUMBRA_EMBEDDER_MODEL".into()),
+                false,
+                vec!["all-MiniLM-L6-v2".into()],
+            ))
+        );
+        for (id, long, env) in [
+            ("embedder_url", "embedder-url", "ANTUMBRA_EMBEDDER_URL"),
+            ("embedder_key", "embedder-key", "ANTUMBRA_EMBEDDER_KEY"),
+            ("fake_embedder", "fake-embedder", "ANTUMBRA_FAKE_EMBEDDER"),
+            ("copal_addr", "copal-addr", "ANTUMBRA_COPAL_ADDR"),
+            ("copal_tenant", "copal-tenant", "ANTUMBRA_COPAL_TENANT"),
+            ("copal_key", "copal-key", "ANTUMBRA_COPAL_KEY"),
+            ("copal_keys", "copal-keys", "ANTUMBRA_COPAL_KEYS"),
+        ] {
+            let Some(got) = flag(id) else {
+                anyhow::bail!("{id} is a flag");
+            };
+            assert_eq!(got.0.as_deref(), Some(long), "{id}");
+            assert_eq!(got.1.as_deref(), Some(env), "{id}");
+            assert_eq!(
+                got.2,
+                id.ends_with("_key"),
+                "{id} hides its value iff a key"
+            );
+        }
         Ok(())
     }
 }

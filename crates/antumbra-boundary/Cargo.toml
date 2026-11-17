@@ -15,3 +15,6 @@ chrono.workspace = true
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 async-trait.workspace = true
+
+[lints]
+workspace = true

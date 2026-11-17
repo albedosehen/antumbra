@@ -221,6 +221,7 @@ pub fn parse(kind: &str, body: &[u8]) -> Result<Event, EventError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::{bail, Context};
     use serde_json::json;
 
     fn merged_pr() -> serde_json::Value {
@@ -251,10 +252,10 @@ mod tests {
     }
 
     #[test]
-    fn a_merged_pull_request_parses_with_its_slug_and_installation() {
-        let body = serde_json::to_vec(&merged_pr()).unwrap();
-        let Event::PullRequest(e) = parse("pull_request", &body).unwrap() else {
-            panic!("expected a pull_request event");
+    fn a_merged_pull_request_parses_with_its_slug_and_installation() -> anyhow::Result<()> {
+        let body = serde_json::to_vec(&merged_pr())?;
+        let Event::PullRequest(e) = parse("pull_request", &body)? else {
+            bail!("expected a pull_request event");
         };
         assert!(e.is_merge());
         assert_eq!(e.pull_request.number, 42);
@@ -269,31 +270,35 @@ mod tests {
             Some("github.com/acme/orders")
         );
         assert_eq!(e.installation, Some(Installation { id: 77 }));
+        Ok(())
     }
 
     #[test]
-    fn a_closed_but_unmerged_pull_request_is_not_a_merge() {
+    fn a_closed_but_unmerged_pull_request_is_not_a_merge() -> anyhow::Result<()> {
         let mut v = merged_pr();
         v["pull_request"]["merged"] = json!(false);
         v["pull_request"]["merge_commit_sha"] = serde_json::Value::Null;
-        v.as_object_mut().unwrap().remove("installation");
-        let body = serde_json::to_vec(&v).unwrap();
-        let Event::PullRequest(e) = parse("pull_request", &body).unwrap() else {
-            panic!("expected a pull_request event");
+        v.as_object_mut()
+            .context("the payload is an object")?
+            .remove("installation");
+        let body = serde_json::to_vec(&v)?;
+        let Event::PullRequest(e) = parse("pull_request", &body)? else {
+            bail!("expected a pull_request event");
         };
         assert!(!e.is_merge());
         assert_eq!(e.installation, None, "a plain webhook has no installation");
         let mut v = merged_pr();
         v["action"] = json!("opened");
-        let body = serde_json::to_vec(&v).unwrap();
-        let Event::PullRequest(e) = parse("pull_request", &body).unwrap() else {
-            panic!("expected a pull_request event");
+        let body = serde_json::to_vec(&v)?;
+        let Event::PullRequest(e) = parse("pull_request", &body)? else {
+            bail!("expected a pull_request event");
         };
         assert!(!e.is_merge());
+        Ok(())
     }
 
     #[test]
-    fn the_slug_keeps_an_enterprise_host_and_falls_back_to_github() {
+    fn the_slug_keeps_an_enterprise_host_and_falls_back_to_github() -> anyhow::Result<()> {
         let ghes = Repository {
             full_name: "Acme/Orders".into(),
             html_url: Some("https://git.acme.internal/Acme/Orders".into()),
@@ -315,40 +320,37 @@ mod tests {
             default_branch: None,
         };
         assert_eq!(broken.slug(), None);
+        Ok(())
     }
 
     #[test]
-    fn delete_ping_and_unknown_events_parse() {
+    fn delete_ping_and_unknown_events_parse() -> anyhow::Result<()> {
         let body = serde_json::to_vec(&json!({
             "ref": "feat/outbox",
             "ref_type": "branch",
             "pusher_type": "user",
             "repository": { "full_name": "Acme/Orders", "html_url": "https://github.com/Acme/Orders" }
-        }))
-        .unwrap();
-        let Event::Delete(e) = parse("delete", &body).unwrap() else {
-            panic!("expected a delete event");
+        }))?;
+        let Event::Delete(e) = parse("delete", &body)? else {
+            bail!("expected a delete event");
         };
         assert!(e.is_branch());
         assert_eq!(e.name, "feat/outbox");
         let body = serde_json::to_vec(&json!({
             "ref": "v1.2.0", "ref_type": "tag",
             "repository": { "full_name": "Acme/Orders" }
-        }))
-        .unwrap();
-        let Event::Delete(e) = parse("delete", &body).unwrap() else {
-            panic!("expected a delete event");
+        }))?;
+        let Event::Delete(e) = parse("delete", &body)? else {
+            bail!("expected a delete event");
         };
         assert!(!e.is_branch());
-        assert_eq!(parse("ping", b"{\"zen\":\"...\"}").unwrap(), Event::Ping);
-        assert_eq!(
-            parse("issues", b"{}").unwrap(),
-            Event::Other("issues".to_string())
-        );
+        assert_eq!(parse("ping", b"{\"zen\":\"...\"}")?, Event::Ping);
+        assert_eq!(parse("issues", b"{}")?, Event::Other("issues".to_string()));
+        Ok(())
     }
 
     #[test]
-    fn installation_deliveries_name_the_repositories_they_add() {
+    fn installation_deliveries_name_the_repositories_they_add() -> anyhow::Result<()> {
         let body = serde_json::to_vec(&json!({
             "action": "created",
             "installation": { "id": 77, "account": { "login": "Acme" } },
@@ -356,10 +358,9 @@ mod tests {
                 { "id": 1, "full_name": "Acme/Orders", "private": true },
                 { "id": 2, "full_name": "Acme/Billing", "private": true }
             ]
-        }))
-        .unwrap();
-        let Event::Installation(e) = parse("installation", &body).unwrap() else {
-            panic!("expected an installation event");
+        }))?;
+        let Event::Installation(e) = parse("installation", &body)? else {
+            bail!("expected an installation event");
         };
         assert!(e.is_cold_start());
         assert_eq!(e.installation.id, 77);
@@ -375,10 +376,9 @@ mod tests {
             "installation": { "id": 77 },
             "repositories_added": [{ "full_name": "Acme/Shipping" }],
             "repositories_removed": []
-        }))
-        .unwrap();
-        let Event::Installation(e) = parse("installation_repositories", &body).unwrap() else {
-            panic!("expected an installation event");
+        }))?;
+        let Event::Installation(e) = parse("installation_repositories", &body)? else {
+            bail!("expected an installation event");
         };
         assert!(e.is_cold_start());
         assert_eq!(e.repositories[0].full_name, "Acme/Shipping");
@@ -386,32 +386,39 @@ mod tests {
             "action": "deleted",
             "installation": { "id": 77 },
             "repositories": [{ "full_name": "Acme/Orders" }]
-        }))
-        .unwrap();
-        let Event::Installation(e) = parse("installation", &body).unwrap() else {
-            panic!("expected an installation event");
+        }))?;
+        let Event::Installation(e) = parse("installation", &body)? else {
+            bail!("expected an installation event");
         };
         assert!(!e.is_cold_start(), "an uninstall adds nothing");
+        Ok(())
     }
 
     #[test]
-    fn a_malformed_payload_names_its_kind() {
-        let err = parse("pull_request", b"{\"action\":\"closed\"}").unwrap_err();
+    fn a_malformed_payload_names_its_kind() -> anyhow::Result<()> {
+        let Err(err) = parse("pull_request", b"{\"action\":\"closed\"}") else {
+            bail!("a payload without a pull request parsed");
+        };
         assert!(
             err.to_string()
                 .starts_with("malformed pull_request payload"),
             "{err}"
         );
-        let err = parse("delete", b"not json").unwrap_err();
+        let Err(err) = parse("delete", b"not json") else {
+            bail!("a body that is not JSON parsed");
+        };
         assert!(
             err.to_string().starts_with("malformed delete payload"),
             "{err}"
         );
-        let err = parse("installation", b"{\"action\":\"created\"}").unwrap_err();
+        let Err(err) = parse("installation", b"{\"action\":\"created\"}") else {
+            bail!("a payload without an installation parsed");
+        };
         assert!(
             err.to_string()
                 .starts_with("malformed installation payload"),
             "{err}"
         );
+        Ok(())
     }
 }

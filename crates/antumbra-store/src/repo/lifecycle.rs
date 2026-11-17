@@ -27,7 +27,7 @@ use crate::error::map;
 use crate::repo::{expert, router};
 use crate::store::Store;
 
-const TABLE: &str = "expert_transition";
+const TABLE: &str = crate::tables::EXPERT_TRANSITION;
 
 #[derive(Serialize, Deserialize)]
 struct TransitionRow {
@@ -207,6 +207,7 @@ async fn in_states(store: &Store, keep: fn(ExpertStatus) -> bool) -> Result<Vec<
 mod tests {
     use super::*;
     use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use antumbra_core::UserId;
 
     fn expert(id: &str, owner: Option<&str>) -> Expert {
@@ -234,7 +235,7 @@ mod tests {
     }
 
     async fn store_with(ids: &[&str]) -> Result<Store> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         for id in ids {
             expert::insert(&s, &expert(id, None)).await?;
         }
@@ -291,9 +292,11 @@ mod tests {
             .await
             .is_err());
         transition(&s, &a, ExpertStatus::Dormant, operator(), None).await?;
-        let refused = transition(&s, &a, ExpertStatus::Deleted, operator(), None)
-            .await
-            .unwrap_err();
+        let Err(refused) = transition(&s, &a, ExpertStatus::Deleted, operator(), None).await else {
+            return Err(antumbra_core::AntumbraError::other(
+                "a dormant expert was deleted with nothing covering it",
+            ));
+        };
         assert!(refused.is_rejection(), "{refused}");
         assert_eq!(history(&s, &a).await?.len(), 1);
         assert!(transition(
@@ -364,7 +367,11 @@ mod tests {
         .await?;
         let a = ExpertId::new("expert:a");
         transition(&s, &a, ExpertStatus::Dormant, operator(), None).await?;
-        let loaded = load_router(&s).await?.expect("a router");
+        let Some(loaded) = load_router(&s).await? else {
+            return Err(antumbra_core::AntumbraError::other(
+                "the saved router did not load",
+            ));
+        };
         let kept: Vec<&str> = loaded.experts.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(kept, ["expert:b"]);
         assert!(
@@ -381,7 +388,7 @@ mod tests {
     /// hide the expert from other users hide its moves too.
     #[tokio::test]
     async fn a_move_carries_its_experts_owner() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         expert::insert(&s, &expert("expert:mine", Some("user:ada"))).await?;
         let id = ExpertId::new("expert:mine");
         transition(&s, &id, ExpertStatus::Dormant, operator(), None).await?;

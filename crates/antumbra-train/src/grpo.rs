@@ -372,47 +372,54 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn advantages_are_group_normalized_and_zero_without_spread() {
+    fn advantages_are_group_normalized_and_zero_without_spread() -> Result<()> {
         let a = group_advantages(&[1.0, 0.0, 0.0, 0.0]);
         // mean 0.25, so the winner is positive and the losers negative.
         assert!(a[0] > 0.0 && a[1] < 0.0);
         assert!((a.iter().sum::<f32>()).abs() < 1e-5); // zero-mean
         assert_eq!(group_advantages(&[1.0, 1.0, 1.0]), vec![0.0, 0.0, 0.0]);
         assert_eq!(group_advantages(&[0.0, 0.0]), vec![0.0, 0.0]);
+        Ok(())
     }
 
-    fn t(data: &[f32], dev: &Device) -> Tensor {
-        Tensor::from_vec(data.to_vec(), (1, data.len()), dev).unwrap()
+    fn ce(e: candle_core::Error) -> AntumbraError {
+        crate::candle_err("grpo test")(e)
+    }
+
+    fn t(data: &[f32], dev: &Device) -> Result<Tensor> {
+        Tensor::from_vec(data.to_vec(), (1, data.len()), dev).map_err(ce)
     }
 
     #[test]
-    fn grpo_loss_is_negative_advantage_when_on_policy_and_no_kl() {
+    fn grpo_loss_is_negative_advantage_when_on_policy_and_no_kl() -> Result<()> {
         let dev = Device::Cpu;
-        let lp = t(&[-0.5, -0.5], &dev);
+        let lp = t(&[-0.5, -0.5], &dev)?;
         // policy == old (ratio 1) and policy == ref (KL 0); advantage +1.
-        let adv = Tensor::from_vec(vec![1.0f32], (1, 1), &dev).unwrap();
-        let mask = t(&[1.0, 1.0], &dev);
+        let adv = Tensor::from_vec(vec![1.0f32], (1, 1), &dev).map_err(ce)?;
+        let mask = t(&[1.0, 1.0], &dev)?;
         let loss = grpo_loss(&lp, &lp, &lp, &adv, &mask, 0.2, 0.04)
-            .unwrap()
+            .map_err(ce)?
             .to_scalar::<f32>()
-            .unwrap();
+            .map_err(ce)?;
         // -mean(min(1*1, clip*1)) = -1
         assert!((loss + 1.0).abs() < 1e-5, "loss {loss}");
+        Ok(())
     }
 
     #[test]
-    fn grpo_loss_kl_penalizes_divergence_from_reference() {
+    fn grpo_loss_kl_penalizes_divergence_from_reference() -> Result<()> {
         let dev = Device::Cpu;
-        let policy = t(&[-0.5, -0.5], &dev);
-        let reference = t(&[-1.5, -1.5], &dev); // policy != ref -> KL > 0
-        let adv = Tensor::from_vec(vec![0.0f32], (1, 1), &dev).unwrap(); // no PG term
-        let mask = t(&[1.0, 1.0], &dev);
+        let policy = t(&[-0.5, -0.5], &dev)?;
+        let reference = t(&[-1.5, -1.5], &dev)?; // policy != ref -> KL > 0
+        let adv = Tensor::from_vec(vec![0.0f32], (1, 1), &dev).map_err(ce)?; // no PG term
+        let mask = t(&[1.0, 1.0], &dev)?;
         let loss = grpo_loss(&policy, &policy, &reference, &adv, &mask, 0.2, 1.0)
-            .unwrap()
+            .map_err(ce)?
             .to_scalar::<f32>()
-            .unwrap();
+            .map_err(ce)?;
         // loss = -(- beta*KL) = beta*KL > 0
         assert!(loss > 0.0, "expected positive KL loss, got {loss}");
+        Ok(())
     }
 
     /// A fake whose skill rises with each GRPO step, so the pass-rate climbs.
@@ -536,7 +543,7 @@ mod tests {
         }
     }
 
-    async fn stepped_with(critic: Option<CriticShaping>) -> (Vec<f32>, TrainOutcome) {
+    async fn stepped_with(critic: Option<CriticShaping>) -> Result<(Vec<f32>, TrainOutcome)> {
         let mut lm = RecordingLm {
             stepped: Vec::new(),
         };
@@ -555,40 +562,49 @@ mod tests {
             &cfg,
             critic.as_ref(),
         )
-        .await
-        .unwrap();
-        (lm.stepped.remove(0), out)
+        .await?;
+        let Some(stepped) = lm.stepped.into_iter().next() else {
+            return Err(AntumbraError::other("no step was taken"));
+        };
+        Ok((stepped, out))
     }
 
     /// Every answer the critic scored is read against the verifier, and a
     /// twin scoring the same answers is read against the critic.
     #[tokio::test]
-    async fn a_critic_is_watched_against_the_verifier_and_its_twin() {
-        let (_, plain) = stepped_with(None).await;
+    async fn a_critic_is_watched_against_the_verifier_and_its_twin() -> Result<()> {
+        let (_, plain) = stepped_with(None).await?;
         assert_eq!(plain.critic_watch, None);
         let shaping = CriticShaping {
             critic: Arc::new(Digit { invert: false }),
             weight: 1.0,
             twin: Some(Arc::new(Digit { invert: true })),
         };
-        let (_, out) = stepped_with(Some(shaping)).await;
-        let w = out.critic_watch.expect("watched");
+        let (_, out) = stepped_with(Some(shaping)).await?;
+        let Some(w) = out.critic_watch else {
+            return Err(AntumbraError::other("the critic was not watched"));
+        };
         assert_eq!(w.n, 4);
-        assert!(w.correlation.unwrap() > 0.0, "{w:?}");
+        let (Some(correlation), Some(twin_agreement)) = (w.correlation, w.twin_agreement) else {
+            return Err(AntumbraError::other(format!("an unread watch: {w:?}")));
+        };
+        assert!(correlation > 0.0, "{w:?}");
         // The inverted twin ranks the answers against the critic.
-        assert!(w.twin_agreement.unwrap() < 0.0, "{w:?}");
+        assert!(twin_agreement < 0.0, "{w:?}");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn a_critic_reorders_only_inside_the_verifiers_parts_and_fitness_ignores_it() {
-        let (plain, plain_out) = stepped_with(None).await;
+    async fn a_critic_reorders_only_inside_the_verifiers_parts_and_fitness_ignores_it() -> Result<()>
+    {
+        let (plain, plain_out) = stepped_with(None).await?;
         assert_eq!(plain[0], plain[1]);
         let tracking = CriticShaping {
             critic: Arc::new(Digit { invert: false }),
             weight: 1.0,
             twin: None,
         };
-        let (shaped, out) = stepped_with(Some(tracking)).await;
+        let (shaped, out) = stepped_with(Some(tracking)).await?;
         // "PASS 9" over "PASS 3" and "FAIL 7" over "FAIL 1", and every pass
         // still over every fail.
         assert!(shaped[1] > shaped[0] && shaped[3] > shaped[2], "{shaped:?}");
@@ -604,7 +620,7 @@ mod tests {
             weight: 1.0,
             twin: None,
         };
-        let (flipped, _) = stepped_with(Some(inverted)).await;
+        let (flipped, _) = stepped_with(Some(inverted)).await?;
         assert!(
             flipped[1] < flipped[0] && flipped[3] < flipped[2],
             "{flipped:?}"
@@ -613,10 +629,11 @@ mod tests {
             flipped[0].min(flipped[1]) > flipped[2].max(flipped[3]),
             "{flipped:?}"
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn grpo_lifts_pass_rate_over_rounds() {
+    async fn grpo_lifts_pass_rate_over_rounds() -> Result<()> {
         let mut lm = FakeGrpoLm {
             skill: AtomicUsize::new(1),
         };
@@ -638,11 +655,14 @@ mod tests {
             &cfg,
             None,
         )
-        .await
-        .unwrap();
+        .await?;
         assert_eq!(out.reward_curve.len(), 3);
-        assert!(out.reward_curve.last().unwrap() > out.reward_curve.first().unwrap());
+        let (Some(first), Some(last)) = (out.reward_curve.first(), out.reward_curve.last()) else {
+            return Err(AntumbraError::other("an empty reward curve"));
+        };
+        assert!(last > first);
         assert_eq!(out.capability_exemplars, vec!["do the thing"]);
+        Ok(())
     }
 
     /// Answers every prompt the same way each time: all pass for a mastered

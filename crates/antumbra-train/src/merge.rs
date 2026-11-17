@@ -22,7 +22,7 @@ use candle_core::{DType, Device, Tensor};
 use antumbra_core::{AntumbraError, Result};
 
 fn ce(e: candle_core::Error) -> AntumbraError {
-    AntumbraError::other(format!("merge: {e}"))
+    crate::candle_err("merge")(e)
 }
 
 /// What a merge kept.
@@ -334,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn qr_and_svd_reconstruct_what_they_took_apart() {
+    fn qr_and_svd_reconstruct_what_they_took_apart() -> Result<()> {
         let m = mat(12, 4, pseudo(1));
         let (q, r) = qr(&m);
         assert!(max_diff(&q.mul(&r), &m) < 1e-9);
@@ -349,23 +349,25 @@ mod tests {
         let diag = mat(5, 5, |i, j| if i == j { s[i] } else { 0.0 });
         assert!(max_diff(&u.mul(&diag).mul(&v.transpose()), &sq) < 1e-9);
         assert!(s.windows(2).all(|w| w[0] >= w[1]), "descending: {s:?}");
+        Ok(())
     }
 
     /// An adapter merged with itself is itself: all of its energy is kept and
     /// the merged delta is the original one.
     #[test]
-    fn an_adapter_merged_with_itself_keeps_everything() {
+    fn an_adapter_merged_with_itself_keeps_everything() -> Result<()> {
         let (a, b) = (mat(3, 10, pseudo(3)), mat(8, 3, pseudo(4)));
         let (ma, mb, kept, total) = merge_module(&a, &b, &a, &b, 3);
         assert!((kept / total - 1.0).abs() < 1e-9);
         assert_eq!((ma.rows, ma.cols, mb.rows, mb.cols), (3, 10, 8, 3));
         assert!(max_diff(&mb.mul(&ma), &b.mul(&a)) < 1e-9);
+        Ok(())
     }
 
     /// Siblings with orthogonal subspaces and equal weight keep half the
     /// energy: they are not siblings.
     #[test]
-    fn orthogonal_adapters_keep_half() {
+    fn orthogonal_adapters_keep_half() -> Result<()> {
         let unit = |rows: usize, cols: usize, at: usize| {
             mat(rows, cols, move |r, c| f64::from(u8::from(r == c + at)))
         };
@@ -376,6 +378,7 @@ mod tests {
         );
         let (_, _, kept, total) = merge_module(&a1, &b1, &a2, &b2, 2);
         assert!((kept / total - 0.5).abs() < 1e-9, "{}", kept / total);
+        Ok(())
     }
 
     #[test]

@@ -4,24 +4,22 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::Value;
 
+use antumbra_http::SurfaceClient;
+
+use super::surface_args::SurfaceArgs;
 use super::{
     apply, auto_mode, bridge, brief, conventions, dependencies, examine, mcp_lint, mcp_stdio,
     reanchor, render, repository_root, skills, Inputs, Standing,
 };
 use crate::cli::ClaudeAction;
+use crate::machine::home;
 
 const SURFACE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A hook has seconds, not a minute, and is not worth waiting on.
 const HOOK_TIMEOUT: Duration = Duration::from_secs(5);
-
-fn home() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
-}
 
 fn project(dir: Option<PathBuf>) -> anyhow::Result<PathBuf> {
     match dir {
@@ -30,51 +28,12 @@ fn project(dir: Option<PathBuf>) -> anyhow::Result<PathBuf> {
     }
 }
 
-/// One tool call over `POST {surface}/mcp/call`. A refusal comes back with the
+/// The client for one `antumbra claude` command's calls to the surface, from
+/// the machine `ANTUMBRA_HOST_ID` names when it names one, so the server
+/// stamps what the command writes with it. A refusal comes back with the
 /// surface's own words, since "400" tells a user nothing they can act on.
-fn call_surface(
-    agent: &ureq::Agent,
-    surface: &str,
-    token: Option<&str>,
-    tool: &str,
-    arguments: Value,
-) -> anyhow::Result<Value> {
-    let url = format!("{}/mcp/call", surface.trim_end_matches('/'));
-    let mut request = agent.post(&url).header("content-type", "application/json");
-    if let Some(token) = token {
-        request = request.header("authorization", &format!("Bearer {token}"));
-    }
-    let mut response = request
-        .send_json(json!({ "tool": tool, "arguments": arguments }))
-        .map_err(|e| anyhow::anyhow!("{tool}: could not reach {url}: {e}"))?;
-    let status = response.status();
-    let body = response
-        .body_mut()
-        .read_json::<Value>()
-        .unwrap_or(Value::Null);
-    let refusal = body.get("error").map(|e| match e.as_str() {
-        Some(text) => text.to_string(),
-        None => e.to_string(),
-    });
-    match (status.is_success(), refusal) {
-        (true, None) => Ok(body),
-        (_, Some(said)) => anyhow::bail!("{tool}: {said}"),
-        (false, None) => anyhow::bail!("{tool}: {url} answered {status}"),
-    }
-}
-
-/// An HTTP agent for the surface that hands back a refusal's body, not just its
-/// status, so the surface's own words reach the user.
-fn surface_agent() -> ureq::Agent {
-    surface_agent_within(SURFACE_TIMEOUT)
-}
-
-fn surface_agent_within(patience: Duration) -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(patience))
-        .http_status_as_error(false)
-        .build()
-        .into()
+fn surface_client(surface: &str, token: Option<&str>, patience: Duration) -> SurfaceClient {
+    SurfaceClient::new(surface, token, patience).from_machine(antumbra_http::host_id())
 }
 
 /// A working tree's `origin` URL, when it has one.
@@ -222,8 +181,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
         ClaudeAction::Dependencies {
             dir,
             repos,
-            surface,
-            token,
+            surface: SurfaceArgs { surface, token },
             dry_run,
         } => {
             let trees: Vec<dependencies::Tree> = tree_dirs(&project(dir)?, repos.as_deref())
@@ -239,9 +197,9 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             if trees.is_empty() {
                 anyhow::bail!("no repository with an `origin` remote to read");
             }
-            let agent = surface_agent();
+            let client = surface_client(&surface, token.as_deref(), SURFACE_TIMEOUT);
             let call = |tool: &str, arguments: Value| {
-                call_surface(&agent, &surface, token.as_deref(), tool, arguments)
+                client.call(tool, arguments).map_err(anyhow::Error::from)
             };
             if dry_run {
                 println!("dry run: nothing recorded");
@@ -251,13 +209,12 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             }
         }
         ClaudeAction::Remember {
-            surface,
-            token,
+            surface: SurfaceArgs { surface, token },
             dry_run,
         } => {
-            let agent = surface_agent();
+            let client = surface_client(&surface, token.as_deref(), SURFACE_TIMEOUT);
             let call = |tool: &str, arguments: Value| {
-                call_surface(&agent, &surface, token.as_deref(), tool, arguments)
+                client.call(tool, arguments).map_err(anyhow::Error::from)
             };
             if dry_run {
                 println!("dry run: nothing written");
@@ -272,14 +229,13 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
         ClaudeAction::AutoModeEnv {
             dir,
             repos,
-            surface,
-            token,
+            surface: SurfaceArgs { surface, token },
             each,
         } => {
             let trees = working_trees(&project(dir)?, repos.as_deref());
-            let agent = surface_agent();
+            let client = surface_client(&surface, token.as_deref(), SURFACE_TIMEOUT);
             let call = |tool: &str, arguments: Value| {
-                call_surface(&agent, &surface, token.as_deref(), tool, arguments)
+                client.call(tool, arguments).map_err(anyhow::Error::from)
             };
             // Memory is a second opinion. Without it the remotes still draft.
             let asked = auto_mode::remembered_repositories(&call).and_then(|remembered| {
@@ -326,17 +282,20 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
         }
         ClaudeAction::SkillUsed {
             name,
-            surface,
-            token,
+            surface: SurfaceArgs { surface, token },
         } => {
             let as_a_hook = name.is_none();
-            let agent = surface_agent_within(if as_a_hook {
-                HOOK_TIMEOUT
-            } else {
-                SURFACE_TIMEOUT
-            });
+            let client = surface_client(
+                &surface,
+                token.as_deref(),
+                if as_a_hook {
+                    HOOK_TIMEOUT
+                } else {
+                    SURFACE_TIMEOUT
+                },
+            );
             let call = |tool: &str, arguments: Value| {
-                call_surface(&agent, &surface, token.as_deref(), tool, arguments)
+                client.call(tool, arguments).map_err(anyhow::Error::from)
             };
             let counted = match name {
                 Some(name) => skills::record(&call, &name).map(|how| Some((name, how))),
@@ -365,12 +324,11 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
         ClaudeAction::Skills {
             dir,
             days,
-            surface,
-            token,
+            surface: SurfaceArgs { surface, token },
         } => {
-            let agent = surface_agent();
+            let client = surface_client(&surface, token.as_deref(), SURFACE_TIMEOUT);
             let call = |tool: &str, arguments: Value| {
-                call_surface(&agent, &surface, token.as_deref(), tool, arguments)
+                client.call(tool, arguments).map_err(anyhow::Error::from)
             };
             let used = skills::usage(&call)?;
             let installed = installed_skills(home().as_deref(), &project(dir)?);
@@ -382,8 +340,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             limit,
             days,
             dry_run,
-            surface,
-            token,
+            surface: SurfaceArgs { surface, token },
         } => {
             let project = project(dir)?;
             let repo = origin_of(&project)
@@ -399,9 +356,9 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
                 let cutoff = chrono::Utc::now() - chrono::Duration::days(days);
                 merges = reanchor::merged_since(merges, cutoff);
             }
-            let agent = surface_agent();
+            let client = surface_client(&surface, token.as_deref(), SURFACE_TIMEOUT);
             let call = |tool: &str, arguments: Value| {
-                call_surface(&agent, &surface, token.as_deref(), tool, arguments)
+                client.call(tool, arguments).map_err(anyhow::Error::from)
             };
             if dry_run {
                 println!("dry run: nothing written");

@@ -6,6 +6,7 @@ members = [
     "crates/antumbra-store",
     "crates/antumbra-embed",
     "crates/antumbra-copal",
+    "crates/antumbra-http",
     "crates/antumbra-github",
     "crates/antumbra-ingest",
     "crates/antumbra-bench",
@@ -63,3 +64,12 @@ opt-level = 1
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+# The project's rule: no unwrap or expect without a reason, and no panic, in
+# production code. Test code is allowed them until its sweep lands (#295 to
+# #302): a cfg_attr at each crate root, and an attribute atop each test file.
+# A justified site in production code carries an #[allow] and its reason.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "warn"

@@ -26,6 +26,9 @@
 //! [`HttpEmbedder`] deliberately has no `Debug` impl, so the key cannot leak
 //! through `{:?}`.
 
+#[cfg(feature = "clap")]
+pub mod args;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -37,10 +40,9 @@ use antumbra_store::EMBED_DIM;
 
 /// The one network operation an [`HttpEmbedder`] performs: POST a JSON body to an
 /// embeddings endpoint and return the parsed JSON response. Behind a trait so the
-/// embedder's logic is testable without a socket.
-pub trait EmbedTransport: Send + Sync {
-    fn post(&self, url: &str, api_key: Option<&str>, body: &Value) -> Result<Value>;
-}
+/// embedder's logic is testable without a socket; the trait, and the `ureq`
+/// transport behind it, are the ones every endpoint client shares.
+pub use antumbra_http::JsonPost as EmbedTransport;
 
 /// Default per-request budget for the embeddings endpoint, overridable with
 /// `ANTUMBRA_EMBED_TIMEOUT_SECS`. Without a bound a hung or unreachable endpoint
@@ -63,62 +65,7 @@ const EMBED_MAX_CHARS: usize = 1200;
 
 fn embed_max_chars() -> usize {
     static CACHE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *CACHE.get_or_init(|| {
-        std::env::var("ANTUMBRA_EMBED_MAX_CHARS")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .filter(|&n| n > 0)
-            .unwrap_or(EMBED_MAX_CHARS)
-    })
-}
-
-/// The leading `max` characters of `text` as a slice -- no allocation, and the
-/// cut lands on a `char` boundary by construction (`char_indices` yields only
-/// boundaries), so multi-byte text can never be split mid-codepoint.
-fn cap_chars(text: &str, max: usize) -> &str {
-    match text.char_indices().nth(max) {
-        Some((idx, _)) => &text[..idx],
-        None => text,
-    }
-}
-
-/// The production transport: a blocking `ureq` POST over an agent with a bounded
-/// global timeout, so a dead endpoint fails fast instead of hanging the worker.
-struct UreqTransport {
-    agent: ureq::Agent,
-}
-
-impl UreqTransport {
-    fn new() -> Self {
-        let secs = std::env::var("ANTUMBRA_EMBED_TIMEOUT_SECS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .filter(|&s| s > 0)
-            .unwrap_or(EMBED_TIMEOUT_SECS);
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(std::time::Duration::from_secs(secs)))
-            .build()
-            .into();
-        Self { agent }
-    }
-}
-
-impl EmbedTransport for UreqTransport {
-    fn post(&self, url: &str, api_key: Option<&str>, body: &Value) -> Result<Value> {
-        let mut req = self
-            .agent
-            .post(url)
-            .header("content-type", "application/json");
-        if let Some(key) = api_key {
-            req = req.header("authorization", &format!("Bearer {key}"));
-        }
-        let mut resp = req
-            .send_json(body)
-            .map_err(|e| AntumbraError::other(format!("embed POST {url} failed: {e}")))?;
-        resp.body_mut()
-            .read_json::<Value>()
-            .map_err(|e| AntumbraError::other(format!("embed response was not JSON: {e}")))
-    }
+    *CACHE.get_or_init(|| antumbra_http::env_positive("ANTUMBRA_EMBED_MAX_CHARS", EMBED_MAX_CHARS))
 }
 
 /// Embeds text by calling an OpenAI-compatible `/embeddings` endpoint.
@@ -161,12 +108,17 @@ impl HttpEmbedder {
             model,
             api_key,
             source_dim,
-            transport: Arc::new(UreqTransport::new()),
+            // The shared transport: a bounded patience, and a refusal's body
+            // in the error rather than a bare status.
+            transport: Arc::new(antumbra_http::UreqJson::new(
+                "embed",
+                antumbra_http::patience("ANTUMBRA_EMBED_TIMEOUT_SECS", EMBED_TIMEOUT_SECS),
+            )),
         }
     }
 
     fn request_body_capped(&self, text: &str, cap: usize) -> Value {
-        json!({ "model": self.model, "input": cap_chars(text, cap) })
+        json!({ "model": self.model, "input": antumbra_core::text::first_chars(text, cap) })
     }
 
     /// Pull the embedding out of an OpenAI-shaped response (`data[0].embedding`)
@@ -258,18 +210,7 @@ impl Embedder for HttpEmbedder {
 mod tests {
     use super::*;
 
-    /// Returns a canned response, so the request shaping + parsing are tested
-    /// without a socket.
-    struct FakeTransport(Result<Value>);
-
-    impl EmbedTransport for FakeTransport {
-        fn post(&self, _url: &str, _api_key: Option<&str>, _body: &Value) -> Result<Value> {
-            self.0
-                .as_ref()
-                .map(Clone::clone)
-                .map_err(|e| AntumbraError::other(e.to_string()))
-        }
-    }
+    use antumbra_http::testing::{serve, Canned};
 
     fn embedder(resp: Result<Value>) -> HttpEmbedder {
         embedder_with_dim(resp, None)
@@ -281,41 +222,75 @@ mod tests {
             model: "all-MiniLM-L6-v2".into(),
             api_key: None,
             source_dim,
-            transport: Arc::new(FakeTransport(resp)),
+            transport: Arc::new(Canned(resp)),
         }
     }
 
+    /// The endpoint's refusal reaches the caller in the endpoint's words: a
+    /// llama.cpp or text-embeddings-inference 4xx used to become a bare status.
     #[tokio::test]
-    async fn parses_an_openai_shaped_embedding() {
+    async fn a_refusals_body_is_surfaced() -> anyhow::Result<()> {
+        // Three answers: the embedder halves its cap and retries twice.
+        let (url, served) = serve(
+            3,
+            422,
+            r#"{"error":"input is too long for the model","error_type":"Validation"}"#,
+        )?;
+        let embedder = HttpEmbedder::new(url, "all-MiniLM-L6-v2".into(), Some("k3y".into()));
+        let Err(e) = embedder.embed("hello").await else {
+            anyhow::bail!("a 422 was accepted");
+        };
+        let shown = e.to_string();
+        anyhow::ensure!(
+            shown.starts_with("embed POST http://")
+                && shown.contains("answered 422: input is too long for the model"),
+            "{shown}"
+        );
+        let requests = served.requests()?;
+        anyhow::ensure!(requests.len() == 3, "{} requests", requests.len());
+        anyhow::ensure!(
+            requests[0]
+                .to_lowercase()
+                .contains("authorization: bearer k3y"),
+            "{}",
+            requests[0]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn parses_an_openai_shaped_embedding() -> anyhow::Result<()> {
         let resp = json!({ "data": [ { "embedding": vec![0.25f32; EMBED_DIM] } ] });
-        let v = embedder(Ok(resp)).embed("hello").await.unwrap();
+        let v = embedder(Ok(resp)).embed("hello").await?;
         assert_eq!(v.len(), EMBED_DIM);
         assert!((v[0] - 0.25).abs() < 1e-6);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn rejects_a_wrong_dimension() {
+    async fn rejects_a_wrong_dimension() -> anyhow::Result<()> {
         let resp = json!({ "data": [ { "embedding": vec![0.1f32; 8] } ] });
         assert!(embedder(Ok(resp)).embed("hello").await.is_err());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn matryoshka_truncates_and_renormalizes_to_unit_norm() {
+    async fn matryoshka_truncates_and_renormalizes_to_unit_norm() -> anyhow::Result<()> {
         // A 1024-dim Matryoshka response with source_dim=Some(1024) yields a
         // unit-norm EMBED_DIM (384) vector: the stored vector is always the
         // index width regardless of the model's native dimension.
         let resp = json!({ "data": [ { "embedding": vec![0.5f32; 1024] } ] });
         let v = embedder_with_dim(Ok(resp), Some(1024))
             .embed("hello")
-            .await
-            .unwrap();
+            .await?;
         assert_eq!(v.len(), EMBED_DIM);
         let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((norm - 1.0).abs() < 1e-5, "unit norm, got {norm}");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn matryoshka_rejects_when_source_dim_mismatches() {
+    async fn matryoshka_rejects_when_source_dim_mismatches() -> anyhow::Result<()> {
         // source_dim=Some(1024) but the endpoint returned 512: rejected rather
         // than silently storing a wrong-width prefix.
         let resp = json!({ "data": [ { "embedding": vec![0.1f32; 512] } ] });
@@ -323,10 +298,12 @@ mod tests {
             .embed("hello")
             .await
             .is_err());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn matryoshka_rejects_an_exact_embed_dim_response_when_source_is_longer() {
+    async fn matryoshka_rejects_an_exact_embed_dim_response_when_source_is_longer(
+    ) -> anyhow::Result<()> {
         // With source_dim=Some(1024) a bare EMBED_DIM response is the wrong
         // width for the configured Matryoshka source and is rejected.
         let resp = json!({ "data": [ { "embedding": vec![0.25f32; EMBED_DIM] } ] });
@@ -334,22 +311,25 @@ mod tests {
             .embed("hello")
             .await
             .is_err());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn errors_on_a_malformed_response() {
+    async fn errors_on_a_malformed_response() -> anyhow::Result<()> {
         assert!(embedder(Ok(json!({ "unexpected": true })))
             .embed("hello")
             .await
             .is_err());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn propagates_a_transport_error() {
+    async fn propagates_a_transport_error() -> anyhow::Result<()> {
         assert!(embedder(Err(AntumbraError::other("connection refused")))
             .embed("hello")
             .await
             .is_err());
+        Ok(())
     }
 
     /// Refuses input longer than a token-ish budget, like llama.cpp answering
@@ -370,7 +350,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dense_input_that_still_overflows_the_window_retries_at_a_halved_cap() {
+    async fn dense_input_that_still_overflows_the_window_retries_at_a_halved_cap(
+    ) -> anyhow::Result<()> {
         // The endpoint's real window sits BELOW the char cap (the dense-text
         // case: ~2.3 chars/token puts 1200 chars past 512 tokens). First
         // attempt 500s; the halved retry fits and succeeds.
@@ -384,39 +365,32 @@ mod tests {
             }),
         };
         let long = "x".repeat(EMBED_MAX_CHARS * 2);
-        let v = e.embed(&long).await.unwrap();
+        let v = e.embed(&long).await?;
         assert_eq!(v.len(), EMBED_DIM);
+        Ok(())
     }
 
     #[test]
-    fn request_body_is_openai_shaped() {
+    fn request_body_is_openai_shaped() -> anyhow::Result<()> {
         let e = embedder(Ok(Value::Null));
         let body = e.request_body_capped("hi", embed_max_chars());
         assert_eq!(body["model"], "all-MiniLM-L6-v2");
         assert_eq!(body["input"], "hi");
+        Ok(())
     }
 
     #[test]
-    fn request_body_caps_over_window_input() {
+    fn request_body_caps_over_window_input() -> anyhow::Result<()> {
         // A memory far past the embedding window ships only its head -- the
         // endpoint must never see input it answers with a hard 500.
         let e = embedder(Ok(Value::Null));
         let long = "x".repeat(EMBED_MAX_CHARS * 4);
         let body = e.request_body_capped(&long, embed_max_chars());
-        assert_eq!(
-            body["input"].as_str().unwrap().chars().count(),
-            EMBED_MAX_CHARS
-        );
-    }
-
-    #[test]
-    fn cap_chars_counts_characters_not_bytes_and_keeps_short_input_whole() {
-        // Multi-byte text: the cap is a character count and the cut cannot
-        // split a codepoint (a byte-indexed slice here would panic).
-        let s = "é".repeat(10);
-        assert_eq!(cap_chars(&s, 4), "éééé");
-        // Under the cap: same slice back, untouched.
-        assert_eq!(cap_chars("short", 1200), "short");
+        let Some(input) = body["input"].as_str() else {
+            anyhow::bail!("the input is a string");
+        };
+        assert_eq!(input.chars().count(), EMBED_MAX_CHARS);
+        Ok(())
     }
 
     // The irreducible real POST: point `ANTUMBRA_EMBED_URL` at a running
@@ -424,17 +398,17 @@ mod tests {
     // 384-dim model). Opt-in; it needs a server, so it cannot run offline.
     #[tokio::test]
     #[ignore = "needs a live embeddings endpoint (set ANTUMBRA_EMBED_URL)"]
-    async fn real_endpoint_returns_the_right_dimension() {
+    async fn real_endpoint_returns_the_right_dimension() -> anyhow::Result<()> {
         let Ok(url) = std::env::var("ANTUMBRA_EMBED_URL") else {
-            return;
+            return Ok(());
         };
         let model =
             std::env::var("ANTUMBRA_EMBED_MODEL").unwrap_or_else(|_| "all-MiniLM-L6-v2".into());
         let key = std::env::var("ANTUMBRA_EMBED_KEY").ok();
         let v = HttpEmbedder::new(url, model, key)
             .embed("a probe sentence")
-            .await
-            .unwrap();
+            .await?;
         assert_eq!(v.len(), EMBED_DIM);
+        Ok(())
     }
 }

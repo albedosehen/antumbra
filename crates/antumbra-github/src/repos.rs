@@ -72,11 +72,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_explicit_map_normalizes_slugs_and_ignores_the_rest() {
+    fn an_explicit_map_normalizes_slugs_and_ignores_the_rest() -> anyhow::Result<()> {
         let map = RepoMap::from_json(
             r#"{"GitHub.com/Acme/Orders.git": "ws:acme", "github.com/acme/billing": " ws:billing "}"#,
-        )
-        .unwrap();
+        )?;
         assert_eq!(map.mapped(), Some(2));
         assert_eq!(
             map.tenant_for("github.com/acme/orders").map(|t| t.as_str()),
@@ -88,10 +87,11 @@ mod tests {
             Some("ws:billing")
         );
         assert_eq!(map.tenant_for("github.com/acme/other"), None);
+        Ok(())
     }
 
     #[test]
-    fn all_sends_every_repository_to_one_workspace() {
+    fn all_sends_every_repository_to_one_workspace() -> anyhow::Result<()> {
         let map = RepoMap::all("ws:everything");
         assert_eq!(map.mapped(), None);
         assert_eq!(
@@ -99,10 +99,11 @@ mod tests {
                 .map(|t| t.as_str()),
             Some("ws:everything")
         );
+        Ok(())
     }
 
     #[test]
-    fn bad_maps_are_refused_with_the_reason() {
+    fn bad_maps_are_refused_with_the_reason() -> anyhow::Result<()> {
         assert!(matches!(RepoMap::from_json("{}"), Err(RepoMapError::Empty)));
         assert!(matches!(
             RepoMap::from_json("[]"),
@@ -116,5 +117,6 @@ mod tests {
             RepoMap::from_json(r#"{"github.com/acme/orders": " "}"#),
             Err(RepoMapError::BadEntry(_))
         ));
+        Ok(())
     }
 }

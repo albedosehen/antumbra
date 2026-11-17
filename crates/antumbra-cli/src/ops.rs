@@ -27,9 +27,12 @@ use antumbra_train::{
 use crate::{refresh_router, RouterRefresh};
 
 use antumbra_copal::CopalArchive;
-use antumbra_core::{CompartmentId, GitProvenance, TenantId, UserId};
+use antumbra_core::{CompartmentId, TenantId, UserId};
 pub use antumbra_ingest::Ingested;
 use antumbra_store::repo::{lifecycle, principal};
+use clap::Args;
+
+use crate::capture_args::CaptureSftArgs;
 
 /// Serialize capture tasks back to the `{id, prompt, verify, completion, skill}`
 /// corpus shape (captures carry a completion; seeds do not).
@@ -51,22 +54,39 @@ fn corpus_to_json(tasks: &[CorpusTask]) -> Vec<serde_json::Value> {
         .collect()
 }
 
-/// Parameters for [`consolidate`]; mirrors the clap variant so `main.rs`'s arm
-/// stays a one-line dispatch. Fields are read only in the `models` build; the
-/// stub ignores them.
+/// What `antumbra consolidate` is given. Fields are read only in the `models`
+/// build; the stub ignores them.
+#[derive(Args, Debug)]
 #[cfg_attr(not(feature = "models"), allow(dead_code))]
 pub struct ConsolidateArgs {
+    /// JSON array of normalized memories (see `memory::MemoryRecord`).
+    #[arg(long)]
     pub source: String,
+    /// Accumulating consolidated corpus: the replay source and demotion log.
+    #[arg(long, default_value = "corpora/_consolidated.json")]
     pub log: String,
+    /// Reinforcement count at/above which recurrence is satisfied.
+    #[arg(long, default_value_t = 2)]
     pub min_recurrence: u32,
+    /// Confidence floor a graduating memory must clear.
+    #[arg(long, default_value_t = 0.5)]
     pub min_confidence: f32,
+    /// Internalize the graduates now (else dry-run scoring + log only).
+    #[arg(long, default_value_t = false)]
     pub train: bool,
+    /// Rehearsal examples per winner interleaved into capture SFT.
+    #[arg(long, default_value_t = 0.5)]
     pub replay_ratio: f64,
+    #[arg(long, default_value = "expert:consolidated")]
     pub run: String,
-    pub rounds: usize,
-    pub samples: usize,
-    pub max_new_tokens: usize,
-    pub lr: f64,
+    #[command(flatten)]
+    pub capture: CaptureSftArgs,
+    /// Verified winners per optimizer step. 1 steps on each example in
+    /// turn; more steps on the mean gradient of that many at a time (true
+    /// mini-batch descent), which is less noisy, so a higher `--lr` stays
+    /// stable and no example dominates by being trained last. Examples are
+    /// backpropagated one at a time, so memory does not grow with it.
+    #[arg(long, default_value_t = 1)]
     pub batch_size: usize,
 }
 
@@ -135,10 +155,10 @@ pub async fn consolidate(url: &str, a: ConsolidateArgs) -> anyhow::Result<()> {
         let store = crate::connect(url).await?;
         let embedder = crate::make_embedder()?;
         let cfg = RaftConfig {
-            samples_per_task: a.samples,
-            rounds: a.rounds,
-            max_new_tokens: a.max_new_tokens,
-            learning_rate: a.lr,
+            samples_per_task: a.capture.samples,
+            rounds: a.capture.rounds,
+            max_new_tokens: a.capture.max_new_tokens,
+            learning_rate: a.capture.lr,
             replay_ratio: a.replay_ratio,
             batch_size: a.batch_size,
             ..RaftConfig::default()
@@ -235,16 +255,24 @@ pub async fn consolidate(_url: &str, _a: ConsolidateArgs) -> anyhow::Result<()> 
     anyhow::bail!("`consolidate` requires building with --features models (candle + a GPU)")
 }
 
-/// Arguments for [`propose_compartments`].
+/// What `antumbra propose-compartments` is given.
+#[derive(Args, Debug)]
 pub struct ProposeCompartmentsArgs {
+    #[arg(long)]
     pub tenant: String,
+    #[arg(long)]
     pub user: String,
-    /// The inbox compartment whose contents are clustered. Defaults to the MCP
-    /// session default `comp:{tenant}:{user}:default`.
+    /// The inbox compartment to cluster; defaults to comp:{tenant}:{user}:default.
+    #[arg(long)]
     pub inbox: Option<String>,
+    /// Cosine at/above which two memories cluster together.
+    #[arg(long, default_value_t = 0.6)]
     pub similarity_threshold: f32,
+    /// Smallest cluster worth proposing.
+    #[arg(long, default_value_t = 3)]
     pub min_size: usize,
-    /// Persist proposals as `Origin::Proposed` compartments and move members in.
+    /// Persist the proposals (else print only).
+    #[arg(long, default_value_t = false)]
     pub apply: bool,
 }
 
@@ -395,13 +423,93 @@ async fn refresh_after_move(_store: &antumbra_store::Store) -> anyhow::Result<()
     Ok(())
 }
 
-/// Arguments for [`remember`].
+/// What `antumbra revoke-token` is given: the token to end, as a file or an
+/// id; neither means the token saved on this machine.
+#[derive(Args, Debug)]
+pub struct RevokeTokenArgs {
+    /// A file holding the token to revoke (the one `setup` saves, by default).
+    #[arg(long, conflicts_with = "jti")]
+    pub token_file: Option<std::path::PathBuf>,
+    /// The token's id (its `jti` claim), when the token itself is not at hand.
+    /// The revocation is then kept for a year, the longest a token lives.
+    #[arg(long)]
+    pub jti: Option<String>,
+    /// Why, recorded with the revocation.
+    #[arg(long)]
+    pub note: Option<String>,
+}
+
+/// The id to revoke and how long to keep the revocation: from the token's own
+/// claims when the token is at hand (its id and expiry), else the given id
+/// kept for a year.
+pub fn revocation_of(
+    args: &RevokeTokenArgs,
+) -> anyhow::Result<(String, chrono::DateTime<chrono::Utc>)> {
+    let now = chrono::Utc::now();
+    let a_year = now + chrono::Duration::days(365);
+    if let Some(jti) = &args.jti {
+        anyhow::ensure!(!jti.trim().is_empty(), "--jti is empty");
+        return Ok((jti.trim().to_string(), a_year));
+    }
+    let path = match &args.token_file {
+        Some(path) => path.clone(),
+        None => crate::machine::home()
+            .ok_or_else(|| anyhow::anyhow!("no home directory; pass --token-file or --jti"))?
+            .join(".antumbra")
+            .join("token.txt"),
+    };
+    let token = std::fs::read_to_string(&path)
+        .map_err(|e| anyhow::anyhow!("cannot read the token file {}: {e}", path.display()))?;
+    revocation_of_token(token.trim(), a_year)
+}
+
+/// [`revocation_of`] for a token's text.
+fn revocation_of_token(
+    token: &str,
+    a_year: chrono::DateTime<chrono::Utc>,
+) -> anyhow::Result<(String, chrono::DateTime<chrono::Utc>)> {
+    let Some(jti) = antumbra_auth::unverified::jti(token) else {
+        anyhow::bail!(
+            "this token carries no id, so it cannot be revoked on its own (it was minted before \
+             tokens had ids); rotate the signing key to end it"
+        );
+    };
+    let until = antumbra_auth::unverified::expires(token)
+        .and_then(|secs| chrono::DateTime::from_timestamp(secs, 0))
+        .unwrap_or(a_year);
+    Ok((jti, until))
+}
+
+/// End a token before it expires, through the owner connection: the id goes
+/// on the store's denylist, which every networked server reads every half
+/// minute.
+pub async fn revoke_token(url: &str, args: RevokeTokenArgs) -> anyhow::Result<()> {
+    let (jti, until) = revocation_of(&args)?;
+    let store = crate::connect(url).await?;
+    antumbra_store::repo::revocation::revoke(&store, &jti, until, args.note).await?;
+    println!(
+        "revoked token {jti}: every networked server refuses it within 30 seconds, and the \
+         revocation is kept until {}",
+        until.to_rfc3339()
+    );
+    Ok(())
+}
+
+/// What `antumbra remember` is given.
+#[derive(Args, Debug)]
 pub struct RememberArgs {
+    #[arg(long)]
     pub tenant: String,
+    #[arg(long)]
     pub user: String,
+    #[arg(long)]
     pub compartment: String,
+    /// The memory content: the behavior/fact to internalize on consolidation.
+    #[arg(long)]
     pub content: String,
+    #[arg(long, default_value = "world")]
     pub network: String,
+    #[arg(long, default_value_t = 1.0)]
     pub confidence: f32,
 }
 
@@ -605,23 +713,46 @@ pub async fn reembed(url: &str, tenant: &str, dry_run: bool, yes: bool) -> anyho
     Ok(())
 }
 
-/// What `ingest` needs: the workspace identity, the document, and its anchor.
+/// What `antumbra ingest` is given: the workspace identity, the document (a
+/// file, or the command that prints it), and what anchors it.
+#[derive(Args, Debug)]
 pub struct IngestArgs {
+    #[arg(long)]
     pub tenant: String,
+    #[arg(long)]
     pub user: String,
+    /// The document's title (groups and names its chunks; re-ingesting a
+    /// title replaces its chunks in place).
+    #[arg(long)]
     pub title: String,
-    /// Where the document came from, for the record.
+    /// Read the document from this file.
+    #[arg(long, conflicts_with = "run")]
+    pub file: Option<std::path::PathBuf>,
+    /// Where the document came from, for the record (defaults to the file
+    /// path or the command line).
+    #[arg(long)]
     pub source: Option<String>,
-    /// The document text (a file's contents, or what a command printed).
-    pub content: String,
-    /// The git anchor to fold into every chunk's `source`, when known.
-    pub provenance: Option<GitProvenance>,
-    /// The compartment to keep the document in (`None` = the shared pool).
+    /// The file the document is about, added to the git anchor.
+    #[arg(long)]
+    pub path: Option<String>,
+    /// Do not stamp the current repository / commit / branch on the chunks.
+    #[arg(long, default_value_t = false)]
+    pub no_git: bool,
+    /// Keep the document in this compartment, so only its owner and the people
+    /// it is shared with can recall it. Omit it for the workspace's shared
+    /// pool, which every member can recall.
+    #[arg(long)]
     pub compartment: Option<String>,
+    /// The command whose stdout is the document, after `--`
+    /// (`antumbra ingest --title routes -- deno task routes`).
+    #[arg(last = true)]
+    pub run: Vec<String>,
 }
 
 /// Ingest a knowledge document from the CLI: chunk, embed, store, the same shape
-/// the MCP `ingest_document` tool writes, so `recall_documents` finds it. With
+/// the MCP `ingest_document` tool writes, so `recall_documents` finds it. The
+/// document is the file `--file` names or what the command after `--` prints,
+/// stamped with the current repository's anchor unless `--no-git`. With
 /// an `archive`, the same document-of-record contract as the server: the
 /// original is uploaded to copal FIRST and a failure fails the whole ingest,
 /// because a configured archive that silently dropped originals would be
@@ -631,6 +762,25 @@ pub async fn ingest(
     archive: Option<&CopalArchive>,
     a: IngestArgs,
 ) -> anyhow::Result<Ingested> {
+    let (content, default_source) = match (&a.file, a.run.is_empty()) {
+        (Some(f), true) => (
+            std::fs::read_to_string(f).map_err(|e| anyhow::anyhow!("read {}: {e}", f.display()))?,
+            f.display().to_string(),
+        ),
+        (None, false) => (run_for_output(&a.run)?, format!("$ {}", a.run.join(" "))),
+        _ => anyhow::bail!("give exactly one of --file <path> or `-- <command ...>`"),
+    };
+    // The anchor is what makes the document answerable later: a recalled
+    // chunk names the commit it describes, so a session can tell whether
+    // it is still on HEAD.
+    let provenance = (!a.no_git)
+        .then(crate::gitctx::detect)
+        .flatten()
+        .map(|p| match &a.path {
+            Some(path) => p.at_path(path.as_str()),
+            None => p,
+        });
+    let source = a.source.clone().unwrap_or(default_source);
     let store = crate::connect(url).await?;
     let embedder = crate::make_embedder()?;
     let tenant = TenantId::new(a.tenant.as_str());
@@ -658,15 +808,15 @@ pub async fn ingest(
     }
     let doc = antumbra_ingest::Document {
         title: a.title.clone(),
-        source: a.source.clone(),
-        content: a.content.clone(),
-        provenance: a.provenance.clone(),
+        source: Some(source),
+        content,
+        provenance,
         compartment,
     };
     // The one ingest path every door takes (`antumbra-ingest`).
     let out =
         antumbra_ingest::ingest_text(&store, embedder.as_ref(), &tenant, archive, &doc).await?;
-    let anchor = a
+    let anchor = doc
         .provenance
         .as_ref()
         .map(|p| format!(" at {p}"))
@@ -707,19 +857,61 @@ pub fn run_for_output(argv: &[String]) -> anyhow::Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// What `git-facts` stores: the sentences and the evidence they all share.
+/// What `antumbra git-facts` is given: the compartment the facts go to, the
+/// window they are derived over, and whether to store them.
+#[derive(Args, Debug)]
 pub struct FactsArgs {
+    #[arg(long)]
     pub tenant: String,
+    #[arg(long)]
     pub user: String,
+    #[arg(long)]
     pub compartment: String,
-    pub facts: Vec<String>,
-    pub evidence: Vec<String>,
+    /// Look back this many days.
+    #[arg(long, default_value_t = 90)]
+    pub days: u32,
+    /// How many hotspots and co-change pairs to keep.
+    #[arg(long, default_value_t = 10)]
+    pub top: usize,
+    /// Print the facts without storing them.
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
+}
+
+/// Derive the facts the repository's history states over the window, print
+/// them, and store them as `world` memories unless `--dry-run`.
+pub async fn git_facts(url: &str, a: FactsArgs) -> anyhow::Result<()> {
+    use crate::{gitctx, gitfacts};
+
+    let log = gitfacts::read_log(a.days).ok_or_else(|| {
+        anyhow::anyhow!("not inside a git repository (or git is not on the path)")
+    })?;
+    let facts = gitfacts::derive(&gitfacts::parse_log(&log), a.top);
+    let sentences = gitfacts::render(&facts, a.days);
+    let anchor = gitctx::detect();
+    let evidence = gitfacts::evidence(anchor.as_ref(), &facts, a.days);
+    for s in &sentences {
+        println!("{s}");
+    }
+    if a.dry_run {
+        println!("(dry run: {} fact(s) not stored)", sentences.len());
+    } else {
+        let stored = store_facts(url, &a, &sentences, &evidence).await?;
+        println!("stored {stored} fact(s) with evidence {:?}", facts.range);
+    }
+    Ok(())
 }
 
 /// Store derived repository facts as `world` memories in one compartment, ids
 /// derived from (compartment, content) so re-running over the same window is
-/// idempotent. Returns how many were written.
-pub async fn store_facts(url: &str, a: FactsArgs) -> anyhow::Result<usize> {
+/// idempotent. Every fact carries the same `evidence`. Returns how many were
+/// written.
+pub async fn store_facts(
+    url: &str,
+    a: &FactsArgs,
+    facts: &[String],
+    evidence: &[String],
+) -> anyhow::Result<usize> {
     use std::hash::{Hash, Hasher};
 
     use antumbra_core::{CompartmentId, Memory, MemoryNetwork};
@@ -730,7 +922,7 @@ pub async fn store_facts(url: &str, a: FactsArgs) -> anyhow::Result<usize> {
     let user = UserId::new(a.user.as_str());
     principal::provision(&store, &tenant, &user).await?;
     let now = Utc::now();
-    for content in &a.facts {
+    for content in facts {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         a.compartment.hash(&mut hasher);
         content.hash(&mut hasher);
@@ -745,26 +937,70 @@ pub async fn store_facts(url: &str, a: FactsArgs) -> anyhow::Result<usize> {
         )
         .by(user.clone(), "cli")
         .in_compartment(CompartmentId::new(a.compartment.as_str()))
-        .with_evidence(a.evidence.clone());
+        .with_evidence(evidence.to_vec());
         memory::upsert(&store, &m).await?;
     }
-    Ok(a.facts.len())
+    Ok(facts.len())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn run_for_output_captures_stdout_and_reports_failure() {
-        let ok = run_for_output(&["cargo".to_string(), "--version".to_string()]).unwrap();
+    fn run_for_output_captures_stdout_and_reports_failure() -> anyhow::Result<()> {
+        let ok = run_for_output(&["cargo".to_string(), "--version".to_string()])?;
         assert!(ok.starts_with("cargo "));
-        let err = run_for_output(&[
+        let Err(err) = run_for_output(&[
             "cargo".to_string(),
             "definitely-not-a-cargo-subcommand".to_string(),
-        ])
-        .unwrap_err()
-        .to_string();
+        ]) else {
+            anyhow::bail!("a failing command's output was taken for a success");
+        };
+        let err = err.to_string();
         assert!(err.contains("exited with"), "{err}");
         assert!(run_for_output(&[]).is_err());
+        Ok(())
+    }
+    /// The revocation names the token's own id and lasts as long as the token
+    /// would have; a bare id is kept for a year; a token without an id is
+    /// refused with the way out.
+    #[test]
+    fn a_revocation_is_the_tokens_own_id_for_the_tokens_own_life() -> anyhow::Result<()> {
+        use base64::Engine;
+        let engine = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let now = chrono::Utc::now();
+        let a_year = now + chrono::Duration::days(365);
+        let token = |claims: &str| {
+            format!(
+                "{}.{}.{}",
+                engine.encode(r#"{"alg":"HS256","typ":"JWT"}"#),
+                engine.encode(claims),
+                engine.encode("signature")
+            )
+        };
+        let exp = (now + chrono::Duration::days(7)).timestamp();
+        let (jti, until) = revocation_of_token(
+            &token(&format!(
+                r#"{{"tenant":"ws:a","user":"user:a","jti":"abc123","exp":{exp}}}"#
+            )),
+            a_year,
+        )?;
+        anyhow::ensure!(jti == "abc123");
+        anyhow::ensure!(
+            until.timestamp() == exp,
+            "the revocation lasts as long as the token"
+        );
+        let Err(e) = revocation_of_token(&token(r#"{"tenant":"ws:a","user":"user:a"}"#), a_year)
+        else {
+            anyhow::bail!("a token without an id was accepted");
+        };
+        anyhow::ensure!(e.to_string().contains("carries no id"), "{e}");
+        let (jti, until) = revocation_of(&RevokeTokenArgs {
+            token_file: None,
+            jti: Some(" bare ".into()),
+            note: None,
+        })?;
+        anyhow::ensure!(jti == "bare" && until > now + chrono::Duration::days(364));
+        Ok(())
     }
 }
