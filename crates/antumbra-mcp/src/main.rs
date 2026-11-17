@@ -214,6 +214,16 @@ struct Cli {
     /// profile. Without one, relics still download as HTML and Markdown.
     #[arg(long, env = "ANTUMBRA_PDF_RENDERER")]
     pdf_renderer: Option<String>,
+    /// The address of the Antumbra server that trains this user's experts,
+    /// e.g. `http://trainer:8081`. An expert's weights stay on the machine
+    /// that trained it; with this set, a server that routes to an expert it
+    /// does not hold pulls the adapter from there once, checks it against
+    /// the sha256 on the expert's row, and serves it from then on without
+    /// that server. Needs `--http` and `--jwt-secret`, the same secret as
+    /// the server named: each pull is signed for the user being answered.
+    /// Without it such an expert is not served here.
+    #[arg(long, env = "ANTUMBRA_EXPERT_SOURCE")]
+    expert_source: Option<String>,
     /// Which tools this server advertises and serves: `all` (default), `agent`
     /// (the developer-agent profile: recall/store/reinforce/penalize memories,
     /// recall/ingest documents, route, answer), or a comma-separated list of
@@ -492,6 +502,30 @@ pub(crate) async fn build_serve(
     _serve_quant: &str,
 ) -> Result<Option<Arc<dyn antumbra_core::ports::Serve>>> {
     Ok(None)
+}
+
+/// Where this server pulls the adapters it does not hold, when it was told
+/// where (`--expert-source`) and can sign for them. A pull is signed with the
+/// HS256 secret, so a server verifying with a public key, which takes
+/// precedence, has nothing to sign with: it says so and pulls nothing.
+fn expert_source(
+    url: Option<&str>,
+    secret: Option<&str>,
+    verifies_with_a_public_key: bool,
+) -> Option<Arc<server::pull::ExpertSource>> {
+    let url = url.map(str::trim).filter(|u| !u.is_empty())?;
+    match secret {
+        Some(secret) if !verifies_with_a_public_key => Some(Arc::new(
+            server::pull::ExpertSource::new(url, secret.as_bytes(), antumbra_core::adapter::DIR),
+        )),
+        _ => {
+            eprintln!(
+                "antumbra-mcp: --expert-source is not in effect: a pull is signed with the HS256 \
+                 secret (--jwt-secret), and this server verifies with a public key or has none"
+            );
+            None
+        }
+    }
 }
 
 /// The base model the serving engine loads: the population's, or `default` when
@@ -780,6 +814,11 @@ async fn run() -> Result<()> {
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.
         let verifier = build_verifier(&jwt_secret, &cli.jwt_public_key, &cli.jwt_audience)?;
+        let source = expert_source(
+            cli.expert_source.as_deref(),
+            jwt_secret.as_deref(),
+            cli.jwt_public_key.is_some(),
+        );
         return http::serve(
             addr,
             cli.url,
@@ -797,6 +836,7 @@ async fn run() -> Result<()> {
             github,
             recipe,
             cli.behave_tune_confidence,
+            source,
             &cli.serve_quant,
         )
         .await;

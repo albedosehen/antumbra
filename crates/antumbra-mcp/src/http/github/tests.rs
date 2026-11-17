@@ -46,6 +46,8 @@ async fn state(github: Option<GithubConfig>) -> anyhow::Result<Arc<HttpState>> {
         copal: None,
         pdf: None,
         relics: crate::http::relics::Guards::new(),
+        experts: crate::http::experts::Guards::new(),
+        source: None,
         profile: None,
         github: github.map(Arc::new),
         revoked: std::sync::RwLock::new(std::collections::HashSet::new()),

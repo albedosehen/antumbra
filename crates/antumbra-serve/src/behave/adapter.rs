@@ -6,33 +6,11 @@
 //! row names is the one it was admitted with for as long as the row names
 //! it, whatever is trained after.
 
-use std::io::Read;
 use std::path::Path;
 
+use antumbra_core::adapter::EXTENSION;
+pub use antumbra_core::adapter::{Seal, CARD_ADAPTER};
 use antumbra_core::{AntumbraError, Result};
-use sha2::{Digest, Sha256};
-
-/// The key on an expert's card that holds its adapter's [`Seal`].
-pub const CARD_ADAPTER: &str = "adapter";
-
-/// An adapter file's extension.
-const EXTENSION: &str = "safetensors";
-
-/// What an admitted adapter is, apart from where it is kept: the sha256 of
-/// its file and the file's size.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Seal {
-    /// Lowercase hex.
-    pub sha256: String,
-    pub bytes: u64,
-}
-
-impl Seal {
-    /// As an expert's card holds it, under [`CARD_ADAPTER`].
-    pub fn to_card(&self) -> serde_json::Value {
-        serde_json::json!({ "sha256": self.sha256, "bytes": self.bytes })
-    }
-}
 
 /// The directory a training of a standing expert saves into: under
 /// `adapter_dir`, and apart from every admitted adapter in it.
@@ -58,7 +36,7 @@ pub fn place(candidate: &str, adapter_dir: &str, admitted: bool) -> Result<(Stri
             "the adapter candidate {candidate} has no file name"
         ))
     })?;
-    let seal = seal(from)?;
+    let seal = Seal::of_file(from)?;
     let uri = format!("{adapter_dir}/{stem}.{}.{EXTENSION}", seal.sha256);
     let to = Path::new(&uri);
     if to.exists() {
@@ -85,31 +63,6 @@ pub fn discard(superseded: &str, kept: &str) -> Result<bool> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(e) => Err(failed("remove", superseded, &e)),
     }
-}
-
-/// Read `path` through once: its sha256 and its length.
-fn seal(path: &Path) -> Result<Seal> {
-    let shown = path.display().to_string();
-    let mut file = std::fs::File::open(path).map_err(|e| failed("open", &shown, &e))?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 1 << 16];
-    let mut bytes = 0u64;
-    loop {
-        let n = file
-            .read(&mut buf)
-            .map_err(|e| failed("read", &shown, &e))?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-        bytes += n as u64;
-    }
-    let sha256 = hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    Ok(Seal { sha256, bytes })
 }
 
 fn failed(what: &str, path: &str, e: &std::io::Error) -> AntumbraError {
@@ -266,6 +219,31 @@ mod tests {
         assert!(Path::new(&new).exists());
         assert!(elsewhere.exists());
         assert!(Path::new(&beside).exists());
+        Ok(())
+    }
+
+    /// A server that pulls an adapter computes its name from the expert's row.
+    /// It has to be the name admission gave the file where it was trained.
+    #[test]
+    fn an_admitted_adapter_has_the_name_a_pull_computes_for_it() -> anyhow::Result<()> {
+        let scratch = Scratch::new("pulled-name")?;
+        let expert = antumbra_core::ExpertId::new("expert:ws:a:user:b:behavior:owner/repo");
+        // As a training saves it: under its run id, the expert's id.
+        let candidate = scratch.train(&antumbra_core::adapter::stem(&expert), b"abc")?;
+
+        let (uri, seal) = place(&candidate, &scratch.adapters(), true)?;
+
+        let Some(seal) = seal else {
+            anyhow::bail!("an admitted adapter has a seal");
+        };
+        assert_eq!(
+            uri,
+            format!(
+                "{}/{}",
+                scratch.adapters(),
+                antumbra_core::adapter::file_name(&expert, &seal.sha256)
+            )
+        );
         Ok(())
     }
 

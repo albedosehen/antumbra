@@ -75,6 +75,7 @@ impl McpServer {
             default_compartment,
             auto_propose: None,
             serve,
+            source: None,
             registry: None,
             reranker: None,
             reranker_cache: Arc::new(tokio::sync::Mutex::new(RerankCache::new())),
@@ -165,6 +166,15 @@ impl McpServer {
     #[must_use]
     pub fn with_copal_archive(mut self, archive: Arc<antumbra_copal::CopalArchive>) -> Self {
         self.copal = Some(archive);
+        self
+    }
+
+    /// Pull the adapters of experts placed on other machines from `source`,
+    /// so `answer` serves them here. Off by default: such an expert is then
+    /// one this server cannot serve.
+    #[must_use]
+    pub fn with_expert_source(mut self, source: Arc<super::pull::ExpertSource>) -> Self {
+        self.source = Some(source);
         self
     }
 

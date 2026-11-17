@@ -40,10 +40,12 @@ impl McpServer {
             let top = routes.first().map(|r| ExpertId::new(r.expert_id.clone()));
             (top, Some(v), why)
         };
-        // The serving engine snapshots its adapter population at startup; a route
-        // to an expert it can't serve (e.g. one minted afterward) escalates cleanly
+        // The serving engine holds the adapters on this machine and the ones it
+        // has pulled; a route to an expert it can't serve (one placed elsewhere
+        // with no source to pull from, or whose pull failed) escalates cleanly
         // rather than surfacing a "no adapter registered" error.
         if let Some(top) = &top {
+            self.hold_routed(serve.as_ref(), top).await;
             if !serve.can_serve(top) {
                 return Ok(Json(escalation(
                     Some(top.as_str().to_string()),
@@ -113,10 +115,20 @@ impl McpServer {
         let mine: Vec<Expert> = lifecycle::routable(&self.store)
             .await?
             .into_iter()
-            .filter(|e| {
-                antumbra_core::behavior::is_standing_for(e, &self.tenant, &self.user)
-                    && serve.can_serve(&e.id)
-            })
+            .filter(|e| antumbra_core::behavior::is_standing_for(e, &self.tenant, &self.user))
+            .collect();
+        // The ones asked for that are placed on another machine are pulled
+        // first, when this server has a source for them.
+        for e in &mine {
+            if e.standing_scope()
+                .is_some_and(|s| scopes.iter().any(|w| w == s))
+            {
+                self.hold(serve, e).await;
+            }
+        }
+        let mine: Vec<Expert> = mine
+            .into_iter()
+            .filter(|e| serve.can_serve(&e.id))
             .collect();
         Ok(scopes
             .iter()
