@@ -36,6 +36,16 @@ pub(crate) struct ExpertRow {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placed_on: Option<String>,
     pub created_at: String,
+    // The row's version: when it was last written. The store's, set by the
+    // repository on every write; absent only on a row from before it was
+    // kept, until that row is moved to its own record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    // Set on a tombstone: the record of an expert that was deleted, kept so
+    // a store holding a copy learns of it. Omitted when None, so writing
+    // the expert again clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
 }
 
 impl ExpertRow {
@@ -54,6 +64,8 @@ impl ExpertRow {
             compartment: e.compartment.as_ref().map(|c| c.as_str().to_string()),
             placed_on: e.placed_on.clone(),
             created_at: e.created_at.to_rfc3339(),
+            updated_at: None,
+            deleted_at: None,
         }
     }
 
