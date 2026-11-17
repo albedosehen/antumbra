@@ -386,6 +386,11 @@ mod keeper {
                     }
                     let job = plan.clone();
                     let confidence = confidence_for(state, tenant).await?;
+                    // Checked when the server started; a setting that names no
+                    // form measures nothing.
+                    let measure =
+                        antumbra_serve::ServeQuant::drift_from_setting(&state.behave_drift)
+                            .unwrap_or_default();
                     // The training is a shadow in the penumbra while it
                     // runs, settled by `mint`, or pruned if it fails.
                     {
@@ -394,7 +399,7 @@ mod keeper {
                         behave::begin(&state.store, &plan).await?;
                     }
                     let trained = crate::server::heavy::spawn_heavy(async move {
-                        behave::train(&job, embedder.as_ref(), &cfg, confidence).await
+                        behave::train(&job, embedder.as_ref(), &cfg, confidence, &measure).await
                     })
                     .await
                     .map_err(anyhow::Error::from)
@@ -442,6 +447,13 @@ mod keeper {
                                     format!("; not learned: {}", missed.join("; "))
                                 }
                             );
+                            if !report.drift.is_empty() {
+                                eprintln!(
+                                    "antumbra-mcp: standing experts, {}: {}",
+                                    id.as_str(),
+                                    behave::drift::describe(&report.drift)
+                                );
+                            }
                         }
                         None => {
                             failed.insert(key, print);

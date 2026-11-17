@@ -181,6 +181,10 @@ struct HttpState {
     /// workspace, from the audits of the experts it admitted.
     #[cfg_attr(not(feature = "models"), allow(dead_code))]
     tune_confidence: bool,
+    /// The quantized forms the keeper measures an admitted expert on, as the
+    /// operator's setting names them (`--behave-drift`).
+    #[cfg_attr(not(feature = "models"), allow(dead_code))]
+    behave_drift: String,
     /// The serving engine the `answer` tool drives, built once from the owner
     /// view of the population and shared by every per-identity server (routing
     /// scopes which expert a session may pick).
@@ -258,6 +262,7 @@ pub async fn serve(
     github: Option<GithubConfig>,
     recipe: antumbra_core::behavior::Recipe,
     tune_confidence: bool,
+    behave_drift: String,
     source: Option<Arc<crate::server::pull::ExpertSource>>,
     serve_quant: &str,
 ) -> Result<()> {
@@ -298,6 +303,7 @@ pub async fn serve(
         auto_propose,
         recipe,
         tune_confidence,
+        behave_drift,
         serve,
         reranker,
         decider,

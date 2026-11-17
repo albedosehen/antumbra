@@ -32,9 +32,11 @@ use antumbra_store::{Store, EMBED_DIM};
 use antumbra_train::behave::{self as course, Verdict};
 use antumbra_train::{
     capture_corrections, eval_pass_rate, CandleModelLoader, CorpusTask, ModelLoader, RaftConfig,
+    ServeQuant,
 };
 
 pub mod adapter;
+pub mod drift;
 
 /// What a run did: the expert minted, if admitted, and the scores behind it.
 #[derive(Debug, Clone)]
@@ -51,6 +53,9 @@ pub struct BehaveReport {
     /// place: whoever serves from it registers the new one first, then
     /// [`adapter::discard`]s this.
     pub superseded: Option<String>,
+    /// What each quantized form of the base measured did to the minted
+    /// expert, as its card now records. Empty when none was measured.
+    pub drift: drift::Measured,
 }
 
 /// The private standing expert for a user's behaviors in `scope`, in
@@ -151,6 +156,9 @@ pub struct Trained {
     pub adapter_uri: String,
     /// The admitted adapter's sha256 and size. `None` when refused.
     pub seal: Option<adapter::Seal>,
+    /// What each quantized form of the base measured does to the admitted
+    /// expert. Empty when refused, and when none was measured.
+    pub drift: drift::Measured,
     pub base_model: String,
     pub fitness: f32,
     /// The base model's pass rate on the same held-out tasks, before
@@ -173,11 +181,16 @@ pub struct Trained {
 /// The training writes a candidate adapter. Admitted, it is promoted to the
 /// file its content names ([`adapter::place`]); refused, it stays a candidate
 /// and no admitted adapter is written to.
+///
+/// An admitted expert is then read through each of the `measure` forms of
+/// the base, after the verdict and changing nothing about it
+/// ([`drift::measure`]): one more load of the base for each form.
 pub async fn train(
     plan: &Plan,
     embedder: &dyn Embedder,
     cfg: &RaftConfig,
     confidence: f64,
+    measure: &[ServeQuant],
 ) -> Result<Trained> {
     let (mut tasks, mut held): (Vec<CorpusTask>, Vec<CorpusTask>) = (Vec::new(), Vec::new());
     for (m, spec) in &plan.taught {
@@ -254,12 +267,20 @@ pub async fn train(
         }
     }
     let n = routed.len().max(1) as f32;
+    // Last, since it gives the trained model up: what a quantized base does
+    // to the expert just admitted.
+    let drift = if verdict.admitted {
+        drift::measure(model, &cfg, &adapter_uri, &held, measure).await
+    } else {
+        Vec::new()
+    };
     Ok(Trained {
         misses: course::misses(&held, &scores.draws),
         verdict,
         replay: replayed,
         adapter_uri,
         seal,
+        drift,
         base_model: cfg.base_model.clone(),
         fitness: scores.pass_rate,
         base_fitness: base.pass_rate,
@@ -767,6 +788,7 @@ pub async fn mint(
             verdict: trained.verdict,
             expert: None,
             superseded: None,
+            drift: Vec::new(),
         });
     }
     let verdict = trained.verdict;
@@ -823,6 +845,9 @@ pub async fn mint(
     if let Some(seal) = &trained.seal {
         card[adapter::CARD_ADAPTER] = seal.to_card();
     }
+    if !trained.drift.is_empty() {
+        card[drift::CARD_DRIFT] = drift::to_card(&trained.drift);
+    }
     // The file the expert before this one is served from, when this host
     // holds it and it is not the same bytes admitted again.
     let superseded = before
@@ -872,6 +897,7 @@ pub async fn mint(
         verdict,
         expert: Some((e.id, trained.adapter_uri)),
         superseded,
+        drift: trained.drift,
     })
 }
 
@@ -885,12 +911,13 @@ pub async fn train_behaviors(
     scope: &str,
     cfg: &RaftConfig,
     confidence: f64,
+    measure: &[ServeQuant],
 ) -> Result<Option<BehaveReport>> {
     let Some(plan) = plan(store, tenant, user, scope).await? else {
         return Ok(None);
     };
     begin(store, &plan).await?;
-    let trained = match train(&plan, embedder, cfg, confidence).await {
+    let trained = match train(&plan, embedder, cfg, confidence, measure).await {
         Ok(t) => t,
         Err(e) => {
             abandon(store, &plan).await?;
