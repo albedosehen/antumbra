@@ -1,8 +1,11 @@
 # Antumbra capture hook (Windows / PowerShell). Wire to BOTH Stop and PreCompact.
 # Nudges the agent to deposit non-obvious observations into Antumbra via the
 # `store_memory` MCP tool before the turn ends / context is compacted. A sentinel
-# file makes it fire once per turn (no infinite loop). The verified traces it
-# leaves are what `antumbra metabolize` later turns into a trained expert.
+# file makes it fire once per turn (no infinite loop), and a turn's end is
+# nudged only when one is due: not when the agent has saved since the hook last
+# looked, and not more often than every ANTUMBRA_CAPTURE_EVERY_SECS seconds. The
+# verified traces it leaves are what `antumbra metabolize` later turns into a
+# trained expert.
 #
 # Git-aware: inside a repository the nudge carries the exact provenance to stamp
 # on memories about this code (repo slug, commit, branch), so a later session
@@ -27,13 +30,18 @@ $safeSession = [string]$sessionId -replace '[^A-Za-z0-9_-]', ''
 if (-not $safeSession) { $safeSession = 'default' }
 $safeEvent = [string]$event -replace '[^A-Za-z0-9_-]', ''
 if (-not $safeEvent) { $safeEvent = 'Stop' }
+# One Join-Path inside another: Windows PowerShell 5.1 has no form that takes
+# three parts, and with it the directory came out empty, no sentinel could be
+# written, and every stop was nudged.
 $runDir = if ($env:XDG_RUNTIME_DIR) { $env:XDG_RUNTIME_DIR }
-          elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'antumbra' 'run' }
-          else { Join-Path $HOME '.antumbra' 'run' }
+          elseif ($env:LOCALAPPDATA) { Join-Path (Join-Path $env:LOCALAPPDATA 'antumbra') 'run' }
+          else { Join-Path (Join-Path $HOME '.antumbra') 'run' }
 New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 $sentinel = Join-Path $runDir "antumbra-capture-$safeEvent-$safeSession"
 if (Test-Path $sentinel) { Remove-Item $sentinel -Force; exit 0 }
-New-Item -ItemType File -Path $sentinel -Force | Out-Null
+# A stop this hook's own nudge caused goes through, whatever became of the
+# sentinel.
+if ($event -eq 'Stop' -and $json.stop_hook_active) { exit 0 }
 
 if ($event -eq 'Stop' -and $json.last_assistant_message) {
     $apiUrl = if ($env:ANTUMBRA_URL) { $env:ANTUMBRA_URL } else { 'http://127.0.0.1:8081' }
@@ -69,6 +77,48 @@ if ($event -eq 'Stop' -and $json.last_assistant_message) {
     }
 }
 
+# Whether this stop is nudged. The end of a turn is not when the agent has
+# saved since this hook last looked (the transcript holds a store_memory or
+# record_behavior call past the mark kept from then), or when the session was
+# nudged, or saved, within the last ANTUMBRA_CAPTURE_EVERY_SECS seconds (600
+# unless set; 0 nudges every turn). A long job stops many times while it waits
+# on something, and each nudge costs it a turn and says nothing new. A
+# compaction is always nudged: what is not saved then is about to be cut.
+if ($event -eq 'Stop') {
+    $every = 600
+    if ($env:ANTUMBRA_CAPTURE_EVERY_SECS -match '^\d+$') { $every = [long]$env:ANTUMBRA_CAPTURE_EVERY_SECS }
+    $state = Join-Path $runDir "antumbra-capture-state-$safeSession"
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $last = 0L; $mark = 0L
+    try {
+        $kept = ((Get-Content -LiteralPath $state -Raw -ErrorAction Stop).Trim()) -split '\s+'
+        $last = [long]$kept[0]; $mark = [long]$kept[1]
+    } catch { $last = 0L; $mark = 0L }
+    $size = 0L; $saved = $false
+    $transcript = [string]$json.transcript_path
+    if ($transcript -and (Test-Path -LiteralPath $transcript)) {
+        try {
+            $stream = [System.IO.File]::Open($transcript, 'Open', 'Read', 'ReadWrite')
+            try {
+                $size = $stream.Length
+                # Another transcript, or this one rewritten: read it from the start.
+                if ($mark -gt $size) { $mark = 0L }
+                # No further back than four megabytes, however long the session.
+                if (($size - $mark) -gt 4MB) { $mark = $size - 4MB }
+                [void]$stream.Seek($mark, 'Begin')
+                $reader = New-Object System.IO.StreamReader($stream)
+                # A tool call's own name, not one quoted inside a result.
+                $saved = $reader.ReadToEnd() -match '"name"\s*:\s*"[^"]*(store_memory|record_behavior)"'
+            } finally { $stream.Dispose() }
+        } catch { }
+    }
+    $due = -not $saved -and ($every -eq 0 -or ($now - $last) -ge $every)
+    $stamp = if ($due -or $saved) { $now } else { $last }
+    try { Set-Content -LiteralPath $state -Value "$stamp $size" -NoNewline } catch { }
+    if (-not $due) { exit 0 }
+}
+New-Item -ItemType File -Path $sentinel -Force | Out-Null
+
 # Where the session is, in git terms (fail-open: no repository, no anchor).
 function Invoke-Git([string[]]$GitArgs) {
     try {
@@ -96,7 +146,7 @@ if ((Get-Command git -ErrorAction SilentlyContinue) -and (Invoke-Git @('rev-pars
     if ($branch -eq 'HEAD' -or -not $branch) { $branch = '' }
     $repo = Get-RepoSlug (Invoke-Git @('remote', 'get-url', 'origin'))
     if ($commit -and $repo) {
-        $gitNote = " For any memory about this code, pass provenance {repo: `"$repo`", commit: `"$commit`", branch: `"$branch`"} (add path when it is about one file): that anchor is how a later session tells whether the memory still applies."
+        $gitNote = " For any memory about this code, pass provenance {repo: `"$repo`", commit: `"$commit`", branch: `"$branch`"} (add path when it is about one file): that anchor is how a later session tells whether the memory still applies. That is the repository this session started in; for work done in another, pass that one's own."
     }
 }
 

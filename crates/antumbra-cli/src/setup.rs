@@ -1112,15 +1112,19 @@ fn platform_hooks() -> Vec<(&'static str, &'static str, u32)> {
             pick("antumbra-prompt-recall.sh", "antumbra-prompt-recall.ps1"),
             20,
         ),
+        // Ten seconds: the hook's own work is bounded (two for its report to
+        // the server, a few git calls), but starting PowerShell alone takes
+        // three on a machine that is busy building, and a hook cut off at
+        // five skipped its nudge and left its sentinel behind.
         (
             "Stop",
             pick("antumbra-capture.sh", "antumbra-capture.ps1"),
-            5,
+            10,
         ),
         (
             "PreCompact",
             pick("antumbra-capture.sh", "antumbra-capture.ps1"),
-            5,
+            10,
         ),
     ]
 }
