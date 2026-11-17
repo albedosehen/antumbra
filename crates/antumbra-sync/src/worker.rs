@@ -1,16 +1,24 @@
 //! The supervised collector loop: connect both stores, reconcile on a cadence,
 //! reconnect with exponential backoff when a cycle fails, and shut down promptly
 //! on signal. Mirrors the tinytropolis sync supervisor.
+//!
+//! [`run`] opens both stores itself, which is `antumbra sync`. [`run_on`] is
+//! given its local store by a caller that holds it open and shares it, which
+//! is a server on an embedded store: that file has one writer, so a second
+//! process cannot sync it while the server runs.
 
 use std::time::Duration;
 
 use tokio::sync::watch;
 
-use antumbra_core::Result;
+use antumbra_core::{AntumbraError, Result};
 use antumbra_store::Store;
 
 use crate::config::SyncConfig;
-use crate::reconcile::{reconcile_all_scoped, reconcile_all_since_scoped, Cursors, ReconcileStats};
+use crate::hold::Hold;
+use crate::reconcile::{
+    reconcile_all_scoped, reconcile_all_since_on, Cursors, ReconcileStats, Side,
+};
 use crate::scope::Scope;
 use crate::table::PENUMBRA_TABLES;
 
@@ -76,49 +84,129 @@ pub async fn run(cfg: SyncConfig, mut shutdown: watch::Receiver<bool>) -> Result
             }
         };
 
-        // Fresh watermarks per connection: the first pass after (re)connecting is
-        // a full scan -- the backstop that re-syncs anything changed while down --
-        // then later passes move only what changed.
-        let mut cursors = Cursors::new();
-        let mut cycle: u64 = 0;
+        let (local, remote) = (Side::own(&local), Side::own(&remote));
+        match cycles(local, remote, &cfg, scope.as_ref(), &mut shutdown).await {
+            Ended::Shutdown => return Ok(()),
+            Ended::Failed { .. } => {}
+        }
+    }
+}
 
-        // Reconcile on the cadence until a cycle fails or shutdown is requested.
-        loop {
-            match reconcile_all_since_scoped(
-                &local,
-                &remote,
-                PENUMBRA_TABLES,
-                &mut cursors,
-                cfg.lookback,
-                scope.as_ref(),
-            )
-            .await
-            {
-                Ok(stats) if stats.total() > 0 || stats.refused > 0 || stats.declined > 0 => {
-                    eprintln!("sync: {} pushed, {} pulled", stats.pushed, stats.pulled);
-                    // Loud, and every cycle rather than once: a refusal means
-                    // rows the collector can see and cannot write, so it is
-                    // silently replicating less than it appears to. The engine
-                    // says nothing about this, so this line is the only notice
-                    // anyone gets.
-                    if stats.refused > 0 {
-                        eprintln!(
-                            "sync: WARNING {} row(s) refused: the session may read them and not write them, so this cycle replicated less than it appears to",
-                            stats.refused
-                        );
-                    }
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("sync: cycle failed: {e}; reconnecting");
-                    break;
+/// Run the collector on a local store the caller holds open and shares with
+/// other work, until `shutdown` is set: the remote is connected here, and
+/// reconnected with backoff when it is lost; the local store is used as it is
+/// given and taken hold of, through `hold`, only for the steps of a pass that
+/// read or write it. Returns `Ok(())` on a clean shutdown.
+///
+/// As owner: a fabric in `cfg` is refused, since the caller's store is not
+/// this collector's to sign in on as someone else.
+///
+/// A pass that fails is followed by a wait, doubling while the passes keep
+/// failing at once: this loop runs inside something that has other work to
+/// do, and a remote that refuses every pass is not asked again at full speed.
+pub async fn run_on<H: Hold>(
+    local: &Store,
+    hold: &H,
+    cfg: SyncConfig,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<()> {
+    if cfg.fabric.is_some() {
+        return Err(AntumbraError::other(
+            "a collector on a store it shares runs as owner and takes no fabric",
+        ));
+    }
+    let mut backoff = cfg.min_backoff;
+    loop {
+        if *shutdown.borrow() {
+            return Ok(());
+        }
+        let remote = tokio::select! {
+            remote = cfg.remote.connect() => remote,
+            _ = shutdown.changed() => return Ok(()),
+        };
+        let ended = match remote {
+            Ok(remote) => {
+                let local = Side { store: local, hold };
+                cycles(local, Side::own(&remote), &cfg, None, &mut shutdown).await
+            }
+            Err(e) => {
+                eprintln!(
+                    "sync: connect failed: {e}; retry in {}ms",
+                    backoff.as_millis()
+                );
+                Ended::Failed { ran: 0 }
+            }
+        };
+        match ended {
+            Ended::Shutdown => return Ok(()),
+            // It ran before it failed: start again from the shortest wait.
+            Ended::Failed { ran } if ran > 0 => backoff = cfg.min_backoff,
+            Ended::Failed { .. } => {}
+        }
+        if sleep_or_shutdown(backoff, &mut shutdown).await {
+            return Ok(());
+        }
+        backoff = (backoff * 2).min(cfg.max_backoff);
+    }
+}
+
+/// How a run of cycles on one connection ended.
+enum Ended {
+    /// Shutdown was requested.
+    Shutdown,
+    /// A cycle failed, after `ran` that did not.
+    Failed { ran: u64 },
+}
+
+/// Reconcile on the cadence until a cycle fails or shutdown is requested.
+///
+/// Fresh watermarks per connection: the first pass after (re)connecting is a
+/// full scan -- the backstop that re-syncs anything changed while down -- then
+/// later passes move only what changed.
+async fn cycles<L: Hold, R: Hold>(
+    local: Side<'_, L>,
+    remote: Side<'_, R>,
+    cfg: &SyncConfig,
+    scope: Option<&Scope>,
+    shutdown: &mut watch::Receiver<bool>,
+) -> Ended {
+    let mut cursors = Cursors::new();
+    let mut cycle: u64 = 0;
+    loop {
+        match reconcile_all_since_on(
+            local,
+            remote,
+            PENUMBRA_TABLES,
+            &mut cursors,
+            cfg.lookback,
+            scope,
+        )
+        .await
+        {
+            Ok(stats) if stats.total() > 0 || stats.refused > 0 || stats.declined > 0 => {
+                eprintln!("sync: {} pushed, {} pulled", stats.pushed, stats.pulled);
+                // Loud, and every cycle rather than once: a refusal means
+                // rows the collector can see and cannot write, so it is
+                // silently replicating less than it appears to. The engine
+                // says nothing about this, so this line is the only notice
+                // anyone gets.
+                if stats.refused > 0 {
+                    eprintln!(
+                        "sync: WARNING {} row(s) refused: the session may read them and not write them, so this cycle replicated less than it appears to",
+                        stats.refused
+                    );
                 }
             }
-            cycle += 1;
-            collect_garbage(&cfg, &local, &remote, cycle).await;
-            if sleep_or_shutdown(cfg.interval, &mut shutdown).await {
-                return Ok(());
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("sync: cycle failed: {e}; reconnecting");
+                return Ended::Failed { ran: cycle };
             }
+        }
+        cycle += 1;
+        collect_garbage(cfg, local, remote, cycle).await;
+        if sleep_or_shutdown(cfg.interval, shutdown).await {
+            return Ended::Shutdown;
         }
     }
 }
@@ -126,7 +214,12 @@ pub async fn run(cfg: SyncConfig, mut shutdown: watch::Receiver<bool>) -> Result
 /// Hard-purge tombstones past the grace window on both stores, every `gc_every`
 /// reconcile cycles (so the soft-delete tables don't grow without bound). Best
 /// effort: a GC error is logged, not fatal -- it must never break the sync loop.
-async fn collect_garbage(cfg: &SyncConfig, local: &Store, remote: &Store, cycle: u64) {
+async fn collect_garbage<L: Hold, R: Hold>(
+    cfg: &SyncConfig,
+    local: Side<'_, L>,
+    remote: Side<'_, R>,
+    cycle: u64,
+) {
     if cfg.gc_every == 0 || !cycle.is_multiple_of(cfg.gc_every as u64) {
         return;
     }
@@ -134,12 +227,20 @@ async fn collect_garbage(cfg: &SyncConfig, local: &Store, remote: &Store, cycle:
         return;
     };
     let older_than = chrono::Utc::now() - grace;
-    for store in [local, remote] {
-        match crate::gc::purge_store(store, older_than).await {
-            Ok(n) if n > 0 => eprintln!("sync: gc purged {n} tombstone(s)"),
-            Ok(_) => {}
-            Err(e) => eprintln!("sync: gc error: {e}"),
-        }
+    purge(local, older_than).await;
+    purge(remote, older_than).await;
+}
+
+/// Purge one side's tombstones, held for as long as it takes.
+async fn purge<H: Hold>(side: Side<'_, H>, older_than: chrono::DateTime<chrono::Utc>) {
+    let purged = async {
+        let _held = side.hold.hold().await?;
+        crate::gc::purge_store(side.store, older_than).await
+    };
+    match purged.await {
+        Ok(n) if n > 0 => eprintln!("sync: gc purged {n} tombstone(s)"),
+        Ok(_) => {}
+        Err(e) => eprintln!("sync: gc error: {e}"),
     }
 }
 
@@ -236,19 +337,19 @@ mod tests {
             gc_every: 1,
             ..mem_cfg()
         };
-        collect_garbage(&on, &local, &remote, 1).await; // 1 % 1 == 0 → runs
+        collect_garbage(&on, Side::own(&local), Side::own(&remote), 1).await; // 1 % 1 == 0 → runs
 
         let every_two = SyncConfig {
             gc_every: 2,
             ..mem_cfg()
         };
-        collect_garbage(&every_two, &local, &remote, 1).await; // 1 % 2 != 0 → skipped
+        collect_garbage(&every_two, Side::own(&local), Side::own(&remote), 1).await; // 1 % 2 != 0 → skipped
 
         let off = SyncConfig {
             gc_every: 0,
             ..mem_cfg()
         };
-        collect_garbage(&off, &local, &remote, 1).await; // disabled
+        collect_garbage(&off, Side::own(&local), Side::own(&remote), 1).await; // disabled
         Ok(())
     }
 

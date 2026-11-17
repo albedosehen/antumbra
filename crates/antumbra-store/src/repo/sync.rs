@@ -12,7 +12,7 @@
 use futures::StreamExt;
 use serde_json::Value;
 use surql::connection::streaming::LiveQuery;
-use surql::query::crud::upsert_record;
+use surql::query::crud::{get_record, upsert_record};
 use surql::types::operators::gt;
 use surql::types::RecordID;
 use surrealdb::types::Action;
@@ -59,6 +59,14 @@ pub async fn list_rows_since(
     // fine.
     let filter = gt(version_field, since);
     store.read_paged(table, None, Some(&filter)).await
+}
+
+/// The record `id` names on this store, as [`list_rows`] returns a row, or
+/// `None` when the store has none: what a replicated row would replace. `id`
+/// is a row's own ([`row_id`]), so it is parsed as data, as [`put_row`] does.
+pub async fn get_row(store: &Store, id: &str) -> Result<Option<Value>> {
+    let id = RecordID::<()>::parse(id).map_err(map)?;
+    get_record(store.client(), &id).await.map_err(map)
 }
 
 /// What became of a replicated row.
