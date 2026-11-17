@@ -17,3 +17,6 @@ tokio = { workspace = true, features = ["process", "time"] }
 [dev-dependencies]
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
+
+[lints]
+workspace = true

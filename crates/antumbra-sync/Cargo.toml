@@ -15,4 +15,9 @@ chrono.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+# The embedded stores the sync's tests stand up on each side.
+antumbra-store = { path = "../antumbra-store", features = ["testing"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

@@ -356,7 +356,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn presets_snap_to_common_refresh_rates() {
+    fn presets_snap_to_common_refresh_rates() -> anyhow::Result<()> {
         // Stepping up off 144 lands exactly on 165, then 240/244, not near them.
         assert_eq!(next_preset(144), 165);
         assert_eq!(next_preset(165), 240);
@@ -370,17 +370,19 @@ mod tests {
         // An arbitrary `--fps` value snaps to a neighboring preset.
         assert_eq!(next_preset(100), 120);
         assert_eq!(prev_preset(200), 165);
+        Ok(())
     }
 
     #[test]
-    fn frame_budget_matches_the_rate() {
+    fn frame_budget_matches_the_rate() -> anyhow::Result<()> {
         assert_eq!(frame_budget(60), Duration::from_secs_f64(1.0 / 60.0));
         // Out-of-range targets clamp before becoming a budget.
         assert_eq!(frame_budget(10_000), frame_budget(MAX_FPS));
+        Ok(())
     }
 
     #[test]
-    fn detected_rates_snap_to_presets_within_tolerance() {
+    fn detected_rates_snap_to_presets_within_tolerance() -> anyhow::Result<()> {
         // Drivers under-report the round number by a Hz or two.
         assert_eq!(snap_refresh(59), 60);
         assert_eq!(snap_refresh(143), 144);
@@ -391,25 +393,28 @@ mod tests {
         // Out of range clamps.
         assert_eq!(snap_refresh(9_999), MAX_FPS);
         assert_eq!(snap_refresh(5), MIN_FPS);
+        Ok(())
     }
 
     #[test]
-    fn detect_refresh_never_panics() {
+    fn detect_refresh_never_panics() -> anyhow::Result<()> {
         // Returns Some(real Hz) on a display, None headless/off-Windows, but
         // must always be safe to call, with a captured handle or the live (0) one.
         if let Some(hz) = detect_refresh(0) {
             assert!(hz > 1);
         }
         let _ = detect_refresh(foreground_window());
+        Ok(())
     }
 
     #[test]
-    fn monitor_enumeration_never_panics() {
+    fn monitor_enumeration_never_panics() -> anyhow::Result<()> {
         // Safe to call anywhere; on a real desktop each monitor reports a rate,
         // headless/off-Windows it's empty.
         for m in monitors() {
             assert!(!m.device.is_empty());
         }
         let _ = active_device(0);
+        Ok(())
     }
 }

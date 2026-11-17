@@ -632,24 +632,28 @@ async fn run() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use antumbra_core::AntumbraError;
+    use antumbra_store::testing::mem_store;
+
     use super::*;
 
     /// The harness runs end-to-end over the FixedEmbedder baseline and produces
     /// sane metrics: every metric is in `[0, 1]`, every domain is present, and
     /// `recall@k` is monotonic non-decreasing in `k`.
     #[tokio::test]
-    async fn baseline_runs_and_reports_sane_metrics() {
-        let corpus = Corpus::load().expect("corpus parses");
+    async fn baseline_runs_and_reports_sane_metrics() -> Result<()> {
+        let corpus = Corpus::load()?;
         assert_eq!(corpus.domains.len(), 3, "code / finance / news");
 
         let embedder = FixedEmbedder::new(EMBED_DIM);
-        let report = evaluate("baseline", &embedder, &corpus, Mode::Hybrid)
-            .await
-            .expect("eval runs");
+        let report = evaluate("baseline", &embedder, &corpus, Mode::Hybrid).await?;
 
         // All three domains scored.
         for d in ["code", "finance", "news"] {
-            let m = report.per_domain.get(d).expect("domain present");
+            let m = report
+                .per_domain
+                .get(d)
+                .ok_or_else(|| AntumbraError::other(format!("{d} is missing from the report")))?;
             assert!(m.queries > 0, "{d} had queries");
             // recall@k in [0,1] and monotonic non-decreasing in k; MRR in [0,1].
             let mut prev = 0.0;
@@ -684,29 +688,28 @@ mod tests {
         for needle in ["code", "finance", "news", "ALL", "MRR"] {
             assert!(table.contains(needle), "table mentions {needle}");
         }
+        Ok(())
     }
 
     /// A label file becomes one domain: each distinct memory a document, each
     /// positive pair a query answered by its memory; a negative pair adds no
     /// query. Both modes run over it.
     #[tokio::test]
-    async fn a_label_file_is_a_corpus_and_both_modes_score_it() {
+    async fn a_label_file_is_a_corpus_and_both_modes_score_it() -> Result<()> {
         let labels = serde_json::json!([
             {"query": "the outbox pattern", "memory": "orders write through an outbox table", "relevant": true},
             {"query": "the outbox pattern", "memory": "parcels leave the warehouse at noon", "relevant": false},
             {"query": "parcels leave", "memory": "parcels leave the warehouse at noon", "relevant": true},
             {"query": "parcels leave", "memory": "orders write through an outbox table", "relevant": false}
         ]);
-        let corpus = Corpus::from_labels(&labels.to_string()).expect("label file parses");
+        let corpus = Corpus::from_labels(&labels.to_string())?;
         let domain = &corpus.domains[0];
         assert_eq!(domain.documents.len(), 2);
         assert_eq!(domain.labels.len(), 2);
         assert_eq!(domain.labels[1].relevant_doc_id, "m1");
         let embedder = FixedEmbedder::new(EMBED_DIM);
         for mode in [Mode::Hybrid, Mode::Dense, Mode::Lexical] {
-            let report = evaluate("baseline", &embedder, &corpus, mode)
-                .await
-                .expect("eval runs");
+            let report = evaluate("baseline", &embedder, &corpus, mode).await?;
             assert_eq!(report.overall.queries, 2);
             assert!(report.config_name.ends_with(mode.name()));
             assert!(
@@ -714,14 +717,15 @@ mod tests {
                 "two documents: everything is in the top 30"
             );
         }
+        Ok(())
     }
 
     /// The server's way of storing a document: whole, and its pieces in the
     /// chunk index when it is longer than one; a piece's own vector finds it
     /// through the dense leg.
     #[tokio::test]
-    async fn the_chunk_index_mode_stores_a_document_as_the_server_does() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn the_chunk_index_mode_stores_a_document_as_the_server_does() -> Result<()> {
+        let store = mem_store().await?;
         let tenant = TenantId::new("ws:bench");
         let embedder = FixedEmbedder::new(EMBED_DIM);
         let now = chrono::Utc::now();
@@ -734,24 +738,23 @@ mod tests {
                 id: id.into(),
                 text,
             };
-            index(&store, &embedder, &tenant, &doc, now).await.unwrap();
+            index(&store, &embedder, &tenant, &doc, now).await?;
         }
-        let held = memory_chunk::indexed(&store, &tenant).await.unwrap();
+        let held = memory_chunk::indexed(&store, &tenant).await?;
         assert_eq!(held.len(), 1, "the short document is one piece");
         assert_eq!(held["memory:long"].content_hash, cut_hash(&long));
 
         let piece = &split(&long, MEMORY_CHUNK_CHARS)[2];
-        let qv = embedder.embed(piece).await.unwrap();
-        let hits = memory::recall_hybrid(&store, &tenant, "", &qv, 1, None, &[])
-            .await
-            .unwrap();
+        let qv = embedder.embed(piece).await?;
+        let hits = memory::recall_hybrid(&store, &tenant, "", &qv, 1, None, &[]).await?;
         assert_eq!(rank_of(&hits, "long"), Some(1));
+        Ok(())
     }
 
     /// `rank_of` maps a stored memory id back to its labeled doc id and reports a
     /// 1-based rank (or `None` when absent).
     #[tokio::test]
-    async fn rank_of_strips_prefix_and_is_one_based() {
+    async fn rank_of_strips_prefix_and_is_one_based() -> Result<()> {
         let now = chrono::Utc::now();
         let mk = |doc_id: &str| {
             Memory::new(
@@ -767,5 +770,6 @@ mod tests {
         assert_eq!(rank_of(&hits, "fin-aapl"), Some(1));
         assert_eq!(rank_of(&hits, "fin-msft"), Some(2));
         assert_eq!(rank_of(&hits, "fin-nvda"), None);
+        Ok(())
     }
 }

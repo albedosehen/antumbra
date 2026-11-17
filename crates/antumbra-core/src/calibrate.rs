@@ -118,6 +118,7 @@ pub fn calibrated_score(query: &[f32], embedding: &[f32], probes: &[Vec<f32>]) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     /// A unit vector along one axis, for building an orthogonal toy space where
     /// every similarity is known by construction.
@@ -143,7 +144,7 @@ mod tests {
     /// the hub first even though it answers nothing, which is exactly what the
     /// live store does. Calibration has to invert that.
     #[test]
-    fn calibration_ranks_the_answer_over_a_hub_that_raw_cosine_prefers() {
+    fn calibration_ranks_the_answer_over_a_hub_that_raw_cosine_prefers() -> anyhow::Result<()> {
         let d = 8;
         let probes: Vec<Vec<f32>> = (0..4).map(|i| axis(d, i)).collect();
         // Sits partway toward every probe: high cosine to all of them, and to
@@ -175,13 +176,14 @@ mod tests {
              (hub raw={raw_hub:.3} cal={cal_hub:.3}, specific raw={raw_specific:.3} \
              cal={cal_specific:.3})"
         );
+        Ok(())
     }
 
     /// The hub case, which is the whole reason [`MIN_SD`] is a real number rather
     /// than an epsilon: a text that scores nearly the same against everything must
     /// land near zero, not be amplified by its own lack of spread.
     #[test]
-    fn a_hub_is_not_amplified_by_its_own_flatness() {
+    fn a_hub_is_not_amplified_by_its_own_flatness() -> anyhow::Result<()> {
         let d = 16;
         let probes: Vec<Vec<f32>> = (0..5).map(|i| axis(d, i)).collect();
         // Almost exactly equidistant from every probe, with a whisper of variation
@@ -201,12 +203,13 @@ mod tests {
             z.abs() < 25.0,
             "a flat hub must not be amplified into a huge score by a vanishing sd, got {z}"
         );
+        Ok(())
     }
 
     /// A text that scores the same against every probe has no spread to normalize
     /// by. That must not divide by zero, and must not rank as infinitely relevant.
     #[test]
-    fn a_text_with_no_spread_is_finite() {
+    fn a_text_with_no_spread_is_finite() -> anyhow::Result<()> {
         let d = 4;
         let probes: Vec<Vec<f32>> = vec![axis(d, 0), axis(d, 1), axis(d, 2)];
         // Equidistant from all three probes.
@@ -218,16 +221,17 @@ mod tests {
             let n = (v.iter().map(|x| x * x).sum::<f32>()).sqrt();
             v.iter().map(|x| x / n).collect()
         };
-        let b = baseline_of(&flat, &probes).expect("three probes is enough");
+        let b = baseline_of(&flat, &probes).context("three probes is enough")?;
         assert!(b.sd >= MIN_SD, "sd is floored, not zero");
         let s = calibrated_score(&axis(d, 0), &flat, &probes);
         assert!(s.is_finite(), "a flat baseline still yields a finite score");
+        Ok(())
     }
 
     /// Too few probes to estimate a spread: fall back to the raw cosine rather
     /// than inventing a calibration from one sample.
     #[test]
-    fn too_few_probes_degrades_to_raw_cosine() {
+    fn too_few_probes_degrades_to_raw_cosine() -> anyhow::Result<()> {
         let d = 4;
         let v = axis(d, 0);
         let q = blend(d, 0, 1, 0.8);
@@ -238,18 +242,20 @@ mod tests {
             cosine_similarity(&q, &v),
             "no probes means no correction, not a zero score"
         );
+        Ok(())
     }
 
     /// The probe set is the calibration's only assumption, so it is worth pinning:
     /// the probes must not resemble each other, or the spread they estimate is the
     /// spread of one topic rather than of arbitrary queries.
     #[test]
-    fn the_probes_are_mutually_unrelated_texts() {
+    fn the_probes_are_mutually_unrelated_texts() -> anyhow::Result<()> {
         assert!(PROBE_TEXTS.len() >= 2, "a spread needs at least two");
         let mut seen = std::collections::HashSet::new();
         for p in PROBE_TEXTS {
             assert!(seen.insert(p), "probes must be distinct: {p}");
             assert!(!p.trim().is_empty(), "a blank probe embeds nothing useful");
         }
+        Ok(())
     }
 }

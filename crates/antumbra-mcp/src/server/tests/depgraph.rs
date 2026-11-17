@@ -2,6 +2,7 @@
 //! it again, and walking the blast radius with the evidence attached.
 
 use super::*;
+use antumbra_store::testing::mem_store;
 
 fn server_in(store: &Store, tenant: &str, user: &str) -> McpServer {
     McpServer::new(
@@ -21,37 +22,39 @@ async fn record(
     to: &str,
     source: &str,
     detail: &str,
-) -> RecordedDependencyOut {
-    s.record_dependency(Parameters(RecordDependencyParams {
+) -> anyhow::Result<RecordedDependencyOut> {
+    Ok(s.record_dependency(Parameters(RecordDependencyParams {
         from: from.into(),
         to: to.into(),
         source: source.into(),
         detail: Some(detail.into()),
         provenance: None,
     }))
-    .await
-    .unwrap()
-    .0
+    .await?
+    .0)
 }
 
-async fn radius(s: &McpServer, service: &str, direction: Option<&str>) -> BlastRadiusOut {
-    s.blast_radius(Parameters(BlastRadiusParams {
+async fn radius(
+    s: &McpServer,
+    service: &str,
+    direction: Option<&str>,
+) -> anyhow::Result<BlastRadiusOut> {
+    Ok(s.blast_radius(Parameters(BlastRadiusParams {
         service: service.into(),
         direction: direction.map(str::to_string),
         depth: None,
         min_weight: None,
     }))
-    .await
-    .unwrap()
-    .0
+    .await?
+    .0)
 }
 
 /// What breaks if orders does: checkout directly, web through it, each with
 /// the evidence for every hop. A model's claim alone (billing) stays under the
 /// default floor.
 #[tokio::test]
-async fn blast_radius_walks_the_recorded_edges_with_their_evidence() {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+async fn blast_radius_walks_the_recorded_edges_with_their_evidence() -> anyhow::Result<()> {
+    let store = mem_store().await?;
     let s = server_in(&store, "ws:test", "user:a");
     record(
         &s,
@@ -60,7 +63,7 @@ async fn blast_radius_walks_the_recorded_edges_with_their_evidence() {
         "declared",
         "package.json names @acme/checkout",
     )
-    .await;
+    .await?;
     record(
         &s,
         "github.com/acme/checkout",
@@ -68,7 +71,7 @@ async fn blast_radius_walks_the_recorded_edges_with_their_evidence() {
         "declared",
         "go.mod requires orders",
     )
-    .await;
+    .await?;
     record(
         &s,
         "github.com/acme/checkout",
@@ -76,7 +79,7 @@ async fn blast_radius_walks_the_recorded_edges_with_their_evidence() {
         "observed",
         "APM: 1.2k calls/min",
     )
-    .await;
+    .await?;
     record(
         &s,
         "github.com/acme/billing",
@@ -84,9 +87,9 @@ async fn blast_radius_walks_the_recorded_edges_with_their_evidence() {
         "claimed",
         "read from the code",
     )
-    .await;
+    .await?;
 
-    let out = radius(&s, "GitHub.com/Acme/Orders", None).await;
+    let out = radius(&s, "GitHub.com/Acme/Orders", None).await?;
     assert_eq!(out.service, "github.com/acme/orders");
     assert_eq!(out.direction, "dependents");
     assert_eq!(out.edges, 4);
@@ -116,7 +119,7 @@ async fn blast_radius_walks_the_recorded_edges_with_their_evidence() {
         Some("go.mod requires orders")
     );
 
-    let needs = radius(&s, "github.com/acme/web", Some("dependencies")).await;
+    let needs = radius(&s, "github.com/acme/web", Some("dependencies")).await?;
     let needed: Vec<&str> = needs.reached.iter().map(|r| r.service.as_str()).collect();
     assert_eq!(
         needed,
@@ -130,8 +133,7 @@ async fn blast_radius_walks_the_recorded_edges_with_their_evidence() {
             depth: Some(1),
             min_weight: Some(0.2),
         }))
-        .await
-        .unwrap()
+        .await?
         .0;
     assert!(
         loose
@@ -140,37 +142,39 @@ async fn blast_radius_walks_the_recorded_edges_with_their_evidence() {
             .any(|r| r.service == "github.com/acme/billing"),
         "a lower floor lets the claim through"
     );
+    Ok(())
 }
 
 /// Recording the same edge from the same source again reinforces the one
 /// memory, and the latest detail replaces the old.
 #[tokio::test]
-async fn recording_an_edge_again_reinforces_it() {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+async fn recording_an_edge_again_reinforces_it() -> anyhow::Result<()> {
+    let store = mem_store().await?;
     let s = server_in(&store, "ws:test", "user:a");
-    let first = record(&s, "a", "b", "learned", "changed together 4 times").await;
+    let first = record(&s, "a", "b", "learned", "changed together 4 times").await?;
     assert!(first.created);
     assert!((first.confidence - 0.6).abs() < 1e-6);
-    let again = record(&s, "A", "b/", "learned", "changed together 9 times").await;
+    let again = record(&s, "A", "b/", "learned", "changed together 9 times").await?;
     assert!(!again.created);
     assert_eq!(again.id, first.id);
     assert_eq!(again.reinforcement, 1);
     assert!(again.confidence > first.confidence);
-    let m = memory::get(&store, &TenantId::new("ws:test"), &MemoryId::new(first.id))
-        .await
-        .unwrap()
-        .unwrap();
+    let Some(m) = memory::get(&store, &TenantId::new("ws:test"), &MemoryId::new(first.id)).await?
+    else {
+        anyhow::bail!("the reinforced edge is not in the store");
+    };
     assert!(
         m.content.contains("changed together 9 times"),
         "{}",
         m.content
     );
     assert!(m.compartment.is_none(), "in the workspace's shared pool");
+    Ok(())
 }
 
 #[tokio::test]
-async fn bad_input_is_refused_with_the_choices() {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+async fn bad_input_is_refused_with_the_choices() -> anyhow::Result<()> {
+    let store = mem_store().await?;
     let s = server_in(&store, "ws:test", "user:a");
     let refuse = |from: &str, to: &str, source: &str| {
         let p = RecordDependencyParams {
@@ -187,15 +191,18 @@ async fn bad_input_is_refused_with_the_choices() {
                 .map(|e| e.message.to_string())
         }
     };
-    assert!(refuse("a", "b", "rumor")
-        .await
-        .unwrap()
-        .contains("declared, observed, learned, claimed"));
-    assert!(refuse("a", "A/", "declared")
-        .await
-        .unwrap()
-        .contains("itself"));
-    assert!(refuse(" ", "b", "declared").await.unwrap().contains("both"));
+    let Some(rumor) = refuse("a", "b", "rumor").await else {
+        anyhow::bail!("an unknown source was accepted");
+    };
+    assert!(rumor.contains("declared, observed, learned, claimed"));
+    let Some(itself) = refuse("a", "A/", "declared").await else {
+        anyhow::bail!("a service depending on itself was accepted");
+    };
+    assert!(itself.contains("itself"));
+    let Some(blank) = refuse(" ", "b", "declared").await else {
+        anyhow::bail!("a blank service was accepted");
+    };
+    assert!(blank.contains("both"));
     let Err(e) = s
         .blast_radius(Parameters(BlastRadiusParams {
             service: "a".into(),
@@ -205,68 +212,71 @@ async fn bad_input_is_refused_with_the_choices() {
         }))
         .await
     else {
-        panic!("an unknown direction was accepted");
+        anyhow::bail!("an unknown direction was accepted");
     };
     assert!(
         e.message.contains("dependents or dependencies"),
         "{}",
         e.message
     );
+    Ok(())
 }
 
 /// One workspace's edges are not another's, even for the same pair of
 /// services, and every member of a workspace reads them.
 #[tokio::test]
-async fn edges_belong_to_their_workspace_and_every_member_reads_them() {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+async fn edges_belong_to_their_workspace_and_every_member_reads_them() -> anyhow::Result<()> {
+    let store = mem_store().await?;
     let a = server_in(&store, "ws:one", "user:a");
     let other_member = server_in(&store, "ws:one", "user:b");
     let elsewhere = server_in(&store, "ws:two", "user:c");
-    let mine = record(&a, "web", "orders", "declared", "here").await;
-    let theirs = record(&elsewhere, "web", "orders", "declared", "there").await;
+    let mine = record(&a, "web", "orders", "declared", "here").await?;
+    let theirs = record(&elsewhere, "web", "orders", "declared", "there").await?;
     assert_ne!(mine.id, theirs.id);
     assert!(
         theirs.created,
         "a separate row, not a reinforcement of mine"
     );
-    assert_eq!(radius(&other_member, "orders", None).await.reached.len(), 1);
-    let detail = radius(&elsewhere, "orders", None).await.reached[0].path[0].evidence[0]
+    assert_eq!(
+        radius(&other_member, "orders", None).await?.reached.len(),
+        1
+    );
+    let detail = radius(&elsewhere, "orders", None).await?.reached[0].path[0].evidence[0]
         .detail
         .clone();
     assert_eq!(detail.as_deref(), Some("there"));
+    Ok(())
 }
 
 #[tokio::test]
-async fn the_rest_dispatcher_reaches_the_graph_tools() {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+async fn the_rest_dispatcher_reaches_the_graph_tools() -> anyhow::Result<()> {
+    let store = mem_store().await?;
     let s = server_in(&store, "ws:test", "user:a");
     let recorded = s
         .call_tool(
             "record_dependency",
             serde_json::json!({ "from": "web", "to": "orders", "source": "declared" }),
         )
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(recorded["created"], true);
     let walked = s
         .call_tool("blast_radius", serde_json::json!({ "service": "orders" }))
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(walked["reached"][0]["service"], "web");
     let listed = s
         .call_tool("list_dependencies", serde_json::json!({}))
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(listed["total"], 1);
     assert_eq!(listed["pairs"][0]["from"], "web");
+    Ok(())
 }
 
 /// The list shows every pair, the weak ones a walk would skip included,
 /// strongest first, with a count of them all and the services they name;
 /// `service` keeps the pairs on either end of it, and `limit` how many.
 #[tokio::test]
-async fn the_graph_is_listed_pair_by_pair_weak_ones_too() {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+async fn the_graph_is_listed_pair_by_pair_weak_ones_too() -> anyhow::Result<()> {
+    let store = mem_store().await?;
     let s = server_in(&store, "ws:test", "user:a");
     record(
         &s,
@@ -275,7 +285,7 @@ async fn the_graph_is_listed_pair_by_pair_weak_ones_too() {
         "declared",
         "package.json names orders",
     )
-    .await;
+    .await?;
     record(
         &s,
         "github.com/a/web",
@@ -283,7 +293,7 @@ async fn the_graph_is_listed_pair_by_pair_weak_ones_too() {
         "observed",
         "traces, 7 days",
     )
-    .await;
+    .await?;
     record(
         &s,
         "github.com/a/orders",
@@ -291,7 +301,7 @@ async fn the_graph_is_listed_pair_by_pair_weak_ones_too() {
         "declared",
         "Cargo.toml names db",
     )
-    .await;
+    .await?;
     record(
         &s,
         "github.com/a/billing",
@@ -299,7 +309,7 @@ async fn the_graph_is_listed_pair_by_pair_weak_ones_too() {
         "claimed",
         "read from the code",
     )
-    .await;
+    .await?;
 
     let list = |service: Option<&str>, limit: Option<u32>| {
         let s = &s;
@@ -307,11 +317,10 @@ async fn the_graph_is_listed_pair_by_pair_weak_ones_too() {
         async move {
             s.list_dependencies(Parameters(ListDependenciesParams { service, limit }))
                 .await
-                .unwrap()
-                .0
+                .map(|out| out.0)
         }
     };
-    let all = list(None, None).await;
+    let all = list(None, None).await?;
     assert_eq!(all.total, 3);
     let pairs: Vec<(&str, &str, usize)> = all
         .pairs
@@ -339,8 +348,9 @@ async fn the_graph_is_listed_pair_by_pair_weak_ones_too() {
     );
     assert_eq!(all.pairs[0].evidence[0].source, "declared");
 
-    let orders = list(Some("github.com/a/orders"), None).await;
+    let orders = list(Some("github.com/a/orders"), None).await?;
     assert_eq!(orders.total, 2);
-    let first = list(None, Some(1)).await;
+    let first = list(None, Some(1)).await?;
     assert_eq!((first.pairs.len(), first.total), (1, 3));
+    Ok(())
 }

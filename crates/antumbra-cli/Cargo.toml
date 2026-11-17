@@ -22,13 +22,15 @@ path = "src/main.rs"
 # `testing` feature: the CLI drives the loop with the demo (fake) trainer +
 # embedder until the real candle/llama engines (antumbra-train/serve) land.
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
-antumbra-store = { path = "../antumbra-store" }
+antumbra-auth = { path = "../antumbra-auth" }
+antumbra-store = { path = "../antumbra-store", features = ["clap"] }
 # The operator console, run as `antumbra tui`.
 antumbra-tui = { path = "../antumbra-tui" }
 # The per-workspace embedder (set-embedder / reembed) builds an HttpEmbedder
 # from a workspace's configured endpoint; light (ureq), no models needed.
-antumbra-embed = { path = "../antumbra-embed" }
-antumbra-copal = { path = "../antumbra-copal" }
+antumbra-embed = { path = "../antumbra-embed", features = ["clap"] }
+antumbra-copal = { path = "../antumbra-copal", features = ["clap"] }
+antumbra-http = { path = "../antumbra-http" }
 antumbra-ingest = { path = "../antumbra-ingest" }
 antumbra-sync = { path = "../antumbra-sync" }
 antumbra-loop = { path = "../antumbra-loop" }
@@ -56,6 +58,11 @@ jsonschema = { version = "0.56.0", default-features = false }
 getrandom = "0.3"
 base64 = "0.22"
 
+[dev-dependencies]
+# Tests stand their stores up through the shared `testing` fixtures rather than
+# by hand.
+antumbra-store = { path = "../antumbra-store", features = ["clap", "testing"] }
+
 [features]
 default = []
 # Enables the `train` command: the real candle Qwen2.5-Coder + LoRA trainer
@@ -72,3 +79,6 @@ models = [
 # antumbra-serve, whose `cuda`/`metal` likewise pull in `models`.
 cuda = ["models", "antumbra-train/cuda"]
 metal = ["models", "antumbra-train/metal"]
+
+[lints]
+workspace = true

@@ -11,4 +11,9 @@ antumbra-core = { path = "../antumbra-core" }
 serde.workspace = true
 
 [dev-dependencies]
+# The instruments have no error type of their own; their tests return anyhow's Result.
+anyhow.workspace = true
 serde_json.workspace = true
+
+[lints]
+workspace = true

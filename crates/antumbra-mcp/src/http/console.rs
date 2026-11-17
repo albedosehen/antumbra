@@ -42,8 +42,7 @@ fn verified(state: &HttpState, req: &Request<Body>, route: &str) -> Option<Acces
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok());
     state
-        .verifier
-        .verify_header_access(header_val)
+        .access_of(header_val)
         .map_err(|e| eprintln!("antumbra-mcp: rejected {route}: {e}"))
         .ok()
 }

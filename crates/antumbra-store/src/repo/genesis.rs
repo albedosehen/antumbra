@@ -8,12 +8,10 @@
 //! because the compartment has moved on since.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use surql::query::builder::Query;
-use surql::query::crud::{query_records, upsert_record};
+use surql::query::crud::query_records;
 use surql::types::operators::{and_, eq};
-use surql::types::RecordID;
 
 use antumbra_core::{CompartmentId, GenesisRequest, GenesisStatus, Result, TenantId, UserId};
 
@@ -21,7 +19,7 @@ use crate::dto::parse_dt;
 use crate::error::map;
 use crate::store::Store;
 
-const GENESIS_REQUEST: &str = "genesis_request";
+const GENESIS_REQUEST: &str = crate::tables::GENESIS_REQUEST;
 
 #[derive(Serialize, Deserialize)]
 struct RequestRow {
@@ -82,12 +80,13 @@ fn record_key(request: &GenesisRequest) -> &str {
 }
 
 async fn put(store: &Store, request: &GenesisRequest) -> Result<()> {
-    let rid = RecordID::<()>::new(GENESIS_REQUEST, record_key(request)).map_err(map)?;
-    let data: Value = serde_json::to_value(RequestRow::from_domain(request))?;
-    upsert_record(store.client(), &rid, data)
+    store
+        .put(
+            GENESIS_REQUEST,
+            record_key(request),
+            &RequestRow::from_domain(request),
+        )
         .await
-        .map_err(map)?;
-    Ok(())
 }
 
 /// Ask for a compartment to be trained somewhere else. Returns the request as
@@ -179,11 +178,7 @@ pub async fn set_status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
-
-    async fn store() -> Result<Store> {
-        Store::connect_memory(EMBED_DIM).await
-    }
+    use crate::testing::mem_store;
 
     fn request(compartment: &str, at: chrono::DateTime<chrono::Utc>) -> GenesisRequest {
         GenesisRequest::new(
@@ -198,7 +193,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_compartment_asked_about_twice_waits_once() -> Result<()> {
-        let s = store().await?;
+        let s = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let user = UserId::new("user:a");
         let first = chrono::Utc::now();
@@ -228,7 +223,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_run_that_has_waited_longest_is_the_next_one() -> Result<()> {
-        let s = store().await?;
+        let s = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let user = UserId::new("user:a");
         let now = chrono::Utc::now();
@@ -255,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_status_this_build_cannot_reason_about_is_skipped() -> Result<()> {
-        let s = store().await?;
+        let s = mem_store().await?;
         let tenant = TenantId::new("ws:t");
         let user = UserId::new("user:a");
         ask(&s, &request("comp:rust", chrono::Utc::now())).await?;

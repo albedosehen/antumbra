@@ -84,7 +84,11 @@ pub(super) const LORA_A_STDEV: f64 = 0.02;
 /// same factors in any process, on any device.
 pub(super) fn seed_lora_a(varmap: &VarMap, seed: u64) -> CResult<()> {
     use rand::RngExt as _;
-    let vars = varmap.data().lock().expect("varmap lock");
+    // A poisoned lock holds the same map of vars, none half-set: taken as is.
+    let vars = varmap
+        .data()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut names: Vec<&String> = vars.keys().filter(|n| n.ends_with("lora_a")).collect();
     names.sort();
     let mut rng = StdRng::seed_from_u64(seed);
@@ -686,7 +690,10 @@ mod tests {
     }
 
     fn factor(varmap: &VarMap, name: &str) -> CResult<Vec<f32>> {
-        let vars = varmap.data().lock().expect("varmap lock");
+        let vars = varmap
+            .data()
+            .lock()
+            .map_err(|_| candle_core::Error::msg("the varmap lock is poisoned"))?;
         vars[name].flatten_all()?.to_vec1::<f32>()
     }
 

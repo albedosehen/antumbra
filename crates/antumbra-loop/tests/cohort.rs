@@ -8,10 +8,11 @@ use async_trait::async_trait;
 
 use antumbra_core::ports::{TrainOutcome, TrainRequest, Trainer};
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
-use antumbra_core::{Result, RunId, ShadowId, ShadowStatus, TrainingRecipe};
+use antumbra_core::{AntumbraError, Result, RunId, ShadowId, ShadowStatus, TrainingRecipe};
 use antumbra_loop::search::SearchPolicy;
 use antumbra_loop::{GenerationLoop, GenerationReport, LoopConfig};
 use antumbra_store::repo::{recipe, shadow};
+use antumbra_store::testing::mem_store_of;
 use antumbra_store::Store;
 
 const START: TrainingRecipe = TrainingRecipe {
@@ -25,6 +26,17 @@ const START: TrainingRecipe = TrainingRecipe {
 #[derive(Default)]
 struct RecipeSensitive {
     asked: Mutex<Vec<(ShadowId, Option<TrainingRecipe>)>>,
+}
+
+impl RecipeSensitive {
+    /// Every request it was sent, in order. The fake only ever pushes to the
+    /// list, so a poisoned lock holds a whole list and is read as is.
+    fn asked(&self) -> Vec<(ShadowId, Option<TrainingRecipe>)> {
+        self.asked
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
 }
 
 fn quality(r: &TrainingRecipe) -> f32 {
@@ -80,7 +92,7 @@ async fn run(
 
 #[tokio::test]
 async fn a_searched_generation_trains_its_cohort_and_carries_the_best() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let trainer = RecipeSensitive::default();
     let reports = run(&store, &trainer, searched(4), 1).await?;
     let report = &reports[0];
@@ -102,7 +114,7 @@ async fn a_searched_generation_trains_its_cohort_and_carries_the_best() -> Resul
         .cohort
         .iter()
         .max_by(|a, b| a.fitness.total_cmp(&b.fitness))
-        .expect("members");
+        .ok_or_else(|| AntumbraError::other("the cohort has no members"))?;
     assert_eq!(
         report.shadow, best.shadow,
         "the best member is carried forward"
@@ -111,14 +123,14 @@ async fn a_searched_generation_trains_its_cohort_and_carries_the_best() -> Resul
 
     // Every member trained from the base under the recipe it was given, and
     // left a recipe row and a shadow; the ones that lost were pruned.
-    let asked = trainer.asked.lock().unwrap().clone();
+    let asked = trainer.asked();
     assert_eq!(asked.len(), 4);
     let rows = recipe::list_for_run(&store, &RunId::new("run:cohort")).await?;
     assert_eq!(rows.len(), 4);
     for member in &report.cohort {
         let sh = shadow::get(&store, &member.shadow)
             .await?
-            .expect("a shadow");
+            .ok_or_else(|| AntumbraError::other(format!("{} left no shadow", member.shadow)))?;
         if member.shadow != report.shadow {
             assert_eq!(sh.status, ShadowStatus::Pruned, "{}", member.shadow);
         }
@@ -130,7 +142,7 @@ async fn a_searched_generation_trains_its_cohort_and_carries_the_best() -> Resul
 /// recipe, and nothing else of the winner's is handed on.
 #[tokio::test]
 async fn the_winning_recipe_leads_the_next_cohort() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let trainer = RecipeSensitive::default();
     let reports = run(&store, &trainer, searched(4), 2).await?;
     assert_eq!(reports[1].cohort[0].recipe, reports[0].recipe);
@@ -168,7 +180,7 @@ impl Trainer for InOrder {
 #[tokio::test]
 async fn a_cohorts_best_graduates_on_its_shrunk_score() -> Result<()> {
     for (threshold, expected) in [(0.5, true), (0.7, false)] {
-        let store = Store::connect_memory(8).await?;
+        let store = mem_store_of(8).await?;
         let trainer = InOrder(Mutex::new(vec![0.1, 0.9, 0.1, 0.1]));
         let cfg = LoopConfig {
             graduate_threshold: threshold,
@@ -188,7 +200,7 @@ async fn a_cohorts_best_graduates_on_its_shrunk_score() -> Result<()> {
 
 #[tokio::test]
 async fn an_unsearched_generation_scores_its_one_shadow_as_it_always_did() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let report = run(
         &store,
         &ScriptedTrainer::graduating(),
@@ -205,7 +217,7 @@ async fn an_unsearched_generation_scores_its_one_shadow_as_it_always_did() -> Re
 
 #[tokio::test]
 async fn a_searched_run_needs_a_starting_recipe() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let cfg = LoopConfig {
         recipe: None,
         ..searched(4)
@@ -224,10 +236,10 @@ async fn a_resumed_run_proposes_what_a_continuous_one_would() -> Result<()> {
     let recipes = |reports: &[GenerationReport]| -> Vec<Option<TrainingRecipe>> {
         reports[1].cohort.iter().map(|m| m.recipe).collect()
     };
-    let continuous = Store::connect_memory(8).await?;
+    let continuous = mem_store_of(8).await?;
     let straight = run(&continuous, &RecipeSensitive::default(), searched(4), 2).await?;
 
-    let resumed = Store::connect_memory(8).await?;
+    let resumed = mem_store_of(8).await?;
     run(&resumed, &RecipeSensitive::default(), searched(4), 1).await?;
     let mut after = run(&resumed, &RecipeSensitive::default(), searched(4), 2).await?;
     after.insert(0, straight[0].clone());
@@ -241,10 +253,10 @@ async fn a_resumed_run_proposes_what_a_continuous_one_would() -> Result<()> {
 /// evidence (here, a leftover row scoring a perfect 1.0).
 #[tokio::test]
 async fn a_half_finished_generation_is_not_its_own_history() -> Result<()> {
-    let continuous = Store::connect_memory(8).await?;
+    let continuous = mem_store_of(8).await?;
     let straight = run(&continuous, &RecipeSensitive::default(), searched(4), 2).await?;
 
-    let crashed = Store::connect_memory(8).await?;
+    let crashed = mem_store_of(8).await?;
     run(&crashed, &RecipeSensitive::default(), searched(4), 1).await?;
     recipe::upsert(
         &crashed,
@@ -292,7 +304,7 @@ fn with_slow(interval: u32) -> LoopConfig {
 /// member is slow.
 #[tokio::test]
 async fn a_slow_member_holds_its_recipe_for_its_interval() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let reports = run(&store, &RecipeSensitive::default(), with_slow(2), 3).await?;
     let slow: Vec<Option<TrainingRecipe>> = reports
         .iter()
@@ -315,9 +327,9 @@ async fn a_resumed_run_holds_what_a_continuous_one_would() -> Result<()> {
     let recipes = |r: &GenerationReport| -> Vec<Option<TrainingRecipe>> {
         r.cohort.iter().map(|m| m.recipe).collect()
     };
-    let continuous = Store::connect_memory(8).await?;
+    let continuous = mem_store_of(8).await?;
     let straight = run(&continuous, &RecipeSensitive::default(), with_slow(3), 3).await?;
-    let resumed = Store::connect_memory(8).await?;
+    let resumed = mem_store_of(8).await?;
     run(&resumed, &RecipeSensitive::default(), with_slow(3), 2).await?;
     let after = run(&resumed, &RecipeSensitive::default(), with_slow(3), 3).await?;
     assert_eq!(after.len(), 1);

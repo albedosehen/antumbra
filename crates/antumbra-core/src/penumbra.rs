@@ -92,12 +92,15 @@ impl Cluster {
 pub fn propose_compartments(memories: &[Memory], cfg: &ClusterConfig) -> Vec<ProposedCompartment> {
     // Embedded candidates in a stable id order so the greedy pass (and thus the
     // proposals) is reproducible run to run.
-    let mut candidates: Vec<&Memory> = memories.iter().filter(|m| m.embedding.is_some()).collect();
-    candidates.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+    // Each memory with its embedding, so no step below has to ask for one.
+    let mut candidates: Vec<(&Memory, &[f32])> = memories
+        .iter()
+        .filter_map(|m| m.embedding.as_deref().map(|e| (m, e)))
+        .collect();
+    candidates.sort_by(|(a, _), (b, _)| a.id.as_str().cmp(b.id.as_str()));
 
     let mut clusters: Vec<Cluster> = Vec::new();
-    for (idx, m) in candidates.iter().enumerate() {
-        let emb = m.embedding.as_deref().expect("filtered to Some above");
+    for (idx, (_, emb)) in candidates.iter().enumerate() {
         // Best existing cluster by centroid cosine.
         let best = clusters
             .iter()
@@ -121,12 +124,7 @@ pub fn propose_compartments(memories: &[Memory], cfg: &ClusterConfig) -> Vec<Pro
             let sims: Vec<f32> = c
                 .members
                 .iter()
-                .map(|&i| {
-                    cosine_similarity(
-                        &c.centroid,
-                        candidates[i].embedding.as_deref().expect("embedded"),
-                    )
-                })
+                .map(|&i| cosine_similarity(&c.centroid, candidates[i].1))
                 .collect();
             let medoid_pos = sims
                 .iter()
@@ -135,11 +133,14 @@ pub fn propose_compartments(memories: &[Memory], cfg: &ClusterConfig) -> Vec<Pro
                 .map(|(p, _)| p)
                 .unwrap_or(0);
             let cohesion = sims.iter().sum::<f32>() / sims.len() as f32;
-            let label = label_from(&candidates[c.members[medoid_pos]].content, cfg.label_words);
+            let label = label_from(
+                &candidates[c.members[medoid_pos]].0.content,
+                cfg.label_words,
+            );
             let members: Vec<MemoryId> = c
                 .members
                 .iter()
-                .map(|&i| candidates[i].id.clone())
+                .map(|&i| candidates[i].0.id.clone())
                 .collect();
             ProposedCompartment {
                 label,
@@ -203,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn groups_two_coherent_regions() {
+    fn groups_two_coherent_regions() -> anyhow::Result<()> {
         // Two tight clusters along orthogonal axes, plus one outlier singleton.
         let memories = vec![
             mem("m:1", "deno run typescript", vec![1.0, 0.0, 0.0], None),
@@ -220,10 +221,11 @@ mod tests {
             assert_eq!(p.members.len(), 3);
             assert!(p.cohesion > 0.9);
         }
+        Ok(())
     }
 
     #[test]
-    fn clustering_is_policy_free_over_the_given_pool() {
+    fn clustering_is_policy_free_over_the_given_pool() -> anyhow::Result<()> {
         // The core clusters whatever it is handed; pool selection (skipping
         // already-filed memory) is the caller's job, not this function's.
         let memories = vec![
@@ -233,20 +235,22 @@ mod tests {
         ];
         let out = propose_compartments(&memories, &ClusterConfig::default());
         assert_eq!(out.len(), 1, "core clusters the pool it is given");
+        Ok(())
     }
 
     #[test]
-    fn drops_clusters_below_min_size() {
+    fn drops_clusters_below_min_size() -> anyhow::Result<()> {
         let memories = vec![
             mem("m:1", "lonely pair one", vec![1.0, 0.0], None),
             mem("m:2", "lonely pair two", vec![0.99, 0.0], None),
         ];
         let out = propose_compartments(&memories, &ClusterConfig::default());
         assert!(out.is_empty(), "a pair is below the default min_size of 3");
+        Ok(())
     }
 
     #[test]
-    fn ignores_memories_without_embeddings() {
+    fn ignores_memories_without_embeddings() -> anyhow::Result<()> {
         let mut m = Memory::new(
             MemoryId::new("m:1"),
             TenantId::new("ws:1"),
@@ -258,10 +262,11 @@ mod tests {
         m.embedding = None;
         let out = propose_compartments(&[m], &ClusterConfig::default());
         assert!(out.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn label_is_a_slug_of_the_medoid() {
+    fn label_is_a_slug_of_the_medoid() -> anyhow::Result<()> {
         let memories = vec![
             mem("m:1", "Deno Run TypeScript!", vec![1.0, 0.0, 0.0], None),
             mem("m:2", "deno test", vec![0.99, 0.02, 0.0], None),
@@ -275,10 +280,11 @@ mod tests {
             out[0].label
         );
         assert!(!out[0].label.contains('!'), "punctuation stripped");
+        Ok(())
     }
 
     #[test]
-    fn proposals_sorted_by_cohesion() {
+    fn proposals_sorted_by_cohesion() -> anyhow::Result<()> {
         let memories = vec![
             // Tight cluster (cohesion ~1.0).
             mem("m:1", "tight a", vec![1.0, 0.0, 0.0], None),
@@ -297,5 +303,6 @@ mod tests {
             out[0].cohesion,
             out[1].cohesion
         );
+        Ok(())
     }
 }

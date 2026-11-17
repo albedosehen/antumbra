@@ -1,5 +1,7 @@
 use super::*;
 
+use antumbra_core::{AntumbraError, Result};
+
 fn spec(n: usize) -> Spec {
     Spec {
         rule: "Name an issue branch feat/{issue}-{slug}.".into(),
@@ -29,7 +31,7 @@ fn result(id: &str, passed: usize, total: usize) -> TaskResult {
 }
 
 #[test]
-fn every_third_example_is_held_out() {
+fn every_third_example_is_held_out() -> Result<()> {
     let ten = spec(10);
     let (train, held) = split(&ten.examples);
     assert_eq!(
@@ -44,12 +46,13 @@ fn every_third_example_is_held_out() {
     let two = spec(2);
     let (train, held) = split(&two.examples);
     assert_eq!((train.len(), held.len()), (2, 0), "too few to hold any out");
+    Ok(())
 }
 
 /// The closed form against what can be checked by hand, and the evidence it
 /// carries: the same lost fraction says more over more tasks.
 #[test]
-fn how_likely_the_expert_is_worse_follows_the_evidence() {
+fn how_likely_the_expert_is_worse_follows_the_evidence() -> Result<()> {
     let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
     assert!(close(prob_beta_greater(1, 1, 1, 1), 0.5), "two flat priors");
     assert!(
@@ -82,19 +85,21 @@ fn how_likely_the_expert_is_worse_follows_the_evidence() {
     );
     // Gaining is the mirror of losing.
     assert!(close(prob_worse(2, 3, 3) + prob_worse(3, 2, 3), 1.0));
+    Ok(())
 }
 
 #[test]
-fn the_fewest_examples_a_behavior_is_recorded_with_hold_one_out() {
+fn the_fewest_examples_a_behavior_is_recorded_with_hold_one_out() -> Result<()> {
     // A behavior recorded with fewer could never be admitted, and the keeper
     // spent ten minutes of GPU on each one before refusing it.
     let fewest = spec(antumbra_core::behavior::MIN_EXAMPLES);
     let (_, held) = split(&fewest.examples);
     assert!(!held.is_empty(), "nothing held out to admit the expert by");
+    Ok(())
 }
 
 #[test]
-fn an_audit_asks_the_later_examples_under_the_behavior_s_own_check() {
+fn an_audit_asks_the_later_examples_under_the_behavior_s_own_check() -> Result<()> {
     let later = spec(2).examples;
     let t = audit_tasks("memory:b1", &spec(8), &later);
     assert_eq!(t.len(), 2);
@@ -110,10 +115,11 @@ fn an_audit_asks_the_later_examples_under_the_behavior_s_own_check() {
     // Counted under the behavior, like its held-out tasks.
     let results = [result("memory:b1#a0", 1, 1), result("memory:b1#a1", 0, 1)];
     assert_eq!(counts(&results, "memory:b1#"), (1, 2));
+    Ok(())
 }
 
 #[test]
-fn tasks_carry_the_check_the_answer_and_the_behavior() {
+fn tasks_carry_the_check_the_answer_and_the_behavior() -> Result<()> {
     let t = tasks("memory:b1", &spec(8));
     assert_eq!((t.train.len(), t.held.len()), (6, 2));
     let first = &t.train[0];
@@ -132,10 +138,11 @@ fn tasks_carry_the_check_the_answer_and_the_behavior() {
     assert_eq!(check["must_not"], json!(["feature/"]));
     assert!(first.verify.get("program").is_none(), "judged in-process");
     assert!(t.held.iter().all(|h| h.id.starts_with("memory:b1#h")));
+    Ok(())
 }
 
 #[test]
-fn the_shipped_replay_and_controls_load() {
+fn the_shipped_replay_and_controls_load() -> Result<()> {
     let prompts = replay_prompts();
     assert_eq!(prompts.len(), 325);
     assert!(prompts.iter().all(|p| p.verify == always()));
@@ -167,10 +174,11 @@ fn the_shipped_replay_and_controls_load() {
         "an empty answer and a missing one are dropped"
     );
     assert_eq!(answered[0].completion.as_deref(), Some("git status"));
+    Ok(())
 }
 
 #[test]
-fn an_expert_that_learned_and_kept_the_rest_is_admitted() {
+fn an_expert_that_learned_and_kept_the_rest_is_admitted() -> Result<()> {
     let ids = vec!["memory:b1".to_string(), "memory:b2".to_string()];
     let base = vec![
         result("memory:b1#h0", 0, 1),
@@ -197,10 +205,11 @@ fn an_expert_that_learned_and_kept_the_rest_is_admitted() {
         }]
     );
     assert!(v.behaviors.iter().all(|b| b.admitted));
+    Ok(())
 }
 
 #[test]
-fn an_expert_that_did_not_learn_or_broke_the_controls_is_refused() {
+fn an_expert_that_did_not_learn_or_broke_the_controls_is_refused() -> Result<()> {
     let ids = vec!["memory:b1".to_string()];
     let base = vec![result("memory:b1#h0", 0, 2), result("control-cmd-0", 4, 4)];
     let unlearned = vec![result("memory:b1#h0", 1, 2), result("control-cmd-0", 4, 4)];
@@ -231,10 +240,11 @@ fn an_expert_that_did_not_learn_or_broke_the_controls_is_refused() {
         !admit(&[], &base, &base).admitted,
         "nothing taught, nothing admitted"
     );
+    Ok(())
 }
 
 #[test]
-fn each_family_of_controls_is_held_on_its_own() {
+fn each_family_of_controls_is_held_on_its_own() -> Result<()> {
     let ids = vec!["memory:b1".to_string()];
     let mut base = vec![result("memory:b1#h0", 0, 2)];
     let mut expert = vec![result("memory:b1#h0", 2, 2)];
@@ -257,10 +267,11 @@ fn each_family_of_controls_is_held_on_its_own() {
         "{:?}",
         v.reasons
     );
+    Ok(())
 }
 
 #[test]
-fn a_behavior_the_base_already_follows_holds_rather_than_rises() {
+fn a_behavior_the_base_already_follows_holds_rather_than_rises() -> Result<()> {
     let ids = vec!["memory:new".to_string(), "memory:known".to_string()];
     let base = vec![
         result("memory:new#h0", 0, 2),
@@ -285,7 +296,9 @@ fn a_behavior_the_base_already_follows_holds_rather_than_rises() {
     ];
     let v = super::admit(&ids, &base, &slipped, 0.9);
     assert!(v.admitted, "{:?}", v.reasons);
-    let known = v.behaviors.iter().find(|s| s.id == "memory:known").unwrap();
+    let Some(known) = v.behaviors.iter().find(|s| s.id == "memory:known") else {
+        return Err(AntumbraError::other("memory:known was not scored"));
+    };
     assert_eq!(known.held, 2);
     assert!((0.75..0.85).contains(&known.worse), "{}", known.worse);
     let forgot = vec![
@@ -317,10 +330,11 @@ fn a_behavior_the_base_already_follows_holds_rather_than_rises() {
         "{:?}",
         v.reasons
     );
+    Ok(())
 }
 
 #[test]
-fn an_expert_is_admitted_with_what_it_learned_and_without_what_it_missed() {
+fn an_expert_is_admitted_with_what_it_learned_and_without_what_it_missed() -> Result<()> {
     let ids = vec!["memory:learned".to_string(), "memory:missed".to_string()];
     let base = vec![
         result("memory:learned#h0", 0, 2),
@@ -352,13 +366,14 @@ fn an_expert_is_admitted_with_what_it_learned_and_without_what_it_missed() {
         !admit(&ids, &base, &broke).admitted,
         "the controls still hold it back"
     );
+    Ok(())
 }
 
 /// What a behavior was missed on is its first held-out task the expert
 /// failed, with the expert's answer. A behavior that passed every held-out
 /// task has none, and neither does a control.
 #[test]
-fn a_behavior_is_missed_on_its_first_failed_held_out_answer() {
+fn a_behavior_is_missed_on_its_first_failed_held_out_answer() -> Result<()> {
     let a = tasks("memory:a", &spec(6));
     let b = tasks("memory:b", &spec(6));
     let control = controls().remove(0);
@@ -382,4 +397,5 @@ fn a_behavior_is_missed_on_its_first_failed_held_out_answer() {
     assert_eq!(found[0].0, "memory:a");
     assert_eq!(found[0].1.task, a.held[1].prompt);
     assert_eq!(found[0].1.answer, "git switch -c feature/work");
+    Ok(())
 }

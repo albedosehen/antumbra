@@ -185,6 +185,7 @@ mod tests {
     use super::*;
     use crate::model::CausalLm;
     use antumbra_core::testing::MarkerVerifier;
+    use antumbra_core::AntumbraError;
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -217,7 +218,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn captures_and_internalizes_a_verified_correction() {
+    async fn captures_and_internalizes_a_verified_correction() -> Result<()> {
         let mut lm = Learner {
             taught: AtomicBool::new(false),
         };
@@ -239,15 +240,15 @@ mod tests {
             &cfg,
             &[],
         )
-        .await
-        .unwrap();
+        .await?;
         // The correction verified, was internalized, and the expert now emits it.
         assert_eq!(out.final_fitness, 1.0);
         assert_eq!(out.capability_exemplars, vec!["add a dep"]);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn an_unverifiable_correction_is_not_trusted() {
+    async fn an_unverifiable_correction_is_not_trusted() -> Result<()> {
         let mut lm = Learner {
             taught: AtomicBool::new(false),
         };
@@ -270,10 +271,10 @@ mod tests {
             &cfg,
             &[],
         )
-        .await
-        .unwrap();
+        .await?;
         assert_eq!(out.final_fitness, 0.0);
         assert!(out.capability_exemplars.is_empty());
+        Ok(())
     }
 
     /// Emits the correction for every prompt but one, and records what it was
@@ -348,7 +349,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_verified_correction_with_a_scope_yields_an_actionable_finding() {
+    async fn a_verified_correction_with_a_scope_yields_an_actionable_finding() -> Result<()> {
         let mut lm = Learner {
             taught: AtomicBool::new(false),
         };
@@ -378,18 +379,18 @@ mod tests {
             &cfg,
             &[],
         )
-        .await
-        .unwrap();
+        .await?;
         assert_eq!(out.boundary_findings.len(), 1);
         let f = &out.boundary_findings[0];
         assert_eq!(f.behavior, "add a dep");
         assert_eq!(f.governing_feature, "runtime");
         assert_eq!(f.fail_context["runtime"], serde_json::json!("deno"));
         assert_eq!(f.near_ok_context["runtime"], serde_json::json!("node"));
+        Ok(())
     }
 
     #[tokio::test]
-    async fn an_inferred_scope_names_the_one_differing_feature() {
+    async fn an_inferred_scope_names_the_one_differing_feature() -> Result<()> {
         let mut lm = Learner {
             taught: AtomicBool::new(false),
         };
@@ -418,14 +419,14 @@ mod tests {
             &cfg,
             &[],
         )
-        .await
-        .unwrap();
+        .await?;
         assert_eq!(out.boundary_findings.len(), 1);
         assert_eq!(out.boundary_findings[0].governing_feature, "runtime");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn an_ambiguous_inferred_scope_yields_no_boundary() {
+    async fn an_ambiguous_inferred_scope_yields_no_boundary() -> Result<()> {
         let mut lm = Learner {
             taught: AtomicBool::new(false),
         };
@@ -454,13 +455,13 @@ mod tests {
             &cfg,
             &[],
         )
-        .await
-        .unwrap();
+        .await?;
         assert!(out.boundary_findings.is_empty());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn an_unverified_correction_yields_no_boundary() {
+    async fn an_unverified_correction_yields_no_boundary() -> Result<()> {
         let mut lm = Learner {
             taught: AtomicBool::new(false),
         };
@@ -490,9 +491,9 @@ mod tests {
             &cfg,
             &[],
         )
-        .await
-        .unwrap();
+        .await?;
         assert!(out.boundary_findings.is_empty());
+        Ok(())
     }
 
     /// Records every prompt it is fine-tuned on, so a test can assert the
@@ -507,7 +508,10 @@ mod tests {
             Ok(vec!["deno install".to_string(); n])
         }
         async fn sft_step(&mut self, batch: &[SftExample]) -> Result<f32> {
-            let mut seen = self.seen.lock().unwrap();
+            let mut seen = self
+                .seen
+                .lock()
+                .map_err(|_| AntumbraError::other("the recorder's lock was poisoned"))?;
             seen.extend(batch.iter().map(|e| e.prompt.clone()));
             Ok(0.0)
         }
@@ -517,7 +521,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn replay_buffer_is_rehearsed_during_consolidation() {
+    async fn replay_buffer_is_rehearsed_during_consolidation() -> Result<()> {
         let mut lm = Recorder {
             seen: std::sync::Mutex::new(Vec::new()),
         };
@@ -545,11 +549,14 @@ mod tests {
             &cfg,
             &replay,
         )
-        .await
-        .unwrap();
-        let seen = lm.seen.lock().unwrap();
+        .await?;
+        let seen = lm
+            .seen
+            .lock()
+            .map_err(|_| AntumbraError::other("the recorder's lock was poisoned"))?;
         // Both the new memory and the rehearsed old skill were trained on.
         assert!(seen.iter().any(|p| p == "new project"));
         assert!(seen.iter().any(|p| p == "old skill"));
+        Ok(())
     }
 }

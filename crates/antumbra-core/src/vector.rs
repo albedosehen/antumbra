@@ -57,38 +57,42 @@ mod tests {
     }
 
     #[test]
-    fn truncates_then_renormalizes_to_unit_length() {
+    fn truncates_then_renormalizes_to_unit_length() -> anyhow::Result<()> {
         // A known 4-vector truncated to its first 2 components: [3, 4] → /5.
         let out = truncate_renormalize(vec![3.0, 4.0, 100.0, -7.0], 2);
         assert_eq!(out.len(), 2);
         assert!((out[0] - 0.6).abs() < 1e-6, "{out:?}");
         assert!((out[1] - 0.8).abs() < 1e-6, "{out:?}");
         assert!((norm(&out) - 1.0).abs() < 1e-6, "unit norm: {}", norm(&out));
+        Ok(())
     }
 
     #[test]
-    fn zero_vector_does_not_nan() {
+    fn zero_vector_does_not_nan() -> anyhow::Result<()> {
         let out = truncate_renormalize(vec![0.0; 8], 4);
         assert_eq!(out.len(), 4);
         assert!(out.iter().all(|x| *x == 0.0), "stays zero, no NaN: {out:?}");
+        Ok(())
     }
 
     #[test]
-    fn truncating_to_own_length_is_renormalize_only() {
+    fn truncating_to_own_length_is_renormalize_only() -> anyhow::Result<()> {
         // target == len: no components dropped, just rescaled to unit norm.
         let v = vec![1.0, 2.0, 2.0]; // norm 3
         let out = truncate_renormalize(v.clone(), v.len());
         assert_eq!(out.len(), v.len());
         assert!((out[0] - 1.0 / 3.0).abs() < 1e-6, "{out:?}");
         assert!((norm(&out) - 1.0).abs() < 1e-6);
+        Ok(())
     }
 
     #[test]
-    fn target_longer_than_input_truncates_to_min() {
+    fn target_longer_than_input_truncates_to_min() -> anyhow::Result<()> {
         // A shorter-than-target vector is taken whole (min(len, target)) and
         // renormalized; the helper itself never pads or errors.
         let out = truncate_renormalize(vec![0.0, 3.0], 10);
         assert_eq!(out.len(), 2);
         assert!((out[1] - 1.0).abs() < 1e-6, "{out:?}");
+        Ok(())
     }
 }

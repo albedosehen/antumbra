@@ -52,11 +52,12 @@ impl Serve for CandleServe {
                             .await?,
                     );
                 }
-                guard
-                    .as_mut()
-                    .expect("model loaded above")
-                    .generate(&req.prompt, 1)
-                    .await
+                let Some(model) = guard.as_mut() else {
+                    return Err(antumbra_core::AntumbraError::other(
+                        "the model is not resident after loading",
+                    ));
+                };
+                model.generate(&req.prompt, 1).await
             })
         })?;
         let final_output = outputs.drain(..).next().unwrap_or_default();

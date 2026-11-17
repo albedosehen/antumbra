@@ -13,11 +13,11 @@ use antumbra_core::ports::{TrainOutcome, TrainRequest, Trainer};
 use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
 use antumbra_core::{Result, RunId};
 use antumbra_loop::{GenerationLoop, LoopConfig};
-use antumbra_store::Store;
+use antumbra_store::testing::mem_store_of;
 
 #[tokio::test]
 async fn each_generation_reports_how_its_critic_read() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let read = watch(
         &[0.9, 0.2, 0.8, 0.1],
         &[true, false, true, false],
@@ -58,12 +58,32 @@ struct Scripted {
     verifier_only: Mutex<Vec<bool>>,
 }
 
+impl Scripted {
+    /// Whether each run asked for the verifier's reward alone, in order. The
+    /// fake only ever pushes to the list, so a poisoned lock holds a whole
+    /// list and is read as is.
+    fn verifier_only(&self) -> Vec<bool> {
+        self.verifier_only
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
 #[async_trait]
 impl Trainer for Scripted {
     async fn train_shadow(&self, req: TrainRequest) -> Result<TrainOutcome> {
-        self.verifier_only.lock().unwrap().push(req.verifier_only);
+        // Read as `verifier_only` is: a push cannot leave the list half-written.
+        self.verifier_only
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(req.verifier_only);
         let next = {
-            let mut watches = self.watches.lock().unwrap();
+            // A remove that panicked would have left the script whole too.
+            let mut watches = self
+                .watches
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             (!watches.is_empty()).then(|| watches.remove(0))
         };
         ScriptedTrainer {
@@ -87,7 +107,7 @@ fn read(correlation: f32) -> CriticWatch {
 
 #[tokio::test]
 async fn a_critic_that_stops_tracking_the_verifier_is_set_aside() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let trainer = Scripted {
         watches: Mutex::new(vec![read(0.4), read(-0.2), read(0.5)]),
         verifier_only: Mutex::default(),
@@ -110,10 +130,7 @@ async fn a_critic_that_stops_tracking_the_verifier_is_set_aside() -> Result<()> 
         ]
     );
     // The generation after the one that set it aside trained without it.
-    assert_eq!(
-        *trainer.verifier_only.lock().unwrap(),
-        vec![false, false, true]
-    );
+    assert_eq!(trainer.verifier_only(), vec![false, false, true]);
     assert_eq!(reports[2].critic, None);
     Ok(())
 }

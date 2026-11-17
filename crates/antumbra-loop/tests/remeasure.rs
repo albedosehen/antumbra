@@ -15,6 +15,7 @@ use antumbra_core::testing::{FixedEmbedder, ScriptedTrainer};
 use antumbra_core::{Result, RunId, SubjectKind};
 use antumbra_loop::{GenerationLoop, GenerationReport, LoopConfig, Remeasure};
 use antumbra_store::repo::evaluation;
+use antumbra_store::testing::mem_store_of;
 use antumbra_store::Store;
 
 /// A scripted trainer that keeps every re-measurement it was asked for.
@@ -83,7 +84,7 @@ async fn run(
 #[tokio::test]
 async fn graduation_is_judged_on_the_remeasured_mean() -> Result<()> {
     for (rates, expected) in [(vec![0.2, 0.3, 0.4], false), (vec![0.6, 0.7, 0.8], true)] {
-        let store = Store::connect_memory(8).await?;
+        let store = mem_store_of(8).await?;
         let report = run(&store, &scoring(0.9, &rates), remeasuring(), "run:r", 1)
             .await?
             .remove(0);
@@ -105,23 +106,9 @@ async fn graduation_is_judged_on_the_remeasured_mean() -> Result<()> {
 #[tokio::test]
 async fn the_seeds_are_fresh_per_generation_and_repeat_on_a_rerun() -> Result<()> {
     let first = Recording::new(scoring(0.9, &[0.7]));
-    run(
-        &Store::connect_memory(8).await?,
-        &first,
-        remeasuring(),
-        "run:s",
-        2,
-    )
-    .await?;
+    run(&mem_store_of(8).await?, &first, remeasuring(), "run:s", 2).await?;
     let again = Recording::new(scoring(0.9, &[0.7]));
-    run(
-        &Store::connect_memory(8).await?,
-        &again,
-        remeasuring(),
-        "run:s",
-        2,
-    )
-    .await?;
+    run(&mem_store_of(8).await?, &again, remeasuring(), "run:s", 2).await?;
 
     let seeds =
         |t: &Recording| -> Vec<Vec<u64>> { t.asked().into_iter().map(|r| r.seeds).collect() };
@@ -147,28 +134,21 @@ async fn the_held_out_slice_is_used_only_when_its_holdout_was_confirmed() -> Res
         ..remeasuring()
     };
     let confirmed = Recording::new(scoring(0.9, &[0.7]));
-    run(
-        &Store::connect_memory(8).await?,
-        &confirmed,
-        cfg.clone(),
-        "run:h",
-        1,
-    )
-    .await?;
+    run(&mem_store_of(8).await?, &confirmed, cfg.clone(), "run:h", 1).await?;
     assert!(confirmed.asked()[0].holdout.is_some());
 
     let ignored = Recording::new(ScriptedTrainer {
         ignores_holdout: true,
         ..scoring(0.9, &[0.7])
     });
-    run(&Store::connect_memory(8).await?, &ignored, cfg, "run:h", 1).await?;
+    run(&mem_store_of(8).await?, &ignored, cfg, "run:h", 1).await?;
     assert!(ignored.asked()[0].holdout.is_none());
     Ok(())
 }
 
 #[tokio::test]
 async fn a_trainer_that_cannot_remeasure_fails_the_generation() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let trainer = ScriptedTrainer::graduating();
     assert!(run(&store, &trainer, remeasuring(), "run:n", 1)
         .await
@@ -201,7 +181,7 @@ async fn a_generation_failed_by_a_shortcut_is_not_remeasured() -> Result<()> {
         partition: Some(Partition::default()),
         ..remeasuring()
     };
-    let report = run(&Store::connect_memory(8).await?, &trainer, cfg, "run:x", 1)
+    let report = run(&mem_store_of(8).await?, &trainer, cfg, "run:x", 1)
         .await?
         .remove(0);
     assert!(!report.graduated);
@@ -212,7 +192,7 @@ async fn a_generation_failed_by_a_shortcut_is_not_remeasured() -> Result<()> {
 
 #[tokio::test]
 async fn the_evaluation_row_keeps_the_remeasurement() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     run(
         &store,
         &scoring(0.9, &[0.6, 0.7, 0.8]),

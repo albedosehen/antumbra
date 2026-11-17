@@ -18,3 +18,8 @@ serde = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+# The embedded store the signup and magic-link tests run the flow against.
+antumbra-store = { path = "../antumbra-store", features = ["testing"] }
+
+[lints]
+workspace = true

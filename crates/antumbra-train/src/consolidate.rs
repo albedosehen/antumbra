@@ -263,6 +263,7 @@ pub fn replay_from_tasks(tasks: &[CorpusTask]) -> Vec<SftExample> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_core::{AntumbraError, Result};
 
     fn ex(p: &str) -> SftExample {
         SftExample {
@@ -272,23 +273,25 @@ mod tests {
     }
 
     #[test]
-    fn ratio_zero_returns_winners_unchanged() {
+    fn ratio_zero_returns_winners_unchanged() -> Result<()> {
         let winners = vec![ex("a"), ex("b")];
         let replay = vec![ex("old")];
         let out = interleave_replay(&winners, &replay, 0.0);
         assert_eq!(out.len(), 2);
         assert!(out.iter().all(|e| e.prompt != "old"));
+        Ok(())
     }
 
     #[test]
-    fn empty_replay_returns_winners_unchanged() {
+    fn empty_replay_returns_winners_unchanged() -> Result<()> {
         let winners = vec![ex("a"), ex("b")];
         let out = interleave_replay(&winners, &[], 1.0);
         assert_eq!(out.len(), 2);
+        Ok(())
     }
 
     #[test]
-    fn ratio_one_adds_one_rehearsal_per_winner_round_robin() {
+    fn ratio_one_adds_one_rehearsal_per_winner_round_robin() -> Result<()> {
         let winners = vec![ex("a"), ex("b")];
         let replay = vec![ex("old0"), ex("old1")];
         let out = interleave_replay(&winners, &replay, 1.0);
@@ -298,10 +301,11 @@ mod tests {
         assert!(prompts.contains(&"a") && prompts.contains(&"b"));
         // Round-robin draws both buffer entries, not just the first.
         assert!(prompts.contains(&"old0") && prompts.contains(&"old1"));
+        Ok(())
     }
 
     #[test]
-    fn fractional_ratio_is_honored_and_interleaved() {
+    fn fractional_ratio_is_honored_and_interleaved() -> Result<()> {
         let winners = vec![ex("a"), ex("b"), ex("c"), ex("d")];
         let replay = vec![ex("old")];
         let out = interleave_replay(&winners, &replay, 0.5);
@@ -310,8 +314,11 @@ mod tests {
         assert_eq!(out.iter().filter(|e| e.prompt == "old").count(), 2);
         // Interleaved, not all appended at the end: a rehearsal lands before the
         // last winner.
-        let last = out.last().unwrap();
+        let Some(last) = out.last() else {
+            return Err(AntumbraError::other("the interleaved batch is empty"));
+        };
         assert!(last.prompt == "d" || last.prompt == "old");
+        Ok(())
     }
 
     fn mem(network: &str, confidence: f32, reinforcement: u32) -> MemoryRecord {
@@ -325,22 +332,24 @@ mod tests {
     }
 
     #[test]
-    fn verifiable_reinforced_memory_graduates() {
+    fn verifiable_reinforced_memory_graduates() -> Result<()> {
         let v = score_memory(&mem("world", 0.8, 3), &ConsolidationPolicy::default());
         assert!(v.graduate, "{}", v.reason);
+        Ok(())
     }
 
     #[test]
-    fn volatile_memory_never_graduates() {
+    fn volatile_memory_never_graduates() -> Result<()> {
         let mut m = mem("world", 1.0, 9);
         m.volatile = Some(true);
         let v = score_memory(&m, &ConsolidationPolicy::default());
         assert!(!v.graduate);
         assert!(v.reason.contains("volatile"));
+        Ok(())
     }
 
     #[test]
-    fn under_reinforced_memory_waits_unless_maximally_confident() {
+    fn under_reinforced_memory_waits_unless_maximally_confident() -> Result<()> {
         let policy = ConsolidationPolicy::default();
         // Reinforced once (< 2) and not maximally confident -> waits.
         let v = score_memory(&mem("world", 0.8, 1), &policy);
@@ -349,10 +358,11 @@ mod tests {
         // A maximally-confident memory graduates without repeats.
         let v = score_memory(&mem("world", 1.0, 0), &policy);
         assert!(v.graduate, "{}", v.reason);
+        Ok(())
     }
 
     #[test]
-    fn opinion_needs_the_higher_provenance_confidence() {
+    fn opinion_needs_the_higher_provenance_confidence() -> Result<()> {
         let policy = ConsolidationPolicy::default();
         // An opinion at 0.6 clears the verifiable floor but not the provenance
         // tier -> rejected.
@@ -362,10 +372,11 @@ mod tests {
         // A strongly-held opinion graduates on provenance.
         let v = score_memory(&mem("opinion", 0.95, 5), &policy);
         assert!(v.graduate, "{}", v.reason);
+        Ok(())
     }
 
     #[test]
-    fn the_verdict_names_what_held_a_memory_back() {
+    fn the_verdict_names_what_held_a_memory_back() -> Result<()> {
         let policy = ConsolidationPolicy::default();
         assert_eq!(score_memory(&mem("world", 0.8, 3), &policy).held_back, None);
         assert_eq!(
@@ -382,12 +393,13 @@ mod tests {
             score_memory(&volatile, &policy).held_back,
             Some(HeldBack::Volatile)
         );
+        Ok(())
     }
 
     /// The field case this exists for: hundreds of real memories, each
     /// reinforced once, clear nothing. The report has to say so in one line.
     #[test]
-    fn a_report_says_why_nothing_graduated() {
+    fn a_report_says_why_nothing_graduated() -> Result<()> {
         let policy = ConsolidationPolicy::default();
         let mut records: Vec<MemoryRecord> = (0..397).map(|_| mem("world", 0.8, 1)).collect();
         records.extend((0..3).map(|_| {
@@ -406,10 +418,11 @@ mod tests {
             report.summary(),
             "0 of 400 graduate (397 under-reinforced, 3 volatile)"
         );
+        Ok(())
     }
 
     #[test]
-    fn a_report_counts_graduates_and_is_stable_on_ties() {
+    fn a_report_counts_graduates_and_is_stable_on_ties() -> Result<()> {
         let policy = ConsolidationPolicy::default();
         let mut volatile = mem("world", 1.0, 9);
         volatile.volatile = Some(true);
@@ -433,10 +446,11 @@ mod tests {
         assert_eq!(gate_report(&[], &policy).summary(), "0 of 0 graduate");
         let all = gate_report(&[mem("world", 0.8, 3)], &policy);
         assert_eq!(all.summary(), "1 of 1 graduate");
+        Ok(())
     }
 
     #[test]
-    fn replay_from_tasks_keeps_only_completed_captures() {
+    fn replay_from_tasks_keeps_only_completed_captures() -> Result<()> {
         let tasks = vec![
             CorpusTask::new("t1", "p1").with_completion("answer1"),
             CorpusTask::new("t2", "p2"), // a seed: no completion
@@ -445,5 +459,6 @@ mod tests {
         assert_eq!(buf.len(), 1);
         assert_eq!(buf[0].prompt, "p1");
         assert_eq!(buf[0].completion, "answer1");
+        Ok(())
     }
 }

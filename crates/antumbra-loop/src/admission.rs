@@ -216,15 +216,16 @@ mod tests {
     }
 
     #[test]
-    fn only_tasks_both_sides_scored_are_compared() {
+    fn only_tasks_both_sides_scored_are_compared() -> Result<()> {
         let ours = scores(&[("a", 1.0), ("b", 0.5), ("c", 1.0)]);
         let theirs = scores(&[("a", 0.5), ("b", 0.5)]);
         assert_eq!(paired_means(&ours, &theirs), Some((0.75, 0.5)));
         assert_eq!(paired_means(&ours, &scores(&[])), None);
+        Ok(())
     }
 
     #[test]
-    fn only_a_rejection_keeps_a_candidate_out() {
+    fn only_a_rejection_keeps_a_candidate_out() -> Result<()> {
         let id = ExpertId::new("expert:x");
         assert!(Admission::Admitted { nearest: None }.admits());
         assert!(Admission::Superseded {
@@ -248,5 +249,6 @@ mod tests {
             incumbent: None,
         }
         .admits());
+        Ok(())
     }
 }

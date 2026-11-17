@@ -45,6 +45,13 @@ pub struct GitProvenance {
     pub path: Option<String>,
 }
 
+/// Whether `s` is a commit sha as git writes one: 7 to 40 hexadecimal digits,
+/// ASCII by construction. The one check every reader of a sha applies before
+/// it slices, stores or compares one.
+pub fn is_commit_sha(s: &str) -> bool {
+    (7..=40).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 impl GitProvenance {
     /// A provenance at `repo` and `commit`, with no branch or path.
     pub fn new(repo: impl Into<String>, commit: impl Into<String>) -> Self {
@@ -72,8 +79,7 @@ impl GitProvenance {
     /// `@`, a 7 to 40 digit hex commit, and no `:` in the branch.
     pub fn is_valid(&self) -> bool {
         let repo_ok = !self.repo.trim().is_empty() && !self.repo.contains('@');
-        let commit_ok = (7..=40).contains(&self.commit.len())
-            && self.commit.chars().all(|c| c.is_ascii_hexdigit());
+        let commit_ok = is_commit_sha(&self.commit);
         let branch_ok = self
             .branch
             .as_deref()
@@ -371,9 +377,31 @@ pub fn demote_out_of_scope<T>(items: Vec<T>, scope_of_item: impl Fn(&T) -> Scope
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
 
     #[test]
-    fn evidence_round_trips_every_shape() {
+    fn a_commit_sha_is_seven_to_forty_hex_digits() -> anyhow::Result<()> {
+        for sha in [
+            "abcdef0",
+            "fedcba9876543210fedcba9876543210fedcba98",
+            "ABCDEF0123",
+        ] {
+            assert!(is_commit_sha(sha), "{sha}");
+        }
+        for not in [
+            "abcdef",
+            "fedcba9876543210fedcba9876543210fedcba98f",
+            "not-a-sha",
+            "ééééééé",
+            "",
+        ] {
+            assert!(!is_commit_sha(not), "{not:?}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn evidence_round_trips_every_shape() -> anyhow::Result<()> {
         let cases = [
             GitProvenance::new("github.com/oneiriq/antumbra", "b697da7"),
             GitProvenance::new("github.com/oneiriq/antumbra", "b697da7").on_branch("main"),
@@ -389,23 +417,27 @@ mod tests {
             assert_eq!(GitProvenance::parse(&wire), Some(p.clone()), "{wire}");
             assert_eq!(p.to_string(), wire);
         }
+        Ok(())
     }
 
     #[test]
-    fn parse_reads_branch_and_path_separately() {
-        let p =
-            GitProvenance::parse("git:github.com/o/r@0123abcdef#release/1.2:src/lib.rs").unwrap();
+    fn parse_reads_branch_and_path_separately() -> anyhow::Result<()> {
+        let p = GitProvenance::parse("git:github.com/o/r@0123abcdef#release/1.2:src/lib.rs")
+            .context("a branch and a path parse")?;
         assert_eq!(p.branch.as_deref(), Some("release/1.2"));
         assert_eq!(p.path.as_deref(), Some("src/lib.rs"));
-        let p = GitProvenance::parse("git:github.com/o/r@0123abcdef:src/lib.rs").unwrap();
+        let p = GitProvenance::parse("git:github.com/o/r@0123abcdef:src/lib.rs")
+            .context("a path without a branch parses")?;
         assert_eq!(p.branch, None);
         assert_eq!(p.path.as_deref(), Some("src/lib.rs"));
-        let p = GitProvenance::parse("git:github.com/o/r@0123abcdef#main:").unwrap();
+        let p = GitProvenance::parse("git:github.com/o/r@0123abcdef#main:")
+            .context("an empty path parses")?;
         assert_eq!(p.path, None, "an empty path is no path");
+        Ok(())
     }
 
     #[test]
-    fn malformed_or_foreign_evidence_is_not_provenance() {
+    fn malformed_or_foreign_evidence_is_not_provenance() -> anyhow::Result<()> {
         for bad in [
             "https://example.com/a-link",
             "git:the deno convention, see the README",
@@ -422,23 +454,25 @@ mod tests {
         assert!(!GitProvenance::new("github.com/o/r", "0123abcdef")
             .on_branch("a:b")
             .is_valid());
+        Ok(())
     }
 
     #[test]
-    fn from_evidence_finds_the_first_git_entry() {
+    fn from_evidence_finds_the_first_git_entry() -> anyhow::Result<()> {
         let evidence = vec![
             "test_orders.py passed".to_string(),
             "git:not really".to_string(),
             "git:github.com/o/r@0123abcdef#main".to_string(),
             "git:github.com/o/r@fedcba9876#other".to_string(),
         ];
-        let p = GitProvenance::from_evidence(&evidence).unwrap();
+        let p = GitProvenance::from_evidence(&evidence).context("the evidence carries a commit")?;
         assert_eq!(p.commit, "0123abcdef");
         assert_eq!(GitProvenance::from_evidence(&["nothing".to_string()]), None);
+        Ok(())
     }
 
     #[test]
-    fn scope_follows_repo_then_branch() {
+    fn scope_follows_repo_then_branch() -> anyhow::Result<()> {
         let here = GitContext {
             repo: Some("github.com/o/r".into()),
             branch: Some("main".into()),
@@ -464,10 +498,11 @@ mod tests {
         assert!(Scope::OtherBranch.is_inhibited() && Scope::OtherRepo.is_inhibited());
         assert!(!Scope::InScope.is_inhibited() && !Scope::Unknown.is_inhibited());
         assert_eq!(Scope::OtherBranch.as_str(), "other_branch");
+        Ok(())
     }
 
     #[test]
-    fn remotes_normalize_to_one_slug() {
+    fn remotes_normalize_to_one_slug() -> anyhow::Result<()> {
         for remote in [
             "git@github.com:Oneiriq/antumbra.git",
             "ssh://git@github.com/Oneiriq/antumbra.git",
@@ -487,13 +522,12 @@ mod tests {
         assert_eq!(repo_slug_from_remote("antumbra"), None);
         assert_eq!(repo_slug_from_remote("/srv/git/antumbra.git"), None);
         assert_eq!(repo_slug_from_remote("C:\\repos\\antumbra"), None);
+        Ok(())
     }
 
     #[test]
-    fn orphan_marker_round_trips_and_covers_only_its_branch() {
-        let at = DateTime::parse_from_rfc3339("2026-09-19T10:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
+    fn orphan_marker_round_trips_and_covers_only_its_branch() -> anyhow::Result<()> {
+        let at = DateTime::parse_from_rfc3339("2026-09-19T10:00:00Z")?.with_timezone(&Utc);
         let o = BranchOrphan::new("github.com/o/r", "feat/x@v2", at);
         let wire = o.to_evidence();
         assert_eq!(
@@ -516,10 +550,11 @@ mod tests {
         assert!(o.covers(&on_feat));
         assert!(!o.covers(&on_main));
         assert!(!o.covers(&no_branch));
+        Ok(())
     }
 
     #[test]
-    fn reanchor_puts_the_new_anchor_first_and_is_idempotent() {
+    fn reanchor_puts_the_new_anchor_first_and_is_idempotent() -> anyhow::Result<()> {
         let mut evidence = vec![
             "a test note".to_string(),
             "git:github.com/o/r@0123abcdef#feat/x:src/lib.rs".to_string(),
@@ -542,10 +577,11 @@ mod tests {
             "redelivery changes nothing"
         );
         assert_eq!(evidence.len(), 3);
+        Ok(())
     }
 
     #[test]
-    fn orphan_marking_follows_the_current_anchor() {
+    fn orphan_marking_follows_the_current_anchor() -> anyhow::Result<()> {
         let now = Utc::now();
         let orphan = BranchOrphan::new("github.com/o/r", "feat/x", now);
         let mut evidence = vec!["git:github.com/o/r@0123abcdef#feat/x".to_string()];
@@ -565,10 +601,11 @@ mod tests {
         assert!(!mark_orphaned(&mut other, &orphan));
         let mut none: Vec<String> = vec!["free text".to_string()];
         assert!(!mark_orphaned(&mut none, &orphan));
+        Ok(())
     }
 
     #[test]
-    fn scope_of_evidence_puts_orphaned_first() {
+    fn scope_of_evidence_puts_orphaned_first() -> anyhow::Result<()> {
         let here = GitContext {
             repo: Some("github.com/o/r".into()),
             branch: Some("main".into()),
@@ -591,10 +628,11 @@ mod tests {
         assert_eq!(scope_from_str("orphaned"), Scope::Orphaned);
         assert_eq!(scope_from_str("other_repo"), Scope::OtherRepo);
         assert_eq!(scope_from_str("nonsense"), Scope::Unknown);
+        Ok(())
     }
 
     #[test]
-    fn demotion_is_stable_and_hides_nothing() {
+    fn demotion_is_stable_and_hides_nothing() -> anyhow::Result<()> {
         let items = vec![
             ("a", Scope::OtherBranch),
             ("b", Scope::InScope),
@@ -607,5 +645,6 @@ mod tests {
             .map(|(n, _)| n)
             .collect();
         assert_eq!(ordered, vec!["b", "c", "e", "a", "d"]);
+        Ok(())
     }
 }

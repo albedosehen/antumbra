@@ -156,6 +156,7 @@ pub fn route(
 mod tests {
     use super::*;
     use antumbra_core::{BoundaryId, Generation, Grain};
+    use anyhow::Result;
     use chrono::Utc;
 
     fn expert(key: &str, vec: Vec<f32>) -> Expert {
@@ -194,15 +195,16 @@ mod tests {
     }
 
     #[test]
-    fn picks_nearest_expert_in_scope() {
+    fn picks_nearest_expert_in_scope() -> Result<()> {
         let experts = vec![expert("a", vec![1.0, 0.0]), expert("b", vec![0.0, 1.0])];
         let decision = route(&[0.9, 0.1], &experts, &[], 1, &GateConfig::default());
         assert!(!decision.escalate);
         assert_eq!(decision.chosen, vec![ExpertId::new("a")]);
+        Ok(())
     }
 
     #[test]
-    fn escalates_when_best_below_threshold() {
+    fn escalates_when_best_below_threshold() -> Result<()> {
         let experts = vec![expert("a", vec![1.0, 0.0])];
         let cfg = GateConfig {
             coverage_threshold: 0.95,
@@ -212,10 +214,11 @@ mod tests {
         let decision = route(&[0.3, 0.7], &experts, &[], 1, &cfg);
         assert!(decision.escalate);
         assert!(decision.chosen.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn boundary_inhibition_can_force_escalation() {
+    fn boundary_inhibition_can_force_escalation() -> Result<()> {
         let experts = vec![expert("a", vec![1.0, 0.0])];
         // Without a boundary the expert is a perfect match (score 1.0).
         let cfg = GateConfig {
@@ -230,10 +233,11 @@ mod tests {
         let bounds = vec![boundary(vec![1.0, 0.0], 1.0)];
         let decision = route(&[1.0, 0.0], &experts, &bounds, 1, &cfg);
         assert!(decision.escalate);
+        Ok(())
     }
 
     #[test]
-    fn relative_coverage_escalates_generic_query_an_absolute_floor_would_keep() {
+    fn relative_coverage_escalates_generic_query_an_absolute_floor_would_keep() -> Result<()> {
         // Two orthogonal specialists. A task aligned with one is clearly in
         // scope; a task equidistant from both is generic/out-of-scope despite a
         // high *absolute* cosine (0.707 to each) that any usable floor admits.
@@ -254,18 +258,20 @@ mod tests {
         let generic = route(&[1.0, 1.0], &experts, &[], 1, &cfg);
         assert!(generic.escalate);
         assert!(generic.coverage < 0.1);
+        Ok(())
     }
 
     #[test]
-    fn escalates_with_an_empty_population() {
+    fn escalates_with_an_empty_population() -> Result<()> {
         let decision = route(&[1.0, 0.0], &[], &[], 1, &GateConfig::default());
         assert!(decision.escalate);
         assert!(decision.chosen.is_empty());
         assert!(decision.ranked.is_empty());
+        Ok(())
     }
 
     #[test]
-    fn selects_top_k_best_first_when_in_scope() {
+    fn selects_top_k_best_first_when_in_scope() -> Result<()> {
         let experts = vec![
             expert("a", vec![1.0, 0.0, 0.0]),
             expert("b", vec![0.0, 1.0, 0.0]),
@@ -275,5 +281,6 @@ mod tests {
         assert!(!decision.escalate);
         assert_eq!(decision.chosen.len(), 2);
         assert_eq!(decision.chosen[0], ExpertId::new("a"));
+        Ok(())
     }
 }

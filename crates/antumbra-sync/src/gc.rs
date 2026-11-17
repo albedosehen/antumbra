@@ -28,14 +28,14 @@ mod tests {
     use super::*;
     use antumbra_core::{Memory, MemoryNetwork, TenantId};
     use antumbra_store::repo::memory as memrepo;
-    use antumbra_store::EMBED_DIM;
+    use antumbra_store::testing::mem_store;
     use chrono::Duration;
 
     // A forgotten memory's tombstone is purged once past the grace window, and
     // left alone within it -- across the tables purge_store covers.
     #[tokio::test]
-    async fn purge_store_removes_tombstones_past_the_grace_window() {
-        let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn purge_store_removes_tombstones_past_the_grace_window() -> Result<()> {
+        let store = mem_store().await?;
         let tenant = TenantId::new("t");
         let now = Utc::now();
         let m = Memory::new(
@@ -46,22 +46,13 @@ mod tests {
             0.8,
             now,
         );
-        memrepo::upsert(&store, &m).await.unwrap();
-        memrepo::soft_delete(&store, &tenant, &m.id, now)
-            .await
-            .unwrap();
+        memrepo::upsert(&store, &m).await?;
+        memrepo::soft_delete(&store, &tenant, &m.id, now).await?;
 
         // Within the grace window: retained (a replica might not have seen it).
-        assert_eq!(
-            purge_store(&store, now - Duration::days(1)).await.unwrap(),
-            0
-        );
+        assert_eq!(purge_store(&store, now - Duration::days(1)).await?, 0);
         // Past the grace window: purged.
-        assert_eq!(
-            purge_store(&store, now + Duration::seconds(1))
-                .await
-                .unwrap(),
-            1
-        );
+        assert_eq!(purge_store(&store, now + Duration::seconds(1)).await?, 1);
+        Ok(())
     }
 }

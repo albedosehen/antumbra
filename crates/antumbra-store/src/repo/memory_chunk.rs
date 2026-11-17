@@ -15,9 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use surql::query::builder::Query;
-use surql::query::crud::{delete_records, query_records, upsert_record};
+use surql::query::crud::{delete_records, query_records};
 use surql::types::operators::{and_, eq, gt};
-use surql::types::RecordID;
 
 use antumbra_core::{cosine_similarity, Memory, MemoryNetwork, Result, TenantId, UserId};
 
@@ -27,8 +26,8 @@ use crate::repo::memory;
 use crate::schema;
 use crate::store::Store;
 
-const TABLE: &str = "memory_chunk";
-const MEMORY: &str = "memory";
+const TABLE: &str = crate::tables::MEMORY_CHUNK;
+const MEMORY: &str = crate::tables::MEMORY;
 
 /// How many chunk rows to read per memory wanted: a memory's neighboring
 /// pieces crowd the nearest rows, so the search reads wider than it returns.
@@ -81,17 +80,9 @@ impl Indexed {
     }
 }
 
-fn record(memory: &str, ordinal: u32) -> Result<RecordID<()>> {
-    RecordID::<()>::new(TABLE, format!("{memory}~{ordinal}").as_str()).map_err(map)
-}
-
 async fn write(store: &Store, row: ChunkRow) -> Result<()> {
-    let id = record(&row.memory, row.ordinal)?;
-    let data: Value = serde_json::to_value(row)?;
-    upsert_record(store.client(), &id, data)
-        .await
-        .map_err(map)?;
-    Ok(())
+    let key = format!("{}~{}", row.memory, row.ordinal);
+    store.put(TABLE, key.as_str(), &row).await
 }
 
 /// Replace a memory's chunks with `vectors`, one per piece in order, cut from
@@ -516,7 +507,7 @@ pub(crate) async fn readable_compartments(
     let surql = format!(
         "RETURN array::union(array::union(({}), ({})), ({}))",
         schema::owned_compartments("$tenant", "$user"),
-        schema::granted_compartments("$user"),
+        schema::granted_compartments("$tenant", "$user"),
         schema::hive_compartments("$tenant"),
     );
     let vars = BTreeMap::from([

@@ -368,6 +368,7 @@ pub fn current_trust(origin: VerifierOrigin, history: &[VerifierTransition]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context as _;
     use TrustState::*;
 
     fn spec() -> serde_json::Value {
@@ -386,10 +387,10 @@ mod tests {
     }
 
     #[test]
-    fn the_address_is_the_content_in_any_key_order() {
+    fn the_address_is_the_content_in_any_key_order() -> anyhow::Result<()> {
         let a = serde_json::json!({ "program": "sh", "args": ["-c", "exit 0"] });
         let b: serde_json::Value =
-            serde_json::from_str(r#"{"args":["-c","exit 0"],"program":"sh"}"#).unwrap();
+            serde_json::from_str(r#"{"args":["-c","exit 0"],"program":"sh"}"#)?;
         let tier = VerifierTier::Reducible;
         assert_eq!(
             verifier_address("strings", None, tier, &a),
@@ -412,20 +413,22 @@ mod tests {
         ] {
             assert_ne!(other, id);
         }
+        Ok(())
     }
 
     #[test]
-    fn canonical_json_sorts_keys_at_every_depth() {
+    fn canonical_json_sorts_keys_at_every_depth() -> anyhow::Result<()> {
         let v: serde_json::Value =
-            serde_json::from_str(r#"{"b":{"y":1,"x":[{"q":2,"p":"s"}]},"a":null}"#).unwrap();
+            serde_json::from_str(r#"{"b":{"y":1,"x":[{"q":2,"p":"s"}]},"a":null}"#)?;
         assert_eq!(
             canonical_json(&v),
             r#"{"a":null,"b":{"x":[{"p":"s","q":2}],"y":1}}"#
         );
+        Ok(())
     }
 
     #[test]
-    fn a_record_whose_content_changed_is_not_intact() {
+    fn a_record_whose_content_changed_is_not_intact() -> anyhow::Result<()> {
         let mut r = VerifierRecord::new(
             "strings",
             Some("strings/t1".into()),
@@ -438,22 +441,26 @@ mod tests {
         assert!(r.applies_to("strings/t1") && !r.applies_to("strings/t2"));
         r.spec = serde_json::json!({ "program": "true" });
         assert!(!r.is_intact());
+        Ok(())
     }
 
     #[test]
-    fn derived_oracles_are_refused_by_name() {
+    fn derived_oracles_are_refused_by_name() -> anyhow::Result<()> {
         assert_eq!(
-            "reducible".parse::<VerifierTier>().unwrap(),
+            "reducible".parse::<VerifierTier>()?,
             VerifierTier::Reducible
         );
-        let refused = "derived".parse::<VerifierTier>().unwrap_err();
+        let Err(refused) = "derived".parse::<VerifierTier>() else {
+            anyhow::bail!("a derived oracle must be refused");
+        };
         assert!(refused.to_string().contains("refused"), "{refused}");
         assert!("oracle".parse::<VerifierTier>().is_err());
+        Ok(())
     }
 
     #[test]
-    fn only_a_sound_measurement_trusts() {
-        assert_eq!(Proposed.transition(Trusted, &sound()).unwrap(), Trusted);
+    fn only_a_sound_measurement_trusts() -> anyhow::Result<()> {
+        assert_eq!(Proposed.transition(Trusted, &sound())?, Trusted);
         assert!(Proposed.transition(Trusted, &operator()).is_err());
         let flaky = TrustCause::Measured {
             at: Utc::now(),
@@ -462,26 +469,22 @@ mod tests {
             },
         };
         assert!(Proposed.transition(Trusted, &flaky).is_err());
+        Ok(())
     }
 
     #[test]
-    fn quarantine_is_not_undone_and_revocation_is_final() {
-        assert_eq!(
-            Trusted.transition(Quarantined, &operator()).unwrap(),
-            Quarantined
-        );
+    fn quarantine_is_not_undone_and_revocation_is_final() -> anyhow::Result<()> {
+        assert_eq!(Trusted.transition(Quarantined, &operator())?, Quarantined);
         assert!(Quarantined.transition(Trusted, &sound()).is_err());
-        assert_eq!(
-            Quarantined.transition(Revoked, &operator()).unwrap(),
-            Revoked
-        );
+        assert_eq!(Quarantined.transition(Revoked, &operator())?, Revoked);
         for to in [Proposed, Trusted, Quarantined, Revoked] {
             assert!(Revoked.transition(to, &sound()).is_err(), "{to:?}");
         }
+        Ok(())
     }
 
     #[test]
-    fn grants_count_only_toward_a_named_verifier() {
+    fn grants_count_only_toward_a_named_verifier() -> anyhow::Result<()> {
         let named = serde_json::json!({ "verifier": "verifier:a" });
         let other = serde_json::json!({ "verifier": "verifier:b" });
         let inline = serde_json::json!({ "program": "python" });
@@ -503,26 +506,28 @@ mod tests {
             ]
         );
         assert_eq!(named_verifier(&inline), None);
+        Ok(())
     }
 
     #[test]
-    fn only_a_named_verifiers_verdict_is_kept_for_the_recheck() {
+    fn only_a_named_verifiers_verdict_is_kept_for_the_recheck() -> anyhow::Result<()> {
         let named = serde_json::json!({ "verifier": "verifier:a" });
-        let kept = JudgedSample::named(&named, "t1", "answer", true).expect("named");
+        let kept = JudgedSample::named(&named, "t1", "answer", true).context("named")?;
         assert_eq!(kept.verifier, VerifierId::new("verifier:a"));
         assert_eq!(
             (kept.task.as_str(), kept.completion.as_str()),
             ("t1", "answer")
         );
         assert!(kept.passed && kept.rewarded);
-        let failed = JudgedSample::named(&named, "t1", "answer", false).expect("named");
+        let failed = JudgedSample::named(&named, "t1", "answer", false).context("named")?;
         assert!(!failed.rewarded);
         let inline = serde_json::json!({ "program": "python" });
         assert_eq!(JudgedSample::named(&inline, "t1", "answer", true), None);
+        Ok(())
     }
 
     #[test]
-    fn authored_starts_trusted_and_synthesized_with_no_power() {
+    fn authored_starts_trusted_and_synthesized_with_no_power() -> anyhow::Result<()> {
         assert_eq!(current_trust(VerifierOrigin::Authored, &[]), Trusted);
         assert_eq!(current_trust(VerifierOrigin::Synthesized, &[]), Proposed);
         let moved = VerifierTransition {
@@ -536,5 +541,6 @@ mod tests {
             current_trust(VerifierOrigin::Synthesized, &[moved]),
             Trusted
         );
+        Ok(())
     }
 }

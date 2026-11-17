@@ -7,8 +7,8 @@
 use chrono::Utc;
 
 use antumbra_core::{DeviceProfile, DeviceRole, Result, TenantId, UserId};
-use antumbra_store::repo::{device, principal};
-use antumbra_store::Store;
+use antumbra_store::repo::device;
+use antumbra_store::{testing, Store};
 
 const DIM: usize = 4;
 
@@ -21,12 +21,11 @@ struct Org {
 
 /// Two members of one tenant, each with machines of their own.
 async fn org() -> Result<Org> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = testing::mem_store_of(DIM).await?;
     let tenant = TenantId::new("ws:org");
     let lily = UserId::new("user:lily");
     let oslo = UserId::new("user:oslo");
-    principal::provision(&store, &tenant, &lily).await?;
-    principal::provision(&store, &tenant, &oslo).await?;
+    testing::members(&store, &tenant, &[&lily, &oslo]).await?;
     Ok(Org {
         store,
         tenant,

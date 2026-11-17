@@ -59,14 +59,15 @@ pub(crate) fn name_tasks(
 mod tests {
     use super::*;
     use antumbra_core::{Tally, TrustPolicy, VerifierRecord, VerifierTier};
+    use antumbra_store::testing::mem_store_of;
 
     async fn propose(
         store: &Store,
         task: &str,
         origin: VerifierOrigin,
         spec: &str,
-    ) -> VerifierRecord {
-        verifier::propose(
+    ) -> anyhow::Result<VerifierRecord> {
+        Ok(verifier::propose(
             store,
             &VerifierRecord::new(
                 "strings",
@@ -77,11 +78,10 @@ mod tests {
                 Utc::now(),
             ),
         )
-        .await
-        .unwrap()
+        .await?)
     }
 
-    async fn trust(store: &Store, record: &VerifierRecord) {
+    async fn trust(store: &Store, record: &VerifierRecord) -> anyhow::Result<()> {
         let sound = Tally {
             repeats: 3,
             good: 5,
@@ -90,28 +90,24 @@ mod tests {
             ..Tally::default()
         }
         .judge(&record.id, Utc::now(), &TrustPolicy::default());
-        verifier::record_measurement(store, record, &sound)
-            .await
-            .unwrap();
+        verifier::record_measurement(store, record, &sound).await?;
+        Ok(())
     }
 
     #[tokio::test]
-    async fn only_a_task_with_a_granting_synthesized_verifier_is_named() {
-        let store = Store::connect_memory(8).await.unwrap();
-        propose(&store, "swap", VerifierOrigin::Authored, "authored").await;
-        let trusted = propose(&store, "swap", VerifierOrigin::Synthesized, "a").await;
-        trust(&store, &trusted).await;
+    async fn only_a_task_with_a_granting_synthesized_verifier_is_named() -> anyhow::Result<()> {
+        let store = mem_store_of(8).await?;
+        propose(&store, "swap", VerifierOrigin::Authored, "authored").await?;
+        let trusted = propose(&store, "swap", VerifierOrigin::Synthesized, "a").await?;
+        trust(&store, &trusted).await?;
         // Proposed and never measured: it grants nothing.
-        propose(&store, "caesar", VerifierOrigin::Synthesized, "b").await;
-        let found = granting(&store, "strings", Utc::now()).await.unwrap();
+        propose(&store, "caesar", VerifierOrigin::Synthesized, "b").await?;
+        let found = granting(&store, "strings", Utc::now()).await?;
         assert_eq!(
             found.into_iter().collect::<Vec<_>>(),
             vec![("swap".to_string(), trusted.id.clone())]
         );
-        assert!(granting(&store, "grids", Utc::now())
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(granting(&store, "grids", Utc::now()).await?.is_empty());
 
         let mut tasks = vec![
             serde_json::json!({ "id": "swap", "verify": { "program": "authored" } }),
@@ -121,5 +117,6 @@ mod tests {
         assert_eq!(name_tasks(&mut tasks, &map), 1);
         assert_eq!(tasks[0]["verify"]["verifier"], trusted.id.as_str());
         assert_eq!(tasks[1]["verify"]["program"], "own");
+        Ok(())
     }
 }

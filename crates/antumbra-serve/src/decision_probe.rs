@@ -344,6 +344,8 @@ pub fn verbatim_containment(test: &[LabeledPair]) -> Scored {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::Context as _;
+
     use super::*;
     use crate::BertEmbedder;
 
@@ -374,13 +376,13 @@ mod tests {
     /// set, which is why they are read as an ordering.
     #[tokio::test]
     #[ignore = "needs ANTUMBRA_D2_LABELS and downloads model weights"]
-    async fn d2_head_against_the_control() {
+    async fn d2_head_against_the_control() -> anyhow::Result<()> {
         let Ok(path) = std::env::var("ANTUMBRA_D2_LABELS") else {
             println!("ANTUMBRA_D2_LABELS unset -- skipped");
-            return;
+            return Ok(());
         };
-        let raw = std::fs::read_to_string(&path).expect("read labels");
-        let pairs: Vec<LabeledPair> = serde_json::from_str(&raw).expect("parse labels");
+        let raw = std::fs::read_to_string(&path).context("read labels")?;
+        let pairs: Vec<LabeledPair> = serde_json::from_str(&raw).context("parse labels")?;
         assert!(pairs.len() >= 20, "need a real set, got {}", pairs.len());
 
         let (train, test) = split_by_memory(&pairs);
@@ -391,7 +393,7 @@ mod tests {
             train.len(),
             test.len()
         );
-        let e = BertEmbedder::load().expect("load encoder");
+        let e = BertEmbedder::load().context("load encoder")?;
         for (label, how) in [
             ("joined, mean-pooled ", Pairing::Joined),
             ("separate [u,v,|u-v|,u*v]", Pairing::Separate),
@@ -423,7 +425,7 @@ mod tests {
         ] {
             let got = train_and_score(&e, &train, &test, 400, how)
                 .await
-                .expect("train");
+                .context("train")?;
             println!(
                 "  {label}  acc={:.3} prec={:.3} rec={:.3} F1={:.3}  {}",
                 got.accuracy,
@@ -445,5 +447,6 @@ mod tests {
              collapses from judging relevance into detecting a substring. Read every score\n  \
              above against this line, not against the control."
         );
+        Ok(())
     }
 }

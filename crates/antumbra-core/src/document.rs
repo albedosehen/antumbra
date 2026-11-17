@@ -140,21 +140,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn short_text_is_one_chunk() {
+    fn short_text_is_one_chunk() -> anyhow::Result<()> {
         assert_eq!(
             chunk_text("just a little text", 1000, 100),
             vec!["just a little text"]
         );
+        Ok(())
     }
 
     #[test]
-    fn blank_input_yields_nothing() {
+    fn blank_input_yields_nothing() -> anyhow::Result<()> {
         assert!(chunk_text("   \n\n  ", 100, 10).is_empty());
         assert!(chunk_text("", 100, 10).is_empty());
+        Ok(())
     }
 
     #[test]
-    fn splits_on_sentence_boundaries() {
+    fn splits_on_sentence_boundaries() -> anyhow::Result<()> {
         // Three sentences; a small window forces a split, which lands at a
         // sentence end rather than mid-word.
         let text = "The cat sat. The dog ran. The bird flew away quickly.";
@@ -169,33 +171,37 @@ mod tests {
         for word in ["cat", "dog", "bird", "quickly"] {
             assert!(joined.contains(word), "lost '{word}' in {chunks:?}");
         }
+        Ok(())
     }
 
     #[test]
-    fn overlap_repeats_context_across_the_cut() {
+    fn overlap_repeats_context_across_the_cut() -> anyhow::Result<()> {
         let text = "alpha bravo charlie delta echo foxtrot golf hotel india juliet";
         let no_overlap = chunk_text(text, 24, 0);
         let with_overlap = chunk_text(text, 24, 10);
         // Overlap produces at least as many chunks and repeats some content.
         assert!(with_overlap.len() >= no_overlap.len());
         assert!(with_overlap.len() >= 2);
+        Ok(())
     }
 
     #[test]
-    fn a_boundaryless_blob_still_terminates_and_covers_everything() {
+    fn a_boundaryless_blob_still_terminates_and_covers_everything() -> anyhow::Result<()> {
         // No whitespace at all: must cut at the hard limit and still progress.
         let blob: String = "x".repeat(250);
         let chunks = chunk_text(&blob, 100, 0);
         assert!(chunks.len() >= 3);
         assert!(chunks.iter().all(|c| c.chars().count() <= 100));
         assert_eq!(chunks.concat(), blob);
+        Ok(())
     }
 
     #[test]
-    fn every_chunk_respects_the_char_limit() {
+    fn every_chunk_respects_the_char_limit() -> anyhow::Result<()> {
         let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do \
                     eiusmod tempor incididunt ut labore et dolore magna aliqua.";
         let chunks = chunk_text(text, 40, 8);
         assert!(chunks.iter().all(|c| c.chars().count() <= 40), "{chunks:?}");
+        Ok(())
     }
 }

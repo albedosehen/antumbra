@@ -9,6 +9,7 @@ description = "Antumbra HTTP embedder: an OpenAI-compatible /embeddings client b
 [dependencies]
 antumbra-core = { path = "../antumbra-core" }
 antumbra-store = { path = "../antumbra-store" }
+antumbra-http = { path = "../antumbra-http" }
 serde_json.workspace = true
 async-trait.workspace = true
 # `spawn_blocking` offloads the blocking `ureq` POST off the async runtime.
@@ -16,3 +17,17 @@ tokio = { workspace = true }
 # Outbound HTTP for the runtime-configured embeddings endpoint. Pure-Rust TLS so
 # it needs no system OpenSSL; `json` for send_json/read_json.
 ureq = { version = "3", features = ["json"] }
+# The embedder flags the binaries share (`args`), behind the `clap` feature so
+# the library stays flag-free for everyone else; the stand-in it can name lives
+# in core's testing module.
+clap = { workspace = true, optional = true, features = ["env"] }
+
+[features]
+clap = ["dep:clap", "antumbra-core/testing"]
+
+[dev-dependencies]
+anyhow.workspace = true
+antumbra-http = { path = "../antumbra-http", features = ["testing"] }
+
+[lints]
+workspace = true

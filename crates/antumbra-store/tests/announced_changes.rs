@@ -3,14 +3,16 @@
 //! LIVE watch would report, from the store and from every clone made after
 //! it asked.
 
+use anyhow::Result;
+
 use antumbra_core::{CompartmentId, Memory, MemoryNetwork, TenantId};
 use antumbra_store::repo::memory;
 use antumbra_store::repo::sync::ChangeAction;
-use antumbra_store::{Store, EMBED_DIM};
+use antumbra_store::testing;
 
 #[tokio::test]
-async fn each_memory_write_is_announced_with_its_row() {
-    let mut store = Store::connect_memory(EMBED_DIM).await.unwrap();
+async fn each_memory_write_is_announced_with_its_row() -> Result<()> {
+    let mut store = testing::mem_store().await?;
     let mut changes = store.announce_changes();
     // A clone made after the call announces on the same channel, as the
     // serving connection cloned from the server's store does.
@@ -27,16 +29,12 @@ async fn each_memory_write_is_announced_with_its_row() {
     )
     .in_compartment(CompartmentId::new("comp-1"));
 
-    memory::upsert(&serving, &m).await.unwrap();
-    memory::upsert(&serving, &m).await.unwrap();
-    memory::reinforce(&serving, &tenant, &m.id, now)
-        .await
-        .unwrap();
-    memory::soft_delete(&serving, &tenant, &m.id, now)
-        .await
-        .unwrap();
+    memory::upsert(&serving, &m).await?;
+    memory::upsert(&serving, &m).await?;
+    memory::reinforce(&serving, &tenant, &m.id, now).await?;
+    memory::soft_delete(&serving, &tenant, &m.id, now).await?;
     // Removing the tombstone says nothing: its forget was the announcement.
-    memory::delete(&store, &tenant, &m.id).await.unwrap();
+    memory::delete(&store, &tenant, &m.id).await?;
     // A live memory removed outright is announced as a delete.
     let gone = Memory::new(
         "66666666-7777-8888-9999-000000000000",
@@ -47,8 +45,8 @@ async fn each_memory_write_is_announced_with_its_row() {
         now,
     )
     .in_compartment(CompartmentId::new("comp-1"));
-    memory::upsert(&serving, &gone).await.unwrap();
-    memory::delete(&serving, &tenant, &gone.id).await.unwrap();
+    memory::upsert(&serving, &gone).await?;
+    memory::delete(&serving, &tenant, &gone.id).await?;
 
     let mut seen = Vec::new();
     while let Ok(event) = changes.try_recv() {
@@ -70,4 +68,5 @@ async fn each_memory_write_is_announced_with_its_row() {
             (ChangeAction::Delete, false, false),
         ]
     );
+    Ok(())
 }

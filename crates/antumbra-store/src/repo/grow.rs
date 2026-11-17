@@ -4,17 +4,16 @@
 //! replaces its rows rather than adding second ones.
 
 use surql::query::builder::Query;
-use surql::query::crud::{query_records, upsert_record};
+use surql::query::crud::query_records;
 use surql::types::operators::eq;
-use surql::types::RecordID;
 
 use antumbra_core::{Generation, GrowRecord, RegionCensus, Result, RunId};
 
 use crate::error::map;
 use crate::store::Store;
 
-const CENSUS: &str = "region_census";
-const GROW: &str = "grow";
+const CENSUS: &str = crate::tables::REGION_CENSUS;
+const GROW: &str = crate::tables::GROW;
 
 /// Record one region's census in one generation.
 pub async fn upsert_census(store: &Store, census: &RegionCensus) -> Result<()> {
@@ -22,11 +21,7 @@ pub async fn upsert_census(store: &Store, census: &RegionCensus) -> Result<()> {
         "{}@g{}@{}",
         census.run_id, census.generation.0, census.region
     );
-    let id = RecordID::<()>::new(CENSUS, key.as_str()).map_err(map)?;
-    upsert_record(store.client(), &id, serde_json::to_value(census)?)
-        .await
-        .map_err(map)?;
-    Ok(())
+    store.put(CENSUS, key.as_str(), census).await
 }
 
 /// The latest census a run took before `generation`: every region of the
@@ -63,11 +58,7 @@ pub async fn census_before(
 /// Record the grow step's decision for a generation.
 pub async fn upsert(store: &Store, record: &GrowRecord) -> Result<()> {
     let key = format!("{}@g{}", record.run_id, record.generation.0);
-    let id = RecordID::<()>::new(GROW, key.as_str()).map_err(map)?;
-    upsert_record(store.client(), &id, serde_json::to_value(record)?)
-        .await
-        .map_err(map)?;
-    Ok(())
+    store.put(GROW, key.as_str(), record).await
 }
 
 /// Every decision a run's grow step made, oldest first.
@@ -85,7 +76,7 @@ pub async fn history(store: &Store, run_id: &RunId) -> Result<Vec<GrowRecord>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
     use chrono::Utc;
 
     fn census(generation: u32, region: &str, acceptability: f32) -> RegionCensus {
@@ -102,7 +93,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_latest_census_before_a_generation_is_the_one_read() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         upsert_census(&s, &census(0, "lists", 0.2)).await?;
         upsert_census(&s, &census(0, "dates", 0.9)).await?;
         upsert_census(&s, &census(2, "lists", 0.4)).await?;
@@ -120,7 +111,7 @@ mod tests {
 
     #[tokio::test]
     async fn decisions_are_kept_per_generation() -> Result<()> {
-        let s = Store::connect_memory(EMBED_DIM).await?;
+        let s = mem_store().await?;
         let run = RunId::new("run:g");
         for (g, chosen) in [(0, None), (1, Some("lists")), (1, Some("dates"))] {
             upsert(

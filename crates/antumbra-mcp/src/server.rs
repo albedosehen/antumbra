@@ -82,6 +82,13 @@ pub struct McpServer {
     /// duration (see `session`); checked at every tool call. `None` where the
     /// transport signs in per request (the embedded networked surface).
     session: Option<Arc<crate::session::SessionKeeper>>,
+    /// The lock a tool call takes when `store` is a connection shared with
+    /// other identities (the embedded networked surface): the call signs the
+    /// connection in as this session's identity under it and holds it until
+    /// the tool returns, so no other identity's signin lands in between
+    /// ([`McpServer::bound`]). `None` where the session has a connection of
+    /// its own, which stays signed in as it.
+    shared_bind: Option<Arc<tokio::sync::Mutex<()>>>,
     /// The typed decider that answers "does this memory answer this query" as a
     /// calibrated probability, which is what lets recall say
     /// nothing rather than return the best of a bad lot. `None` = no floor runs
@@ -634,12 +641,17 @@ impl McpServer {
     /// document is reference material the agent was *given*, kept distinct from
     /// the episodic memory it *earned* so neither drowns the other.
     #[tool(
-        description = "Ingest a knowledge document into your workspace: it is split into overlapping chunks, each embedded for semantic recall (kept distinct from episodic memory). Returns the title and the number of chunks stored."
+        description = "Ingest a knowledge document into your workspace: it is split into overlapping chunks, each embedded for semantic recall (kept distinct from episodic memory). Returns the title and the number of chunks stored. A document is at most 512 KiB; split a larger one, or ingest the part that matters."
     )]
     async fn ingest_document(
         &self,
         Parameters(p): Parameters<IngestDocumentParams>,
     ) -> Result<Json<IngestedOut>, ErrorData> {
+        // Before anything is archived or embedded: the cap bounds the
+        // embedder's time one call may spend, and a refusal costs none of it.
+        if let Some(why) = antumbra_ingest::too_large(&p.content) {
+            return Err(ErrorData::invalid_params(why, None));
+        }
         let provenance = p.provenance.map(anchor_from).transpose()?;
         let compartment = p
             .compartment

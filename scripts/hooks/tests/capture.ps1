@@ -45,6 +45,9 @@ if (-not $up) { Write-Output 'the test surface did not start'; exit 2 }
 
 $env:ANTUMBRA_URL = $url
 $env:ANTUMBRA_TOKEN = 'test-token'
+$run = Join-Path $work 'run'
+New-Item -ItemType Directory -Path $run | Out-Null
+$env:XDG_RUNTIME_DIR = $run
 $runners = @('pwsh')
 if ($IsWindows -and (Get-Command powershell -ErrorAction SilentlyContinue)) { $runners += 'powershell' }
 
@@ -70,8 +73,7 @@ foreach ($script:runner in $runners) {
     $null = Invoke-Hook @{ session_id = "$session-h"; prompt_id = 'p2'; hook_event_name = 'Stop'; last_assistant_message = 'done' }
     Remove-Item Env:ANTUMBRA_HOST_ID
     Check 'names the machine as the MCP client does' ((Get-Content -Raw "$request.host") -eq 'windows')
-    $tmp = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
-    Remove-Item (Join-Path $tmp "antumbra-capture-Stop-$session-h") -ErrorAction SilentlyContinue
+    Remove-Item (Join-Path $run "antumbra-capture-Stop-$session-h") -ErrorAction SilentlyContinue
 
     Write-Output 'the stop after the nudge'
     $out = Invoke-Hook @{ session_id = $session; prompt_id = 'p1'; hook_event_name = 'Stop'; last_assistant_message = 'saved' }
@@ -80,8 +82,16 @@ foreach ($script:runner in $runners) {
     Write-Output 'a compaction'
     $null = Invoke-Hook @{ session_id = "$session-c"; hook_event_name = 'PreCompact' }
     Check 'reports no turn' (-not (Test-Path $request))
-    $tmp = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
-    Remove-Item (Join-Path $tmp "antumbra-capture-PreCompact-$session-c") -ErrorAction SilentlyContinue
+    Remove-Item (Join-Path $run "antumbra-capture-PreCompact-$session-c") -ErrorAction SilentlyContinue
+
+    Write-Output 'a hostile session id'
+    Get-ChildItem $run -Filter 'antumbra-capture-*' | Remove-Item -Force
+    $out = Invoke-Hook @{ session_id = '../../x y'; hook_event_name = 'Stop/../z'; last_assistant_message = 'x' }
+    Check 'is handled like any other' (($out | ConvertFrom-Json).decision -eq 'block')
+    Check 'names the sentinel from the id cut to [A-Za-z0-9_-], under the runtime directory' (Test-Path (Join-Path $run 'antumbra-capture-Stopz-xy'))
+    $others = @(Get-ChildItem $run | Where-Object { $_.Name -ne 'antumbra-capture-Stopz-xy' })
+    Check 'and touches nothing else' (($others.Count -eq 0) -and -not (Test-Path (Join-Path $work 'x y')))
+    Get-ChildItem $run -Filter 'antumbra-capture-*' | Remove-Item -Force
 }
 
 $listener.Stop()

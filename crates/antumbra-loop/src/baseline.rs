@@ -117,6 +117,7 @@ pub(crate) fn cross_fitted_oracle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use antumbra_core::{AntumbraError, Result};
     use std::collections::HashMap;
 
     fn id(s: &str) -> ExpertId {
@@ -126,7 +127,7 @@ mod tests {
     /// Two specialists, each perfect on its own tasks and poor elsewhere: the
     /// routed population beats either alone.
     #[test]
-    fn routing_to_specialists_beats_the_best_one_alone() {
+    fn routing_to_specialists_beats_the_best_one_alone() -> Result<()> {
         let (a, b) = (id("a"), id("b"));
         let routed = vec![
             ("a1".to_string(), Some(a.clone())),
@@ -147,18 +148,20 @@ mod tests {
         .into_iter()
         .collect();
         let score = |who: &Option<ExpertId>, task: &str| table.get(&(who.clone(), task)).copied();
-        let c = compare(&routed, &[a.clone(), b], score).expect("scored");
+        let c = compare(&routed, &[a.clone(), b], score)
+            .ok_or_else(|| AntumbraError::other("nothing was scored"))?;
         assert_eq!((c.tasks, c.population), (4, 1.0));
         assert_eq!(c.best, Some((a, 0.625)));
         // Routed perfectly already: nothing left for better routing.
         assert_eq!(c.oracle, 1.0);
+        Ok(())
     }
 
     /// A gate that sends each task to the wrong one of two specialists
     /// leaves the population below either alone, and the oracle shows what
     /// routing them well would reach.
     #[test]
-    fn the_oracle_takes_each_tasks_best() {
+    fn the_oracle_takes_each_tasks_best() -> Result<()> {
         let (a, b) = (id("a"), id("b"));
         let routed = vec![
             ("a1".to_string(), Some(b.clone())),
@@ -169,15 +172,17 @@ mod tests {
             (Some(e), "b1") if e.as_str() == "b" => Some(0.5),
             _ => Some(0.0),
         };
-        let c = compare(&routed, &[a, b], score).expect("scored");
+        let c = compare(&routed, &[a, b], score)
+            .ok_or_else(|| AntumbraError::other("nothing was scored"))?;
         assert_eq!(c.population, 0.0);
         assert_eq!(c.oracle, 0.75);
+        Ok(())
     }
 
     /// An escalated task is scored on the base model, and a task some side
     /// could not score is left out of every mean.
     #[test]
-    fn escalations_use_the_base_and_unscored_tasks_drop_out() {
+    fn escalations_use_the_base_and_unscored_tasks_drop_out() -> Result<()> {
         let a = id("a");
         let routed = vec![
             ("t1".to_string(), Some(a.clone())),
@@ -190,19 +195,21 @@ mod tests {
             (Some(_), "t2") => Some(0.75),
             _ => None,
         };
-        let c = compare(&routed, std::slice::from_ref(&a), score).expect("scored");
+        let c = compare(&routed, std::slice::from_ref(&a), score)
+            .ok_or_else(|| AntumbraError::other("nothing was scored"))?;
         assert_eq!(c.tasks, 2, "t3 was not scored");
         assert_eq!(c.population, 0.625);
         assert_eq!(c.best, Some((a, 0.875)));
         // t2 goes to the expert rather than the base it escalated to.
         assert_eq!(c.oracle, 0.875);
         assert!(compare(&[], &[id("a")], |_, _| Some(1.0)).is_none());
+        Ok(())
     }
 
     /// Two identical experts whose halves disagree by noise: the highest of
     /// their scores reads above either, the cross-fitted oracle does not.
     #[test]
-    fn noise_alone_is_not_headroom_once_cross_fitted() {
+    fn noise_alone_is_not_headroom_once_cross_fitted() -> Result<()> {
         let (a, b) = (id("a"), id("b"));
         let routed = vec![("t".to_string(), Some(a.clone()))];
         let halves = |who: &Option<ExpertId>, _: &str| match who.as_ref().map(ExpertId::as_str) {
@@ -213,11 +220,12 @@ mod tests {
         // Chosen on the first half, a scores 0 on the second; chosen on the
         // second, b scores 0 on the first.
         assert_eq!(cross_fitted_oracle(&routed, &[a, b], halves), Some(0.0));
+        Ok(())
     }
 
     /// An expert better on both halves keeps its headroom.
     #[test]
-    fn a_consistently_better_expert_keeps_its_headroom() {
+    fn a_consistently_better_expert_keeps_its_headroom() -> Result<()> {
         let (a, b) = (id("a"), id("b"));
         let routed = vec![("t".to_string(), Some(a.clone()))];
         let halves = |who: &Option<ExpertId>, _: &str| match who.as_ref().map(ExpertId::as_str) {
@@ -230,5 +238,6 @@ mod tests {
             Some(1.0)
         );
         assert_eq!(cross_fitted_oracle(&routed, &[a], |_, _| None), None);
+        Ok(())
     }
 }

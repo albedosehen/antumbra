@@ -174,26 +174,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_function_is_the_first_backticked_call() {
+    fn the_function_is_the_first_backticked_call() -> anyhow::Result<()> {
         let p = "# Write a Python function `swap_letters(s)` that returns `s` with `i` swapped.";
         assert_eq!(function_name(p), Some("swap_letters"));
         assert_eq!(function_name("uses `x` then `f_2(a, b)`"), Some("f_2"));
         assert_eq!(function_name("no call `here`"), None);
         assert_eq!(function_name("`(` alone"), None);
+        Ok(())
     }
 
     #[test]
-    fn inputs_come_from_the_first_json_block() {
+    fn inputs_come_from_the_first_json_block() -> anyhow::Result<()> {
         let answer = "Here are inputs:\n```json\n[[\"ab\"], [\"\"], [\"in\"]]\n```\nMore text.";
         assert_eq!(parse_inputs(answer).len(), 3);
         assert_eq!(parse_inputs("[[1, 2], [3, 4]]").len(), 2);
         assert!(parse_inputs("```json\n{\"a\": 1}\n```").is_empty());
         assert!(parse_inputs("```json\n[[1, 2],\n```").is_empty());
         assert!(parse_inputs("no json at all").is_empty());
+        Ok(())
     }
 
     #[test]
-    fn merged_inputs_are_distinct_in_first_proposed_order_and_capped() {
+    fn merged_inputs_are_distinct_in_first_proposed_order_and_capped() -> anyhow::Result<()> {
         let a = vec![serde_json::json!([1]), serde_json::json!([2])];
         let b = vec![
             serde_json::json!([2]),
@@ -211,13 +213,15 @@ mod tests {
             ]
         );
         assert_eq!(merge_inputs(&[a, b], 3).len(), 3);
+        Ok(())
     }
 
     #[test]
-    fn the_prompt_names_the_function_and_the_count() {
+    fn the_prompt_names_the_function_and_the_count() -> anyhow::Result<()> {
         let asked = inputs_prompt("# Write `f(x)`.", "f", 12);
         assert!(asked.starts_with("# Write `f(x)`.\n"));
         assert!(asked.contains("12 test inputs for `f`"));
         assert!(asked.contains("```json"));
+        Ok(())
     }
 }

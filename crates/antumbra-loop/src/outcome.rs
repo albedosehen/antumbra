@@ -140,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_clear_win_over_every_other_expert_and_the_base_counts() {
+    fn only_a_clear_win_over_every_other_expert_and_the_base_counts() -> Result<()> {
         let (a, b) = (ExpertId::new("a"), ExpertId::new("b"));
         let tasks = vec![
             task("a-wins"),
@@ -166,5 +166,6 @@ mod tests {
         assert_eq!(wins[0].task.id, "a-wins");
         assert_eq!(wins[0].winner, a);
         assert_eq!((wins[0].score, wins[0].runner_up), (1.0, 0.5));
+        Ok(())
     }
 }

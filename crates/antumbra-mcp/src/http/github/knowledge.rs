@@ -29,7 +29,10 @@ pub(super) fn answers(event: &PullRequestEvent) -> bool {
 /// Queue the knowledge diff for `event`, or say why it is not posted.
 pub(super) fn queue(state: &Arc<HttpState>, event: &PullRequestEvent) -> Outcome {
     const KIND: &str = "pull_request";
-    let cfg = config(state);
+    let cfg = match config(state) {
+        Ok(cfg) => cfg,
+        Err(e) => return Outcome::ignored(KIND, event.repository.slug(), e.to_string()),
+    };
     let repo = event.repository.slug();
     if !cfg.knowledge_diff {
         return Outcome::ignored(
@@ -78,7 +81,7 @@ async fn post(
     tenant: &TenantId,
     installation_id: u64,
 ) -> Result<String> {
-    let cfg = config(state);
+    let cfg = config(state)?;
     let token = cfg
         .installation_token(installation_id)
         .await?

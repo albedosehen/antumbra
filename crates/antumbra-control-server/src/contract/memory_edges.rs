@@ -4,10 +4,10 @@
 //! anything else. `super::contract` puts them together, because what kayak
 //! validates is the whole.
 
-use kayak::{FieldExposure, Identity, Resource, ResourceFaces};
+use kayak::{FieldExposure, Resource};
 use surql::schema::{datetime_field, float_field, string_field, FieldDefinition};
 
-use super::built;
+use super::{built, listing};
 
 /// The penumbra graph: typed, directed edges between memories. List-only,
 /// because an edge row carries no identity on the wire -- its record key is
@@ -17,32 +17,22 @@ use super::built;
 /// service never sends.
 pub(super) fn resource() -> Resource {
     Resource {
-        name: "memory_edges".into(),
-        table: "memory_edge".into(),
-        faces: ResourceFaces::LIST_ONLY,
-        identity: Identity::Absent,
-        fields: vec![
-            FieldExposure::column("from_id"),
-            FieldExposure::column("to_id"),
-            FieldExposure::column("edge_type"),
-            FieldExposure::column("weight"),
-            FieldExposure::column("created_at"),
-        ],
         // tenant_id rides every read; both composite indexes lead with it,
         // which is what makes from_id and to_id valid filter claims.
         pinned: vec!["tenant_id".into()],
-        pinned_either: vec![],
-        filterable: vec!["from_id".into(), "to_id".into()],
-        filter_options: Default::default(),
-        sortable: vec!["created_at".into()],
-        max_page_size: 100,
-        graphql: None,
-        watchable: false,
-        reads_require: vec![],
-        rate_class: None,
-        sub_resources: vec![],
-        content: None,
-        actions: vec![],
+        ..listing(
+            "memory_edges",
+            antumbra_store::tables::MEMORY_EDGE,
+            vec![
+                FieldExposure::column("from_id"),
+                FieldExposure::column("to_id"),
+                FieldExposure::column("edge_type"),
+                FieldExposure::column("weight"),
+                FieldExposure::column("created_at"),
+            ],
+            &["from_id", "to_id"],
+            &["created_at"],
+        )
     }
 }
 

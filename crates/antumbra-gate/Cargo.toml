@@ -10,5 +10,10 @@ description = "A heuristic, boundary-conditioned coverage gate (capability simil
 antumbra-core = { path = "../antumbra-core" }
 
 [dev-dependencies]
+# The gate has no error type of its own; its tests return anyhow's Result.
+anyhow.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
+
+[lints]
+workspace = true

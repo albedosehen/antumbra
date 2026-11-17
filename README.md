@@ -106,16 +106,16 @@ Every milestone is a falsifiable experiment with a kill criterion.
 
 ## Install
 
-New here? Install the CLI, then, with Docker and ollama running, one command sets everything up and connects Claude Code:
+New here? Install the CLI from a release (the command names a tag rather than `latest`, so what it runs is a published, unchanging asset, and the installer checks the archive against the sha256 built into it), then, with Docker and ollama running, one command sets everything up and connects Claude Code:
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.2.7/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.2.7/antumbra-cli-installer.ps1 | iex
 ```
 
 ```bash
@@ -129,19 +129,19 @@ No clone is needed: outside one, setup writes the stack's compose file to `~/.an
 
 ### Prebuilt binaries (no Rust toolchain)
 
-Each binary ships a one-line installer that pulls the right prebuilt build for your OS (macOS on Apple silicon and Intel, Linux on x86-64 and ARM, Windows on x86-64) from the latest GitHub release. The `antumbra` command, which holds the operator console (`antumbra tui`):
+Each binary ships a one-line installer that pulls the right prebuilt build for your OS (macOS on Apple silicon and Intel, Linux on x86-64 and ARM, Windows on x86-64) from a GitHub release and checks it against the sha256 built into the script. Name the release tag, not `latest`, so the script you run is a published, unchanging asset. The `antumbra` command, which holds the operator console (`antumbra tui`):
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.2.7/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/latest/download/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.2.7/antumbra-cli-installer.ps1 | iex
 ```
 
-The MCP server (`antumbra-mcp`) installs the same way, with `antumbra-mcp` in place of `antumbra-cli` in the URL; `antumbra setup local` runs it in Docker instead, so most people never install it by hand. Windows `.msi` packages, per-OS archives, and checksums are attached to every [release](https://github.com/albedosehen/antumbra/releases).
+The MCP server (`antumbra-mcp`) installs the same way, with `antumbra-mcp` in place of `antumbra-cli` in the URL; `antumbra setup local` runs it in Docker instead, so most people never install it by hand. Windows `.msi` packages, per-OS archives, and a `.sha256` beside each are attached to every [release](https://github.com/albedosehen/antumbra/releases); [docs/getting-started.md](docs/getting-started.md) shows the download-verify-unpack form for a machine that should check the archive itself before anything runs.
 
 ### From source (needs the Rust toolchain)
 
@@ -215,7 +215,7 @@ memory`). See **[Running the trainer](docs/running-the-trainer.md)** for the CUD
 
 ### Crates
 
-`antumbra-core` (domain types, ports) · `antumbra-auth` (JWT token contract) · `antumbra-store` (SurrealDB persistence via surql-rs) · `antumbra-embed` (HTTP `/embeddings` client behind the `Embedder` port) · `antumbra-copal` (the copal document-of-record archive client, shared by the server and the CLI) · `antumbra-gate` (router/coverage gate) · `antumbra-boundary` (counterfactual scope) · `antumbra-rerank` (cross-encoder `/rerank` client behind the `Reranker` port) · `antumbra-bench` (retrieval-quality harness) · `antumbra-critic` (verifiers + credit assignment) · `antumbra-train` (candle Qwen + LoRA trainer) · `antumbra-serve` (resident multi-adapter serving) · `antumbra-loop` (generational loop) · `antumbra-sync` (collector/sync + live propagation) · `antumbra-mcp` (MCP server, stdio + networked) · `antumbra-control` (hosted-onboarding control plane) · `antumbra-control-server` (the control plane's HTTP surface: invite-gated signup + magic-link login) · `antumbra-cli` · `antumbra-tui`.
+`antumbra-core` (domain types, ports) · `antumbra-auth` (JWT token contract) · `antumbra-store` (SurrealDB persistence via surql-rs) · `antumbra-embed` (HTTP `/embeddings` client behind the `Embedder` port) · `antumbra-copal` (the copal document-of-record archive client, shared by the server and the CLI) · `antumbra-http` (the agent and the tool-surface client the CLI and the console call the server with: one set of refusals) · `antumbra-gate` (router/coverage gate) · `antumbra-boundary` (counterfactual scope) · `antumbra-rerank` (cross-encoder `/rerank` client behind the `Reranker` port) · `antumbra-bench` (retrieval-quality harness) · `antumbra-critic` (verifiers + credit assignment) · `antumbra-train` (candle Qwen + LoRA trainer) · `antumbra-serve` (resident multi-adapter serving) · `antumbra-loop` (generational loop) · `antumbra-sync` (collector/sync + live propagation) · `antumbra-mcp` (MCP server, stdio + networked) · `antumbra-control` (hosted-onboarding control plane) · `antumbra-control-server` (the control plane's HTTP surface: invite-gated signup + magic-link login) · `antumbra-cli` · `antumbra-tui`.
 
 ## License
 

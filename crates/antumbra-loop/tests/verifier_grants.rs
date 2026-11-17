@@ -11,11 +11,11 @@ use antumbra_core::{
 };
 use antumbra_loop::{GenerationLoop, LoopConfig};
 use antumbra_store::repo::{expert, lifecycle, reward, verifier};
-use antumbra_store::Store;
+use antumbra_store::testing::mem_store_of;
 
 #[tokio::test]
 async fn a_quarantined_verifier_takes_what_it_taught_out_of_the_population() -> Result<()> {
-    let store = Store::connect_memory(8).await?;
+    let store = mem_store_of(8).await?;
     let record = verifier::propose(
         &store,
         &VerifierRecord::new(

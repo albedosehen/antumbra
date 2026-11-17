@@ -147,7 +147,7 @@ mod tests {
             &Axis,
         )
         .await?
-        .expect("two experts, three exemplars");
+        .ok_or_else(|| AntumbraError::other("two experts and three exemplars need a router"))?;
         let labels: Vec<&str> = got.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(labels, ["a", "a", "b"]);
         assert_eq!(got[2].1, vec![3.0, 1.0]);
@@ -172,7 +172,7 @@ mod tests {
             &Axis,
         )
         .await?
-        .expect("two experts");
+        .ok_or_else(|| AntumbraError::other("two experts need a router"))?;
         let labels: Vec<&str> = got.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(labels, ["a", "b", "b"]);
         assert_eq!(got[2].1, vec![4.0, 1.0], "the won task's prompt, embedded");

@@ -17,5 +17,10 @@ chrono.workspace = true
 
 [dev-dependencies]
 antumbra-core = { path = "../antumbra-core", features = ["testing"] }
+# `testing` is the shared in-memory store fixture the ingest tests write into.
+antumbra-store = { path = "../antumbra-store", features = ["testing"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 serde_json.workspace = true
+
+[lints]
+workspace = true

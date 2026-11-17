@@ -14,11 +14,12 @@ use antumbra_core::ports::{
 use antumbra_core::slice::Holdout;
 use antumbra_core::testing::ScriptedTrainer;
 use antumbra_core::{
-    Expert, ExpertId, Generation, LearnedRouter, Result, RouterExpert, RoutingOutcome, RunId,
+    AntumbraError, Expert, ExpertId, Generation, LearnedRouter, Result, RouterExpert,
+    RoutingOutcome, RunId,
 };
 use antumbra_loop::{ContributionPolicy, GenerationLoop, LoopConfig};
 use antumbra_store::repo::{contribution, expert};
-use antumbra_store::Store;
+use antumbra_store::testing::mem_store_of;
 
 const DIM: usize = 4;
 
@@ -51,6 +52,18 @@ impl Embedder for Places {
 #[derive(Default)]
 struct Scorer {
     trained_on: Mutex<Vec<Exemplars>>,
+}
+
+impl Scorer {
+    /// What every router it trained was trained on, in order. The fake only
+    /// ever pushes to the list, so a poisoned lock holds a whole list and is
+    /// read as is.
+    fn trained_on(&self) -> Vec<Exemplars> {
+        self.trained_on
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
 }
 
 #[async_trait]
@@ -88,7 +101,11 @@ impl Trainer for Scorer {
     }
 
     async fn train_router(&self, exemplars: &[(ExpertId, Vec<f32>)]) -> Result<LearnedRouter> {
-        self.trained_on.lock().unwrap().push(exemplars.to_vec());
+        // Read as `trained_on` is: a push cannot leave the list half-written.
+        self.trained_on
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(exemplars.to_vec());
         let mut experts: Vec<RouterExpert> = Vec::new();
         for (id, _) in exemplars {
             if experts.iter().any(|e| &e.id == id) {
@@ -133,7 +150,7 @@ fn shared(id: &str, exemplar: &str, capability: Vec<f32>) -> Expert {
 
 #[tokio::test]
 async fn the_gate_is_retrained_on_each_tasks_clear_winner() -> Result<()> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = mem_store_of(DIM).await?;
     expert::insert(
         &store,
         &shared("alpha", "alpha task", vec![1.0, 0.0, 0.0, 0.0]),
@@ -190,7 +207,10 @@ async fn the_gate_is_retrained_on_each_tasks_clear_winner() -> Result<()> {
         ]
     );
     // The gate was retrained with the won tasks as the winner's exemplars.
-    let last = trainer.trained_on.lock().unwrap().last().cloned().unwrap();
+    let last = trainer
+        .trained_on()
+        .pop()
+        .ok_or_else(|| AntumbraError::other("no router was trained"))?;
     assert!(last
         .iter()
         .any(|(id, v)| id.as_str() == "expert:beta" && v == &vec![0.9, 0.3, 0.0, 0.0]));
@@ -202,7 +222,7 @@ async fn the_gate_is_retrained_on_each_tasks_clear_winner() -> Result<()> {
 /// higher on the withheld tasks.
 #[tokio::test]
 async fn by_default_the_winners_are_recorded_and_not_routed_on() -> Result<()> {
-    let store = Store::connect_memory(DIM).await?;
+    let store = mem_store_of(DIM).await?;
     expert::insert(
         &store,
         &shared("alpha", "alpha task", vec![1.0, 0.0, 0.0, 0.0]),
@@ -228,7 +248,7 @@ async fn by_default_the_winners_are_recorded_and_not_routed_on() -> Result<()> {
         .await?;
     assert_eq!(reports[0].routing_outcomes, 2);
     assert_eq!(contribution::outcomes(&store).await?.len(), 2);
-    let trained = trainer.trained_on.lock().unwrap();
+    let trained = trainer.trained_on();
     assert!(
         trained
             .iter()

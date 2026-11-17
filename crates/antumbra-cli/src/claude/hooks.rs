@@ -226,14 +226,19 @@ pub fn render(hooks: &[InstalledHook]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Context;
     use std::collections::HashMap;
 
-    fn bundled(name: &str) -> &'static str {
-        BUNDLED.iter().find(|(n, _)| *n == name).unwrap().1
+    fn bundled(name: &str) -> anyhow::Result<&'static str> {
+        BUNDLED
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, text)| *text)
+            .with_context(|| format!("{name} is not bundled"))
     }
 
     #[test]
-    fn every_script_a_hook_command_runs_is_found() {
+    fn every_script_a_hook_command_runs_is_found() -> anyhow::Result<()> {
         let settings = serde_json::json!({
             "hooks": {
                 "UserPromptSubmit": [{ "hooks": [{ "type": "command",
@@ -255,21 +260,22 @@ mod tests {
             ]
         );
         assert!(scripts_in(&serde_json::json!({})).is_empty());
+        Ok(())
     }
 
     #[test]
-    fn an_installed_hook_is_compared_with_the_bundled_one() {
+    fn an_installed_hook_is_compared_with_the_bundled_one() -> anyhow::Result<()> {
         let base = Path::new("/project");
         let files: HashMap<PathBuf, String> = [
             (
                 base.join("same/antumbra-capture.sh"),
-                bundled("antumbra-capture.sh").replace('\n', "\r\n"),
+                bundled("antumbra-capture.sh")?.replace('\n', "\r\n"),
             ),
             (
                 base.join("edited/antumbra-prompt-recall.ps1"),
                 format!(
                     "{}\n# edited in place\n",
-                    bundled("antumbra-prompt-recall.ps1")
+                    bundled("antumbra-prompt-recall.ps1")?
                 ),
             ),
             (base.join("mine/my-own-hook.sh"), "echo mine".to_string()),
@@ -299,13 +305,15 @@ mod tests {
         assert!(said.contains("antumbra-prompt-recall.ps1 at"));
         assert!(said.contains("differs from this build's"));
         assert!(render(&[]).is_empty());
+        Ok(())
     }
 
     #[test]
-    fn a_quoted_path_with_spaces_is_one_word() {
+    fn a_quoted_path_with_spaces_is_one_word() -> anyhow::Result<()> {
         assert_eq!(
             words(r#"pwsh -File "C:\a b\x.ps1" -X"#),
             vec!["pwsh", "-File", r"C:\a b\x.ps1", "-X"]
         );
+        Ok(())
     }
 }

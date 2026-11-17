@@ -7,8 +7,9 @@
 use super::*;
 
 use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 
+use antumbra_store::testing::mem_store;
 use serde_json::{json, Value};
 
 const ORIGIN: &str = "http://10.0.0.130:8083";
@@ -23,7 +24,12 @@ struct RelicCopal {
 
 impl RelicCopal {
     fn calls(&self) -> Vec<(String, Value)> {
-        self.calls.lock().unwrap().clone()
+        // The list only ever grows by a push, so a poisoned lock still holds a
+        // whole list.
+        self.calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// The access each file was last set to, by file id.
@@ -34,6 +40,14 @@ impl RelicCopal {
             .find(|(url, _)| url.ends_with(&format!("/v1/files/{file}/access")))
             .map(|(_, body)| body["access"].as_str().unwrap_or_default().to_string())
     }
+
+    fn record(&self, url: &str, body: Value) {
+        // As in `calls`: a push cannot leave the list half-written.
+        self.calls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((url.to_string(), body));
+    }
 }
 
 impl antumbra_copal::CopalTransport for RelicCopal {
@@ -43,10 +57,7 @@ impl antumbra_copal::CopalTransport for RelicCopal {
         _credential: &antumbra_copal::CopalCredential,
         body: &Value,
     ) -> antumbra_core::Result<Value> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push((url.to_string(), body.clone()));
+        self.record(url, body.clone());
         if url.ends_with("/v1/files") {
             let n = self.files.fetch_add(1, AtomicOrdering::SeqCst) + 1;
             Ok(json!({ "id": format!("01relicfile{n:015}"), "state": "draft" }))
@@ -68,10 +79,7 @@ impl antumbra_copal::CopalTransport for RelicCopal {
         digest: &str,
         _body: &[u8],
     ) -> antumbra_core::Result<Value> {
-        self.calls
-            .lock()
-            .unwrap()
-            .push((url.to_string(), json!({ "uploaded": true })));
+        self.record(url, json!({ "uploaded": true }));
         Ok(json!({ "digest": digest, "state": "ready" }))
     }
 }
@@ -81,11 +89,9 @@ async fn as_user(
     store: &Store,
     user: &str,
     copal: Option<(Arc<RelicCopal>, Option<&str>)>,
-) -> McpServer {
+) -> anyhow::Result<McpServer> {
     let (tenant, user) = (TenantId::new("ws:org"), UserId::new(user));
-    let compartment = crate::provision_identity(store, &tenant, &user)
-        .await
-        .unwrap();
+    let compartment = crate::provision_identity(store, &tenant, &user).await?;
     let s = McpServer::new(
         store.clone(),
         Arc::new(FixedEmbedder::new(EMBED_DIM)),
@@ -95,7 +101,7 @@ async fn as_user(
         compartment,
         None,
     );
-    match copal {
+    Ok(match copal {
         Some((transport, origin)) => s.with_copal_archive(Arc::new(
             antumbra_copal::CopalArchive::with_transport(
                 "127.0.0.1:9010",
@@ -105,23 +111,23 @@ async fn as_user(
             .with_render_origin(origin.map(str::to_string)),
         )),
         None => s,
-    }
+    })
 }
 
-async fn lily() -> (Store, McpServer, Arc<RelicCopal>) {
-    let store = Store::connect_memory(EMBED_DIM).await.unwrap();
+async fn lily() -> anyhow::Result<(Store, McpServer, Arc<RelicCopal>)> {
+    let store = mem_store().await?;
     let copal = Arc::new(RelicCopal::default());
-    let s = as_user(&store, "user:lily", Some((copal.clone(), Some(ORIGIN)))).await;
-    (store, s, copal)
+    let s = as_user(&store, "user:lily", Some((copal.clone(), Some(ORIGIN)))).await?;
+    Ok((store, s, copal))
 }
 
-async fn publish(s: &McpServer, args: Value) -> Value {
-    s.call_tool("publish_relic", args).await.unwrap()
+async fn publish(s: &McpServer, args: Value) -> anyhow::Result<Value> {
+    Ok(s.call_tool("publish_relic", args).await?)
 }
 
 #[tokio::test]
-async fn a_relic_is_published_viewed_republished_and_made_public() {
-    let (_store, s, copal) = lily().await;
+async fn a_relic_is_published_viewed_republished_and_made_public() -> anyhow::Result<()> {
+    let (_store, s, copal) = lily().await?;
 
     let first = publish(
         &s,
@@ -131,7 +137,7 @@ async fn a_relic_is_published_viewed_republished_and_made_public() {
                      <h1>The ceiling pays</h1><script>var DATA = [1947, 65.2];</script>",
         }),
     )
-    .await;
+    .await?;
     assert_eq!(first["slug"], "the-ceiling-pays-for-the-floor");
     assert_eq!(first["version"], 1);
     assert_eq!(first["visibility"], "private");
@@ -145,13 +151,12 @@ async fn a_relic_is_published_viewed_republished_and_made_public() {
             "get_relic",
             json!({ "slug": "the-ceiling-pays-for-the-floor" }),
         )
-        .await
-        .unwrap();
+        .await?;
+    let Some(view_url) = viewed["view_url"].as_str() else {
+        anyhow::bail!("the private relic came with no view url: {viewed}");
+    };
     assert!(
-        viewed["view_url"]
-            .as_str()
-            .unwrap()
-            .starts_with(&format!("{ORIGIN}/v1/render/")),
+        view_url.starts_with(&format!("{ORIGIN}/v1/render/")),
         "{viewed}"
     );
     assert!(viewed["expires_at"].is_string());
@@ -168,7 +173,7 @@ async fn a_relic_is_published_viewed_republished_and_made_public() {
             "visibility": "public",
         }),
     )
-    .await;
+    .await?;
     assert_eq!(second["version"], 2);
     assert_eq!(second["visibility"], "public");
     // A page with no viewport still lands, and says what a phone will make of it.
@@ -185,12 +190,14 @@ async fn a_relic_is_published_viewed_republished_and_made_public() {
     );
     // Only the current version is ever public: the one before it closes.
     assert_eq!(copal.access_of(first_file).as_deref(), Some("private"));
-    let create = copal
+    let Some(create) = copal
         .calls()
         .into_iter()
         .filter(|(url, _)| url.ends_with("/v1/files"))
         .nth(1)
-        .unwrap();
+    else {
+        anyhow::bail!("the second version created no file at copal");
+    };
     assert_eq!(create.1["access"], "public");
     assert_eq!(
         create.1["path"],
@@ -202,14 +209,16 @@ async fn a_relic_is_published_viewed_republished_and_made_public() {
             "get_relic",
             json!({ "slug": "the-ceiling-pays-for-the-floor" }),
         )
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(
         viewed["view_url"],
         format!("{ORIGIN}/v1/public/{second_file}")
     );
     assert!(viewed.get("expires_at").is_none());
-    assert_eq!(viewed["versions"].as_array().unwrap().len(), 2);
+    let Some(versions) = viewed["versions"].as_array() else {
+        anyhow::bail!("the relic lists no versions: {viewed}");
+    };
+    assert_eq!(versions.len(), 2);
 
     // And private again, which copal is told first.
     let changed = s
@@ -217,25 +226,27 @@ async fn a_relic_is_published_viewed_republished_and_made_public() {
             "set_relic_visibility",
             json!({ "slug": "the-ceiling-pays-for-the-floor", "visibility": "private" }),
         )
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(changed["visibility"], "private");
     assert_eq!(copal.access_of(second_file).as_deref(), Some("private"));
-    let listed = s.call_tool("list_relics", json!({})).await.unwrap();
-    let cards = listed["relics"].as_array().unwrap();
+    let listed = s.call_tool("list_relics", json!({})).await?;
+    let Some(cards) = listed["relics"].as_array() else {
+        anyhow::bail!("the list is not a list: {listed}");
+    };
     assert_eq!(cards.len(), 1, "one relic, however many versions");
     assert_eq!(cards[0]["visibility"], "private");
     assert!(cards[0].get("preview_url").is_none());
+    Ok(())
 }
 
 #[tokio::test]
-async fn relics_are_found_by_what_they_say_and_by_whose_they_are() {
-    let (store, s, copal) = lily().await;
+async fn relics_are_found_by_what_they_say_and_by_whose_they_are() -> anyhow::Result<()> {
+    let (store, s, copal) = lily().await?;
     publish(
         &s,
         json!({ "title": "Child poverty", "html": "<p>The expanded credit cut it in half.</p>" }),
     )
-    .await;
+    .await?;
     publish(
         &s,
         json!({
@@ -244,13 +255,12 @@ async fn relics_are_found_by_what_they_say_and_by_whose_they_are() {
             "visibility": "public",
         }),
     )
-    .await;
+    .await?;
 
     // A word only the page's body holds finds it.
     let found = s
         .call_tool("list_relics", json!({ "query": "zymurgy" }))
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(found["relics"][0]["slug"], "wealth-ceiling", "{found}");
     assert_eq!(
         found["relics"][0]["preview_url"]
@@ -261,61 +271,62 @@ async fn relics_are_found_by_what_they_say_and_by_whose_they_are() {
     // A title word finds it too.
     let by_title = s
         .call_tool("list_relics", json!({ "query": "Child" }))
-        .await
-        .unwrap();
+        .await?;
     assert_eq!(by_title["relics"][0]["slug"], "child-poverty", "{by_title}");
 
     let mine = s
         .call_tool("list_relics", json!({ "scope": "mine" }))
-        .await
-        .unwrap();
-    assert_eq!(mine["relics"].as_array().unwrap().len(), 2);
+        .await?;
+    assert_eq!(mine["relics"].as_array().map(Vec::len), Some(2));
     let shared = s
         .call_tool("list_relics", json!({ "scope": "shared" }))
-        .await
-        .unwrap();
-    assert!(shared["relics"].as_array().unwrap().is_empty());
+        .await?;
+    assert_eq!(shared["relics"].as_array().map(Vec::len), Some(0));
     assert!(shared["note"].is_string(), "an empty list says why");
 
     // Another member's view of the same store: lily's relics are not theirs.
-    let oslo = as_user(&store, "user:oslo", Some((copal, Some(ORIGIN)))).await;
+    let oslo = as_user(&store, "user:oslo", Some((copal, Some(ORIGIN)))).await?;
     let theirs = oslo
         .call_tool("list_relics", json!({ "scope": "mine" }))
-        .await
-        .unwrap();
-    assert!(theirs["relics"].as_array().unwrap().is_empty());
+        .await?;
+    assert_eq!(theirs["relics"].as_array().map(Vec::len), Some(0));
+    Ok(())
 }
 
 #[tokio::test]
-async fn only_the_owner_republishes_or_changes_who_sees_a_relic() {
-    let (store, s, copal) = lily().await;
+async fn only_the_owner_republishes_or_changes_who_sees_a_relic() -> anyhow::Result<()> {
+    let (store, s, copal) = lily().await?;
     publish(
         &s,
         json!({ "title": "Ceiling", "slug": "ceiling", "html": "<p>lily's</p>" }),
     )
-    .await;
+    .await?;
     let before = copal.calls().len();
 
-    let oslo = as_user(&store, "user:oslo", Some((copal.clone(), Some(ORIGIN)))).await;
-    let taken = oslo
+    let oslo = as_user(&store, "user:oslo", Some((copal.clone(), Some(ORIGIN)))).await?;
+    let Err(taken) = oslo
         .call_tool(
             "publish_relic",
             json!({ "title": "Mine now", "slug": "ceiling", "html": "<p>oslo's</p>" }),
         )
         .await
-        .unwrap_err();
+    else {
+        anyhow::bail!("someone else's slug was republished");
+    };
     assert!(
         taken.message.contains("someone else's"),
         "{}",
         taken.message
     );
-    let flipped = oslo
+    let Err(flipped) = oslo
         .call_tool(
             "set_relic_visibility",
             json!({ "slug": "ceiling", "visibility": "public" }),
         )
         .await
-        .unwrap_err();
+    else {
+        anyhow::bail!("someone else's relic was made public");
+    };
     assert!(
         flipped.message.contains("only its owner"),
         "{}",
@@ -328,14 +339,18 @@ async fn only_the_owner_republishes_or_changes_who_sees_a_relic() {
         &oslo,
         json!({ "title": "Ceiling", "html": "<p>oslo's own</p>" }),
     )
-    .await;
+    .await?;
     assert_ne!(drawn["slug"], "ceiling");
-    assert!(drawn["slug"].as_str().unwrap().starts_with("ceiling-"));
+    let Some(slug) = drawn["slug"].as_str() else {
+        anyhow::bail!("the relic has no slug: {drawn}");
+    };
+    assert!(slug.starts_with("ceiling-"));
+    Ok(())
 }
 
 #[tokio::test]
-async fn a_publish_that_cannot_land_is_refused_before_copal() {
-    let (store, s, copal) = lily().await;
+async fn a_publish_that_cannot_land_is_refused_before_copal() -> anyhow::Result<()> {
+    let (store, s, copal) = lily().await?;
     for (args, says) in [
         (json!({ "title": "", "html": "<p>x</p>" }), "title"),
         (json!({ "title": "T", "html": "  " }), "html is empty"),
@@ -352,10 +367,9 @@ async fn a_publish_that_cannot_land_is_refused_before_copal() {
             "not one you can write to",
         ),
     ] {
-        let refused = s
-            .call_tool("publish_relic", args.clone())
-            .await
-            .unwrap_err();
+        let Err(refused) = s.call_tool("publish_relic", args.clone()).await else {
+            anyhow::bail!("{args} was published");
+        };
         assert!(
             refused.message.contains(says),
             "{args}: {}",
@@ -370,22 +384,27 @@ async fn a_publish_that_cannot_land_is_refused_before_copal() {
         "user:blind",
         Some((Arc::new(RelicCopal::default()), None)),
     )
-    .await;
-    let none = as_user(&store, "user:none", None).await;
+    .await?;
+    let none = as_user(&store, "user:none", None).await?;
     for server in [blind, none] {
-        let refused = server
+        let Err(refused) = server
             .call_tool("publish_relic", json!({ "title": "T", "html": "<p>x</p>" }))
             .await
-            .unwrap_err();
+        else {
+            anyhow::bail!("a relic was published with nowhere to render it");
+        };
         assert!(
             refused.message.contains("--copal-render-origin"),
             "{}",
             refused.message
         );
     }
-    let missing = s
+    let Err(missing) = s
         .call_tool("get_relic", json!({ "slug": "nothing-here" }))
         .await
-        .unwrap_err();
+    else {
+        anyhow::bail!("a relic that was never published was found");
+    };
     assert!(missing.message.contains("no relic"), "{}", missing.message);
+    Ok(())
 }

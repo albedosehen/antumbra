@@ -15,7 +15,7 @@ use antumbra_core::Result;
 use crate::error::map;
 use crate::store::Store;
 
-const TABLE: &str = "magic_link_use";
+const TABLE: &str = crate::tables::MAGIC_LINK_USE;
 
 /// Mark a link id consumed. `true` = first use (proceed); `false` = already
 /// consumed (the link is being replayed; refuse it). Atomic: a keyed `CREATE`
@@ -54,35 +54,29 @@ pub async fn sweep_expired(store: &Store, now: DateTime<Utc>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::EMBED_DIM;
+    use crate::testing::mem_store;
 
     #[tokio::test]
-    async fn a_link_id_consumes_exactly_once() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn a_link_id_consumes_exactly_once() -> Result<()> {
+        let s = mem_store().await?;
         let exp = Utc::now() + chrono::Duration::minutes(15);
-        assert!(consume(&s, "jti-1", exp).await.unwrap(), "first use wins");
-        assert!(!consume(&s, "jti-1", exp).await.unwrap(), "replay refused");
+        assert!(consume(&s, "jti-1", exp).await?, "first use wins");
+        assert!(!consume(&s, "jti-1", exp).await?, "replay refused");
         // A different id is unaffected.
-        assert!(consume(&s, "jti-2", exp).await.unwrap());
+        assert!(consume(&s, "jti-2", exp).await?);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn sweeping_drops_only_expired_entries() {
-        let s = Store::connect_memory(EMBED_DIM).await.unwrap();
+    async fn sweeping_drops_only_expired_entries() -> Result<()> {
+        let s = mem_store().await?;
         let now = Utc::now();
-        assert!(consume(&s, "dead", now - chrono::Duration::minutes(1))
-            .await
-            .unwrap());
-        assert!(consume(&s, "live", now + chrono::Duration::minutes(15))
-            .await
-            .unwrap());
-        sweep_expired(&s, now).await.unwrap();
+        assert!(consume(&s, "dead", now - chrono::Duration::minutes(1)).await?);
+        assert!(consume(&s, "live", now + chrono::Duration::minutes(15)).await?);
+        sweep_expired(&s, now).await?;
         // The expired row is gone (its id consumes afresh); the live row holds.
-        assert!(consume(&s, "dead", now + chrono::Duration::minutes(15))
-            .await
-            .unwrap());
-        assert!(!consume(&s, "live", now + chrono::Duration::minutes(15))
-            .await
-            .unwrap());
+        assert!(consume(&s, "dead", now + chrono::Duration::minutes(15)).await?);
+        assert!(!consume(&s, "live", now + chrono::Duration::minutes(15)).await?);
+        Ok(())
     }
 }

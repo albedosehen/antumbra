@@ -17,6 +17,7 @@
 //!
 //! Optional: `ANTUMBRA_STORE_WS_USER` / `ANTUMBRA_STORE_WS_PASS` (default root/root).
 
+use anyhow::{Context, Result};
 use chrono::Utc;
 
 use antumbra_core::{Memory, MemoryNetwork, TenantId, UserId};
@@ -37,10 +38,10 @@ fn mem(id: &str, tenant: &TenantId, content: &str) -> Memory {
 
 #[tokio::test]
 #[ignore = "live ws:// SurrealDB: set ANTUMBRA_STORE_WS=ws://127.0.0.1:8002/rpc and run with --ignored"]
-async fn signin_root_restores_the_owner_view_over_ws() {
-    let url = std::env::var("ANTUMBRA_STORE_WS").expect(
+async fn signin_root_restores_the_owner_view_over_ws() -> Result<()> {
+    let url = std::env::var("ANTUMBRA_STORE_WS").context(
         "ANTUMBRA_STORE_WS must name a live SurrealDB (ws://127.0.0.1:8002/rpc) to run this ignored test",
-    );
+    )?;
     let user = std::env::var("ANTUMBRA_STORE_WS_USER").unwrap_or_else(|_| "root".into());
     let pass = std::env::var("ANTUMBRA_STORE_WS_PASS").unwrap_or_else(|_| "root".into());
 
@@ -53,34 +54,27 @@ async fn signin_root_restores_the_owner_view_over_ws() {
         .database("main")
         .username(&user)
         .password(&pass)
-        .build()
-        .unwrap();
-    let store = Store::connect(config, EMBED_DIM).await.unwrap();
+        .build()?;
+    let store = Store::connect(config, EMBED_DIM).await?;
 
     let alpha = TenantId::new("ws:owner-alpha");
     let beta = TenantId::new("ws:owner-beta");
-    principal::provision(&store, &alpha, &UserId::new("user:a"))
-        .await
-        .unwrap();
-    principal::provision(&store, &beta, &UserId::new("user:b"))
-        .await
-        .unwrap();
+    principal::provision(&store, &alpha, &UserId::new("user:a")).await?;
+    principal::provision(&store, &beta, &UserId::new("user:b")).await?;
     memory::upsert(
         &store,
         &mem("eeeeeeee-0000-0000-0000-00000000000a", &alpha, "alpha"),
     )
-    .await
-    .unwrap();
+    .await?;
     memory::upsert(
         &store,
         &mem("eeeeeeee-0000-0000-0000-00000000000b", &beta, "beta"),
     )
-    .await
-    .unwrap();
+    .await?;
 
     // Bind a tenant record session: the engine hides the other tenant's rows.
-    store.signin(&alpha, &UserId::new("user:a")).await.unwrap();
-    let scoped = memory::all_unscoped(&store).await.unwrap();
+    store.signin(&alpha, &UserId::new("user:a")).await?;
+    let scoped = memory::all_unscoped(&store).await?;
     assert!(
         !scoped.is_empty() && scoped.iter().all(|m| m.tenant == alpha),
         "a tenant session sees only its own rows over ws://"
@@ -89,12 +83,13 @@ async fn signin_root_restores_the_owner_view_over_ws() {
     // Return to the owner view via signin_root (the branch under test). Here
     // `invalidate` would drop to a permission-less anonymous; re-signing-in as
     // root restores the cross-tenant read.
-    store.signin_root().await.unwrap();
-    let owner = memory::all_unscoped(&store).await.unwrap();
+    store.signin_root().await?;
+    let owner = memory::all_unscoped(&store).await?;
     assert!(
         owner.iter().any(|m| m.tenant == alpha) && owner.iter().any(|m| m.tenant == beta),
         "signin_root restores the cross-tenant owner view"
     );
 
     eprintln!("RESULT: PASS - signin_root owner view over ws://");
+    Ok(())
 }
