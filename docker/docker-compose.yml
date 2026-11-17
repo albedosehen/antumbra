@@ -152,6 +152,14 @@ services:
       # Both servers need the same ANTUMBRA_JWT_SECRET. Unset, an expert
       # placed on another machine is not served here.
       - ANTUMBRA_EXPERT_SOURCE=${ANTUMBRA_EXPERT_SOURCE:-}
+      # A remote SurrealDB to keep this server's store in step with, for a
+      # server on an embedded store: the collector `antumbra sync` runs,
+      # inside the server, since nothing else can open that store while the
+      # server runs. With the remote's root user and password, or neither
+      # for a remote with no authentication. Unset, the server does not sync.
+      - ANTUMBRA_SYNC_REMOTE=${ANTUMBRA_SYNC_REMOTE:-}
+      - ANTUMBRA_SYNC_REMOTE_USER=${ANTUMBRA_SYNC_REMOTE_USER:-}
+      - ANTUMBRA_SYNC_REMOTE_PASS=${ANTUMBRA_SYNC_REMOTE_PASS:-}
       # Trace export over OTLP/HTTP, all optional. Empty counts as unset, so the
       # export stays off unless docker/.env sets the endpoint, and the service
       # is named antumbra-mcp unless it names one. The headers can carry the

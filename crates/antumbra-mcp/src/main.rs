@@ -233,6 +233,31 @@ struct Cli {
     /// Without it such an expert is not served here.
     #[arg(long, env = "ANTUMBRA_EXPERT_SOURCE")]
     expert_source: Option<String>,
+    /// A remote SurrealDB to keep this server's store in step with, e.g.
+    /// `ws://host:8000/rpc`: the collector `antumbra sync` runs, inside the
+    /// server. A server on an embedded store is that store's one writer, so
+    /// nothing else can sync it while the server runs. Rows are carried both
+    /// ways, last write wins, as owner. Needs `--http`.
+    #[arg(long, env = "ANTUMBRA_SYNC_REMOTE")]
+    sync_remote: Option<String>,
+    /// Root username for the sync remote. With `--sync-remote-pass`, or
+    /// neither for a remote with no authentication.
+    #[arg(long, env = "ANTUMBRA_SYNC_REMOTE_USER")]
+    sync_remote_user: Option<String>,
+    /// Root password for the sync remote.
+    #[arg(long, env = "ANTUMBRA_SYNC_REMOTE_PASS", hide_env_values = true)]
+    sync_remote_pass: Option<String>,
+    /// Read the sync remote's password from this file instead (see
+    /// --jwt-secret-file).
+    #[arg(
+        long,
+        env = "ANTUMBRA_SYNC_REMOTE_PASS_FILE",
+        conflicts_with = "sync_remote_pass"
+    )]
+    sync_remote_pass_file: Option<std::path::PathBuf>,
+    /// Seconds between two sync passes.
+    #[arg(long, env = "ANTUMBRA_SYNC_INTERVAL_SECS", default_value_t = 15)]
+    sync_interval_secs: u64,
     /// Which tools this server advertises and serves: `all` (default), `agent`
     /// (the developer-agent profile: recall/store/reinforce/penalize memories,
     /// recall/ingest documents, route, answer), or a comma-separated list of
@@ -638,8 +663,44 @@ impl Cli {
         self.copal = self.copal.without_empty_settings();
         self.copal_render_origin = set(self.copal_render_origin);
         self.pdf_renderer = set(self.pdf_renderer);
+        self.sync_remote = set(self.sync_remote);
+        self.sync_remote_user = set(self.sync_remote_user);
+        self.sync_remote_pass = set(self.sync_remote_pass);
+        self.sync_remote_pass_file = self
+            .sync_remote_pass_file
+            .filter(|file| !file.as_os_str().is_empty());
         self
     }
+}
+
+/// What `--sync-remote` and the flags beside it ask for: `None` with no
+/// remote. A user and a password come together, or neither does for a
+/// remote with no authentication; one without the other is a mistake said
+/// here, not a collector that quietly signs in as nobody.
+fn sync_settings(
+    remote: Option<String>,
+    user: Option<String>,
+    pass: Option<String>,
+    interval_secs: u64,
+) -> Result<Option<http::sync::Settings>> {
+    let Some(remote) = remote else {
+        if user.is_some() || pass.is_some() {
+            anyhow::bail!("--sync-remote-user and --sync-remote-pass need --sync-remote");
+        }
+        return Ok(None);
+    };
+    let credentials = match (user, pass) {
+        (Some(user), Some(pass)) => Some((user, pass)),
+        (None, None) => None,
+        _ => anyhow::bail!(
+            "--sync-remote-user and --sync-remote-pass are given together, or neither for a remote with no authentication"
+        ),
+    };
+    Ok(Some(http::sync::Settings {
+        remote,
+        credentials,
+        interval: std::time::Duration::from_secs(interval_secs.max(1)),
+    }))
 }
 
 async fn run() -> Result<()> {
@@ -848,6 +909,16 @@ async fn run() -> Result<()> {
             cli.jwt_public_key.is_some(),
             copal.clone(),
         );
+        let sync = sync_settings(
+            cli.sync_remote.clone(),
+            cli.sync_remote_user.clone(),
+            antumbra_core::secrets::resolve(
+                cli.sync_remote_pass.clone(),
+                cli.sync_remote_pass_file.as_deref(),
+                "sync remote password",
+            )?,
+            cli.sync_interval_secs,
+        )?;
         return http::serve(
             addr,
             cli.url,
@@ -868,10 +939,16 @@ async fn run() -> Result<()> {
             cli.behave_drift,
             source,
             &cli.serve_quant,
+            sync,
         )
         .await;
     }
 
+    if cli.sync_remote.is_some() {
+        anyhow::bail!(
+            "--sync-remote needs --http: the stdio server is one user's process and does not sync"
+        );
+    }
     // stdio: one fixed identity for the life of the process.
     let mut service = build_session(
         &cli.url,
@@ -1205,6 +1282,86 @@ mod tests {
                 "{id} hides its value iff a key"
             );
         }
+        Ok(())
+    }
+
+    // What the sync flags become (#393): a remote, and how to sign in to it.
+    #[test]
+    fn the_sync_flags_name_a_remote_and_how_to_sign_in_to_it() -> Result<()> {
+        let remote = || Some("ws://db:8000/rpc".to_string());
+        assert_eq!(sync_settings(None, None, None, 15)?, None);
+        assert_eq!(
+            sync_settings(remote(), None, None, 15)?,
+            Some(http::sync::Settings {
+                remote: "ws://db:8000/rpc".into(),
+                credentials: None,
+                interval: std::time::Duration::from_secs(15),
+            })
+        );
+        // An interval of none is one second, not a loop that never waits.
+        assert_eq!(
+            sync_settings(remote(), Some("root".into()), Some("a password".into()), 0)?,
+            Some(http::sync::Settings {
+                remote: "ws://db:8000/rpc".into(),
+                credentials: Some(("root".into(), "a password".into())),
+                interval: std::time::Duration::from_secs(1),
+            })
+        );
+        // One without the other, or either without a remote, is said: not a
+        // collector that quietly signs in as nobody.
+        assert!(sync_settings(remote(), Some("root".into()), None, 15).is_err());
+        assert!(sync_settings(remote(), None, Some("a password".into()), 15).is_err());
+        assert!(sync_settings(None, Some("root".into()), None, 15).is_err());
+        assert!(sync_settings(None, None, Some("a password".into()), 15).is_err());
+        Ok(())
+    }
+
+    // The remote's password is a secret like the server's others: its
+    // environment value stays out of --help, it may come from a file and not
+    // from both, and an empty setting, as docker compose passes an unset
+    // variable, is an unset one.
+    #[test]
+    fn the_sync_password_is_hidden_and_an_empty_setting_is_unset() -> Result<()> {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        let flag = |id: &str| {
+            cmd.get_arguments().find(|a| a.get_id() == id).map(|a| {
+                (
+                    a.get_env().map(|e| e.to_string_lossy().into_owned()),
+                    a.is_hide_env_values_set(),
+                )
+            })
+        };
+        assert_eq!(
+            flag("sync_remote_pass"),
+            Some((Some("ANTUMBRA_SYNC_REMOTE_PASS".into()), true))
+        );
+        assert_eq!(
+            flag("sync_remote"),
+            Some((Some("ANTUMBRA_SYNC_REMOTE".into()), false))
+        );
+        assert!(Cli::try_parse_from([
+            "antumbra-mcp",
+            "--sync-remote-pass",
+            "x",
+            "--sync-remote-pass-file",
+            "f"
+        ])
+        .is_err());
+        let cli = Cli::try_parse_from([
+            "antumbra-mcp",
+            "--sync-remote",
+            "",
+            "--sync-remote-user",
+            " ",
+            "--sync-remote-pass",
+            "",
+        ])?
+        .without_empty_settings();
+        assert_eq!(
+            (cli.sync_remote, cli.sync_remote_user, cli.sync_remote_pass),
+            (None, None, None)
+        );
         Ok(())
     }
 }

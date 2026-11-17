@@ -78,6 +78,7 @@ mod experts;
 mod github;
 mod relics;
 mod revocation;
+pub(crate) mod sync;
 pub(crate) use github::GithubConfig;
 
 type IdentityService = StreamableHttpService<McpServer, LocalSessionManager>;
@@ -310,6 +311,7 @@ pub async fn serve(
     behave_drift: String,
     source: Option<Arc<crate::server::pull::ExpertSource>>,
     serve_quant: &str,
+    sync: Option<sync::Settings>,
 ) -> Result<()> {
     let mut store = crate::connect(&url, &db).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
@@ -376,6 +378,7 @@ pub async fn serve(
     spawn_live_propagation(state.clone(), announced);
     chunker::spawn(state.clone(), chunk_in_flight);
     behaviors::spawn(state.clone());
+    sync::spawn(state.clone(), sync);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     eprintln!("antumbra-mcp: networked surface on http://{addr}/mcp (JWT-authenticated)");
     let header_read = state.limits.header_read;

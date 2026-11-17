@@ -77,7 +77,7 @@ Antumbra carries its own first-class memory and runtime rather than running alon
 
 - **Live propagation**: when a shared compartment changes, a SurrealDB `LIVE` subscription resolves the audience (owner + grantees) and pushes a notification to each open SSE stream, so an agent learns of new or forgotten memories without polling. Validated end-to-end over the wire.
 
-- **Collector / sync** (`antumbra-sync`): keeps a local embedded store and a remote authoritative store in agreement by periodic **bidirectional last-write-wins** reconciliation (by each row's version timestamp), so memories, grants, revocations and each expert's row become visible across a fleet. An expert's adapter is a file and is not carried: a server pulls it for itself. CLI: `antumbra sync`.
+- **Collector / sync** (`antumbra-sync`): keeps a local embedded store and a remote authoritative store in agreement by periodic **bidirectional last-write-wins** reconciliation (by each row's version timestamp), so memories, grants, revocations and each expert's row become visible across a fleet. An expert's adapter is a file and is not carried: a server pulls it for itself. CLI: `antumbra sync`, or inside a server that is told a remote (`--sync-remote`), which is how a server on an embedded store syncs without being stopped.
 
 ---
 
