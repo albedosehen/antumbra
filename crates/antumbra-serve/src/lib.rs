@@ -54,8 +54,9 @@ pub use antumbra_train::RaftConfig;
 /// alpha raised in step, so one expert serves exactly as at its trained rank
 /// and a blend of up to that many (a routed expert with the user's standing
 /// ones) needs no rebuild. A `register`ed map resolves the gate's `ExpertId`s
-/// to adapter files; the resident blend is tracked so repeated requests for
-/// the same one skip the swap.
+/// to adapter files; the resident blend is tracked by those files, so repeated
+/// requests for the same one skip the swap and an expert registered again
+/// under another file is loaded from it.
 #[cfg(feature = "models")]
 pub struct MultiAdapterServe {
     base_model: String,
@@ -89,7 +90,21 @@ fn blend_config(trained: &antumbra_train::RaftConfig) -> antumbra_train::RaftCon
 #[derive(Default)]
 struct Resident {
     model: Option<antumbra_train::models::QwenCausalLm>,
-    current: Option<Vec<(antumbra_core::ExpertId, u32)>>,
+    current: Option<BlendKey>,
+}
+
+/// What tells one resident blend from another: each adapter's file and the
+/// bits of its weight. The file, not the expert: a retrained expert keeps its
+/// id and is served from another file, and must not pass for what is loaded.
+#[cfg(feature = "models")]
+type BlendKey = Vec<(String, u32)>;
+
+#[cfg(feature = "models")]
+fn blend_key(specs: &[(String, f32)]) -> BlendKey {
+    specs
+        .iter()
+        .map(|(path, weight)| (path.clone(), weight.to_bits()))
+        .collect()
 }
 
 #[cfg(feature = "models")]
@@ -144,6 +159,30 @@ impl MultiAdapterServe {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .is_empty()
     }
+
+    /// Each of `blend`'s experts as the adapter file registered for it now,
+    /// with its weight.
+    fn resolve(
+        &self,
+        blend: &[(antumbra_core::ExpertId, f32)],
+    ) -> antumbra_core::Result<Vec<(String, f32)>> {
+        let registry = self
+            .registry
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        blend
+            .iter()
+            .map(|(e, w)| {
+                let path = registry.get(e).cloned().ok_or_else(|| {
+                    antumbra_core::AntumbraError::other(format!(
+                        "MultiAdapterServe: no adapter registered for {e} (register the \
+                         population before serving)"
+                    ))
+                })?;
+                Ok((path, *w))
+            })
+            .collect()
+    }
 }
 
 #[cfg(feature = "models")]
@@ -159,7 +198,9 @@ impl Serve for MultiAdapterServe {
     }
 
     /// Hot-register a freshly-minted expert's adapter, so a route to it serves
-    /// without a restart (a standing expert the keeper just trained).
+    /// without a restart (a standing expert the keeper just trained). An
+    /// expert registered again under another file is served from that file by
+    /// the next request to take the engine.
     fn register_expert(&self, expert: &antumbra_core::ExpertId, adapter_uri: &str) {
         self.registry
             .write()
@@ -190,28 +231,7 @@ impl Serve for MultiAdapterServe {
         }
         // Resolve before touching the device: an unknown expert is a config
         // error, not a generation failure, and must not pay a model load.
-        let specs: Vec<(String, f32)> = {
-            let registry = self
-                .registry
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            blend
-                .iter()
-                .map(|(e, w)| {
-                    let path = registry.get(e).cloned().ok_or_else(|| {
-                        AntumbraError::other(format!(
-                            "MultiAdapterServe: no adapter registered for {e} (register the \
-                             population before serving)"
-                        ))
-                    })?;
-                    Ok((path, *w))
-                })
-                .collect::<antumbra_core::Result<_>>()?
-        };
-        let key: Vec<(antumbra_core::ExpertId, u32)> = blend
-            .iter()
-            .map(|(e, w)| (e.clone(), w.to_bits()))
-            .collect();
+        self.resolve(&blend)?;
 
         // candle generation is synchronous and device-bound. Run it under
         // `block_in_place` so the runtime spawns a replacement worker and other
@@ -220,6 +240,11 @@ impl Serve for MultiAdapterServe {
         let final_output = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let mut st = self.state.lock().await;
+                // Resolved again now the engine is this request's: one that
+                // waited here while an expert was retrained loads the file
+                // registered since, not the one that was there when it asked.
+                let specs = self.resolve(&blend)?;
+                let key = blend_key(&specs);
                 if st.model.is_none() {
                     // Load the base with neutral (zero) LoRA factors; adapters are
                     // swapped in below. Reuse the trainer's loader so the model is
@@ -398,5 +423,38 @@ mod tests {
         assert_eq!(serve.len(), 2);
         assert!(!serve.is_empty());
         Ok(())
+    }
+
+    /// The regression: a retrained expert keeps its id, and the resident
+    /// blend was known by id, so its new adapter was never loaded.
+    #[test]
+    fn an_expert_registered_under_another_file_is_another_blend() -> antumbra_core::Result<()> {
+        let expert = ExpertId::new("expert:a");
+        let serve = MultiAdapterServe::new("base", Default::default())
+            .with_adapter(expert.clone(), "adapters/a.1.safetensors");
+        let blend = [(expert.clone(), 1.0f32)];
+        let before = blend_key(&serve.resolve(&blend)?);
+        assert_eq!(
+            before,
+            blend_key(&serve.resolve(&blend)?),
+            "the same file at the same weight is the blend already resident"
+        );
+
+        serve.register_expert(&expert, "adapters/a.2.safetensors");
+        let after = blend_key(&serve.resolve(&blend)?);
+
+        assert_ne!(before, after);
+        assert_eq!(
+            after,
+            vec![("adapters/a.2.safetensors".to_string(), 1.0f32.to_bits())]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_blend_at_another_weight_is_another_blend() {
+        let at = |weight: f32| blend_key(&[("adapters/a.safetensors".to_string(), weight)]);
+        assert_eq!(at(0.5), at(0.5));
+        assert_ne!(at(0.5), at(1.0));
     }
 }

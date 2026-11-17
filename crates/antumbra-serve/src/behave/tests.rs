@@ -59,6 +59,7 @@ fn admitted(ids: &[&str], adapter: &str) -> Trained {
         },
         replay: 0,
         adapter_uri: adapter.into(),
+        seal: None,
         base_model: "base".into(),
         fitness: 1.0,
         base_fitness: 0.0,
@@ -297,6 +298,7 @@ async fn mint_marks_only_the_behaviors_still_as_they_were_taught() -> anyhow::Re
         },
         replay: 0,
         adapter_uri: "adapters/x.safetensors".into(),
+        seal: None,
         base_model: "base".into(),
         fitness: 1.0,
         base_fitness: 0.0,
@@ -390,6 +392,7 @@ async fn learned_and_missed(admitted: bool) -> anyhow::Result<(Store, Plan, Trai
         },
         replay: 0,
         adapter_uri: "adapters/x.safetensors".into(),
+        seal: None,
         base_model: "base".into(),
         fitness: 0.5,
         base_fitness: 0.25,
@@ -1073,5 +1076,130 @@ async fn note_audit_makes_the_sections_a_card_lacks() -> anyhow::Result<()> {
         );
         expert::delete(&store, &id).await?;
     }
+    Ok(())
+}
+
+/// An admitted training of `ids` whose adapter was promoted to `adapter`,
+/// three bytes with the digest `sha256`.
+fn sealed(ids: &[&str], adapter: &str, sha256: &str) -> Trained {
+    Trained {
+        seal: Some(adapter::Seal {
+            sha256: sha256.into(),
+            bytes: 3,
+        }),
+        ..admitted(ids, adapter)
+    }
+}
+
+/// The adapter the scope's standing expert is served from, and the seal on
+/// its card.
+async fn served(store: &Store, plan: &Plan) -> anyhow::Result<(String, serde_json::Value)> {
+    let id = expert_id(&plan.tenant, &plan.user, &plan.scope);
+    let Some(e) = expert::get(store, &id).await? else {
+        anyhow::bail!("{} is not minted", id.as_str());
+    };
+    let seal = e.capability_card[adapter::CARD_ADAPTER].clone();
+    Ok((e.artifact_uri, seal))
+}
+
+#[tokio::test]
+async fn an_expert_s_row_names_its_adapter_and_its_card_seals_it() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let plan = owner_plan("ws:a");
+
+    let first = sealed(&["memory:rule"], "adapters/e.aa.safetensors", "aa");
+    let report = mint(&store, &plan, first, "rig").await?;
+
+    assert_eq!(
+        report.expert.map(|(_, uri)| uri).as_deref(),
+        Some("adapters/e.aa.safetensors")
+    );
+    assert_eq!(
+        report.superseded, None,
+        "the first of a scope replaces none"
+    );
+    assert_eq!(
+        served(&store, &plan).await?,
+        (
+            "adapters/e.aa.safetensors".to_string(),
+            serde_json::json!({ "sha256": "aa", "bytes": 3 })
+        )
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_admitted_retraining_reports_the_adapter_it_replaces() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let plan = owner_plan("ws:a");
+    let train = |file: &str, sha256: &str| sealed(&["memory:rule"], file, sha256);
+    mint(
+        &store,
+        &plan,
+        train("adapters/e.aa.safetensors", "aa"),
+        "rig",
+    )
+    .await?;
+
+    let again = mint(
+        &store,
+        &plan,
+        train("adapters/e.bb.safetensors", "bb"),
+        "rig",
+    )
+    .await?;
+    assert_eq!(
+        again.superseded.as_deref(),
+        Some("adapters/e.aa.safetensors")
+    );
+    assert_eq!(
+        served(&store, &plan).await?,
+        (
+            "adapters/e.bb.safetensors".to_string(),
+            serde_json::json!({ "sha256": "bb", "bytes": 3 })
+        )
+    );
+
+    // The same bytes admitted again are the same file: nothing to remove.
+    let same = mint(
+        &store,
+        &plan,
+        train("adapters/e.bb.safetensors", "bb"),
+        "rig",
+    )
+    .await?;
+    assert_eq!(same.superseded, None);
+
+    // Minted on another machine, the file before it is on a disk that
+    // machine cannot reach: it has nothing of its own to remove.
+    let moved = mint(
+        &store,
+        &plan,
+        train("adapters/e.cc.safetensors", "cc"),
+        "other",
+    )
+    .await?;
+    assert_eq!(moved.superseded, None);
+    Ok(())
+}
+
+/// The regression, at the row: a refused retraining leaves the expert, the
+/// adapter its row names and the seal on its card as admission left them.
+#[tokio::test]
+async fn a_refused_retraining_leaves_the_expert_its_adapter() -> anyhow::Result<()> {
+    let store = Store::connect_memory(EMBED_DIM).await?;
+    let plan = owner_plan("ws:a");
+    let first = sealed(&["memory:rule"], "adapters/e.aa.safetensors", "aa");
+    mint(&store, &plan, first, "rig").await?;
+    let before = served(&store, &plan).await?;
+
+    let mut refused = admitted(&["memory:rule"], "adapters/candidates/e.safetensors");
+    refused.verdict.admitted = false;
+    let report = mint(&store, &plan, refused, "rig").await?;
+
+    assert!(report.expert.is_none(), "nothing is minted");
+    assert_eq!(report.superseded, None, "and nothing is to be removed");
+    assert_eq!(served(&store, &plan).await?, before);
+    assert_eq!(before.0, "adapters/e.aa.safetensors");
     Ok(())
 }
