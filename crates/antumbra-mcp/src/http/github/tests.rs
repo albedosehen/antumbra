@@ -2,7 +2,7 @@
 //! merge and delete handlers against the store, the acknowledgements, and the
 //! App-driven document ingest with a canned GitHub.
 
-use super::super::{router, Bounded, Serving, MAX_EMBEDDERS, MAX_SESSIONS};
+use super::super::{router, Bounded, Limits, Serving, MAX_EMBEDDERS, MAX_SESSIONS};
 use super::ingest::{self, IngestPlan};
 use super::*;
 use antumbra_core::ports::Embedder;
@@ -52,6 +52,7 @@ async fn state(github: Option<GithubConfig>) -> anyhow::Result<Arc<HttpState>> {
         profile: None,
         github: github.map(Arc::new),
         revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
+        limits: Limits::default(),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
         registry: crate::notify::PeerRegistry::new(),
