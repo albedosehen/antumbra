@@ -371,4 +371,88 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(120)).await;
         stop_within(&tx, handle, Duration::from_secs(5)).await
     }
+
+    /// A local store the collector is handed, as a server hands its own: it
+    /// counts each time it is taken.
+    struct Counted(std::sync::atomic::AtomicUsize);
+
+    impl Hold for Counted {
+        const SHARED: bool = true;
+        type Held = ();
+
+        async fn hold(&self) -> Result<()> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    impl Counted {
+        fn taken(&self) -> usize {
+            self.0.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    // The loop a server runs: on the store it is handed, taken hold of for
+    // each table's read, with the remote connected here; and it stops when
+    // told.
+    #[tokio::test]
+    async fn run_on_reconciles_a_store_it_is_given_then_stops() -> Result<()> {
+        let local = Endpoint::embedded("mem://").connect().await?;
+        let cfg = mem_cfg().with_interval(Duration::from_millis(20));
+        let hold = std::sync::Arc::new(Counted(std::sync::atomic::AtomicUsize::new(0)));
+        let (tx, rx) = watch::channel(false);
+        let handle = {
+            let hold = hold.clone();
+            tokio::spawn(async move { run_on(&local, hold.as_ref(), cfg, rx).await })
+        };
+        // One whole pass: every table read once.
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while hold.taken() < PENUMBRA_TABLES.len() {
+            if std::time::Instant::now() > deadline {
+                return Err(AntumbraError::other("no pass ran on the store given"));
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        stop_within(&tx, handle, Duration::from_secs(5)).await
+    }
+
+    // A remote that is down costs the shared store nothing: the loop waits and
+    // tries the remote again, never takes the local store, and still stops.
+    #[tokio::test]
+    async fn run_on_waits_out_a_remote_that_is_down_and_leaves_the_store_alone() -> Result<()> {
+        let local = Endpoint::embedded("mem://").connect().await?;
+        let cfg = SyncConfig {
+            min_backoff: Duration::from_millis(20),
+            max_backoff: Duration::from_millis(40),
+            ..SyncConfig::new(
+                Endpoint::embedded("mem://"),
+                // A refused port: connecting fails fast.
+                Endpoint::authoritative("ws://127.0.0.1:1/rpc", "root", "x"),
+            )
+        };
+        let hold = std::sync::Arc::new(Counted(std::sync::atomic::AtomicUsize::new(0)));
+        let (tx, rx) = watch::channel(false);
+        let handle = {
+            let hold = hold.clone();
+            tokio::spawn(async move { run_on(&local, hold.as_ref(), cfg, rx).await })
+        };
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        stop_within(&tx, handle, Duration::from_secs(5)).await?;
+        assert_eq!(hold.taken(), 0);
+        Ok(())
+    }
+
+    // The caller's store is not this collector's to sign in on as someone
+    // else: a fabric is refused before anything is connected.
+    #[tokio::test]
+    async fn run_on_takes_no_fabric() -> Result<()> {
+        let local = Endpoint::embedded("mem://").connect().await?;
+        let cfg = SyncConfig {
+            fabric: Some(crate::config::Fabric::new("ws:t", "user:a")),
+            ..mem_cfg()
+        };
+        let (_tx, rx) = watch::channel(false);
+        assert!(run_on(&local, &crate::hold::Own, cfg, rx).await.is_err());
+        Ok(())
+    }
 }

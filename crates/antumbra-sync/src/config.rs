@@ -100,6 +100,8 @@ impl Fabric {
 /// The collector's full configuration.
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
+    /// The local store's endpoint. Not connected by a collector that is
+    /// given its local store ([`crate::worker::run_on`]).
     pub local: Endpoint,
     pub remote: Endpoint,
     /// Whose fabric to replicate. `None` is owner mode over the whole tenant,

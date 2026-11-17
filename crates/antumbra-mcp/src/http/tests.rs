@@ -736,6 +736,7 @@ mod experts;
 mod limits;
 mod relics;
 mod shutdown;
+mod sync;
 mod telemetry;
 mod written_from;
 

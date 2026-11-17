@@ -410,4 +410,69 @@ mod tests {
         );
         Ok(())
     }
+
+    // The point read a shared store's pass asks before it writes a row: the
+    // record a row would replace, by the id the row carries, or none.
+    #[tokio::test]
+    async fn get_row_reads_the_record_a_row_would_replace() -> Result<()> {
+        let store = mem_store().await?;
+        let tenant = TenantId::new("tenant-x");
+        let kept = Memory::new(
+            "11111111-2222-3333-4444-555555555555",
+            tenant.clone(),
+            MemoryNetwork::World,
+            "kept",
+            0.9,
+            chrono::Utc::now(),
+        );
+        memory::upsert(&store, &kept).await?;
+        let listed = list_rows(&store, "memory").await?;
+        let id = listed.first().and_then(row_id);
+        let Some(id) = id else {
+            return Err(antumbra_core::AntumbraError::other("the row has no id"));
+        };
+
+        let got = get_row(&store, &id).await?;
+        assert_eq!(got.as_ref().and_then(row_id).as_deref(), Some(id.as_str()));
+        assert_eq!(
+            got.as_ref().and_then(|row| row.get("content")),
+            Some(&serde_json::json!("kept"))
+        );
+        assert_eq!(
+            get_row(&store, "memory:00000000-0000-0000-0000-000000000000").await?,
+            None
+        );
+        Ok(())
+    }
+
+    // The id read by is another store's, so it is data here too: one carrying
+    // a statement, or one written to close the id's brackets early, names a
+    // record that is not there, and the statement never runs.
+    #[tokio::test]
+    async fn get_row_does_not_run_a_statement_inside_an_id() -> Result<()> {
+        let store = mem_store().await?;
+        let tenant = TenantId::new("tenant-x");
+        let kept = Memory::new(
+            "11111111-2222-3333-4444-555555555555",
+            tenant.clone(),
+            MemoryNetwork::World,
+            "kept",
+            0.9,
+            chrono::Utc::now(),
+        );
+        memory::upsert(&store, &kept).await?;
+        for hostile in [
+            "memory:x; DELETE memory; --",
+            "memory:⟨x⟩; DELETE memory; --",
+            "memory:`x`; DELETE memory; --",
+            "memory:x⟩; DELETE memory; --",
+        ] {
+            // Read as a record of that odd name, or refused: either way the
+            // DELETE inside the id never runs.
+            let _ = get_row(&store, hostile).await;
+            let got = memory::get(&store, &tenant, &kept.id).await?;
+            assert!(got.is_some(), "the statement inside {hostile:?} ran");
+        }
+        Ok(())
+    }
 }
