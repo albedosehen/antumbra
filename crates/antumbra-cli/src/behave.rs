@@ -55,6 +55,11 @@ pub struct BehaveArgs {
     /// the set (above 0.5, below 1).
     #[arg(long, default_value_t = 0.9)]
     pub regression_confidence: f64,
+    /// Which quantized forms of the base an admitted expert is measured on:
+    /// `auto` (Q8_0), `off`, `q8_0`, `q4_k`, or `q8_0,q4_k`. Each form is one
+    /// more load of the base, and what it finds goes on the expert's card.
+    #[arg(long, default_value = "auto")]
+    pub drift: String,
 }
 
 /// One behavior in an `--import` file.
@@ -179,6 +184,8 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
         max_new_tokens: a.max_new_tokens,
         ..antumbra_serve::behave::standing_config(&recipe)
     };
+    let measure = antumbra_serve::ServeQuant::drift_from_setting(&a.drift)
+        .map_err(|e| anyhow::anyhow!("--drift: {e}"))?;
     let report = antumbra_serve::behave::train_behaviors(
         &store,
         embedder.as_ref(),
@@ -187,6 +194,7 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
         &scope,
         &cfg,
         recipe.regression_confidence,
+        &measure,
     )
     .await?;
     let Some(r) = report else {
@@ -226,6 +234,9 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
                 println!("  {reason}");
             }
         }
+    }
+    if !r.drift.is_empty() {
+        println!("{}", antumbra_serve::behave::drift::describe(&r.drift));
     }
     // Left in place: a server started before this may still serve from it.
     if let Some(old) = &r.superseded {

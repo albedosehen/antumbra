@@ -15,10 +15,17 @@ use crate::{CopalCredential, CopalTransport};
 /// bound is what turns "hangs" into "fails fast with a clear error".
 const COPAL_TIMEOUT_SECS: u64 = 30;
 
+/// How long the transfer of one large file may take, end to end: an adapter
+/// is tens of megabytes, and the bound above would cut one off on a slow
+/// link. `ANTUMBRA_COPAL_TRANSFER_TIMEOUT_SECS` overrides it.
+const COPAL_TRANSFER_TIMEOUT_SECS: u64 = 300;
+
 /// The production transport: blocking `ureq` calls over an agent with a bounded
 /// global timeout, so a dead copal fails fast instead of hanging the worker.
 pub(crate) struct UreqTransport {
     agent: ureq::Agent,
+    /// The agent large files move on: the same, with the transfer budget.
+    transfers: ureq::Agent,
 }
 
 impl UreqTransport {
@@ -29,6 +36,10 @@ impl UreqTransport {
             agent: antumbra_http::agent(antumbra_http::patience(
                 "ANTUMBRA_COPAL_TIMEOUT_SECS",
                 COPAL_TIMEOUT_SECS,
+            )),
+            transfers: antumbra_http::agent(antumbra_http::patience(
+                "ANTUMBRA_COPAL_TRANSFER_TIMEOUT_SECS",
+                COPAL_TRANSFER_TIMEOUT_SECS,
             )),
         }
     }
@@ -51,36 +62,72 @@ impl CopalTransport for UreqTransport {
         digest: &str,
         body: &[u8],
     ) -> Result<Value> {
-        let req = self
-            .agent
-            .put(url)
-            .header("content-type", content_type)
-            .header("x-copal-digest", digest);
-        let resp = authed(req, credential)
-            .send(body)
-            .map_err(|e| AntumbraError::other(format!("copal PUT {url} failed: {e}")))?;
-        antumbra_http::read_json_or_refusal(&format!("copal PUT {url}"), resp)
+        put(&self.agent, url, credential, content_type, digest, body)
     }
 
     fn get_bytes(&self, url: &str, credential: &CopalCredential, limit: u64) -> Result<Vec<u8>> {
-        let mut resp = authed(self.agent.get(url), credential)
-            .call()
-            .map_err(|e| AntumbraError::other(format!("copal GET {url} failed: {e}")))?;
-        let status = resp.status();
-        if !status.is_success() {
-            let text = resp.body_mut().read_to_string().unwrap_or_default();
-            return Err(AntumbraError::other(format!(
-                "copal GET {url} answered {}: {}",
-                status.as_u16(),
-                antumbra_http::refusal(&text)
-            )));
-        }
-        resp.body_mut()
-            .with_config()
-            .limit(limit)
-            .read_to_vec()
-            .map_err(|e| AntumbraError::other(format!("copal GET {url} body: {e}")))
+        get(&self.agent, url, credential, limit)
     }
+
+    fn put_file(
+        &self,
+        url: &str,
+        credential: &CopalCredential,
+        content_type: &str,
+        digest: &str,
+        body: &[u8],
+    ) -> Result<Value> {
+        put(&self.transfers, url, credential, content_type, digest, body)
+    }
+
+    fn get_file(&self, url: &str, credential: &CopalCredential, limit: u64) -> Result<Vec<u8>> {
+        get(&self.transfers, url, credential, limit)
+    }
+}
+
+/// PUT `body` to `url` on `agent`, declaring its type and its digest.
+fn put(
+    agent: &ureq::Agent,
+    url: &str,
+    credential: &CopalCredential,
+    content_type: &str,
+    digest: &str,
+    body: &[u8],
+) -> Result<Value> {
+    let req = agent
+        .put(url)
+        .header("content-type", content_type)
+        .header("x-copal-digest", digest);
+    let resp = authed(req, credential)
+        .send(body)
+        .map_err(|e| AntumbraError::other(format!("copal PUT {url} failed: {e}")))?;
+    antumbra_http::read_json_or_refusal(&format!("copal PUT {url}"), resp)
+}
+
+/// GET the body at `url` on `agent`, refused past `limit` bytes.
+fn get(
+    agent: &ureq::Agent,
+    url: &str,
+    credential: &CopalCredential,
+    limit: u64,
+) -> Result<Vec<u8>> {
+    let mut resp = authed(agent.get(url), credential)
+        .call()
+        .map_err(|e| AntumbraError::other(format!("copal GET {url} failed: {e}")))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.body_mut().read_to_string().unwrap_or_default();
+        return Err(AntumbraError::other(format!(
+            "copal GET {url} answered {}: {}",
+            status.as_u16(),
+            antumbra_http::refusal(&text)
+        )));
+    }
+    resp.body_mut()
+        .with_config()
+        .limit(limit)
+        .read_to_vec()
+        .map_err(|e| AntumbraError::other(format!("copal GET {url} body: {e}")))
 }
 
 /// Apply `credential` to a request: the tenant header (copal header auth mode)

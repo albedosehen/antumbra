@@ -100,6 +100,7 @@ async fn state_bounded(
         auto_propose: None,
         recipe: antumbra_core::behavior::Recipe::default(),
         tune_confidence: false,
+        behave_drift: "off".into(),
         serve: None,
         reranker: None,
         decider: None,

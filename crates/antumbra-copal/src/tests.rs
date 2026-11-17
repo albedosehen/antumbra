@@ -841,3 +841,222 @@ async fn a_transport_that_only_archives_refuses_to_read() -> anyhow::Result<()> 
     );
     Ok(())
 }
+
+/// Bytes standing for an adapter, and the sha256 its seal would carry.
+const WEIGHTS: &[u8] = b"the admitted weights";
+
+fn weights_sha256() -> String {
+    content_digest(WEIGHTS)
+}
+
+/// An archive that answers a create with a fresh record and an upload with
+/// the digest `holds`.
+fn archive_that_holds(holds: &str) -> (CopalArchive, Arc<FakeTransport>) {
+    let t = Arc::new(FakeTransport {
+        create: Ok(json!({ "id": "01k6f2x9q3w8e5r7t1y4z6a8b0", "state": "draft" })),
+        upload: Ok(json!({ "digest": holds, "state": "ready" })),
+        calls: Mutex::new(Vec::new()),
+    });
+    (archive("127.0.0.1:9010", t.clone()), t)
+}
+
+#[tokio::test]
+async fn an_adapter_is_archived_private_as_bytes_under_its_own_name() -> anyhow::Result<()> {
+    let sha256 = weights_sha256();
+    let (archive, t) = archive_that_holds(&sha256);
+    let expert = antumbra_core::ExpertId::new("expert:ws:one:user:a:behavior:everywhere");
+
+    let stored = archive
+        .put_adapter("ws:one", &expert, &sha256, WEIGHTS.to_vec())
+        .await?;
+
+    assert_eq!(stored.file_id, "01k6f2x9q3w8e5r7t1y4z6a8b0");
+    assert_eq!(stored.digest, sha256);
+    let calls = t.calls();
+    let [Call::Post { url, body, .. }, Call::Put {
+        url: put_url,
+        content_type,
+        digest,
+        body: sent,
+        ..
+    }] = calls.as_slice()
+    else {
+        bail!("expected a create then an upload, got {calls:?}");
+    };
+    assert_eq!(url, "http://127.0.0.1:9010/v1/files");
+    assert_eq!(
+        body["path"],
+        format!("adapters/expert_ws_one_user_a_behavior_everywhere.{sha256}.safetensors")
+    );
+    assert_eq!(body["content_type"], "application/octet-stream");
+    assert_eq!(body["access"], "private");
+    assert_eq!(body["metadata"]["expert"], expert.as_str());
+    assert_eq!(body["metadata"]["sha256"], sha256);
+    assert_eq!(body["metadata"]["bytes"], WEIGHTS.len());
+    assert_eq!(
+        put_url,
+        "http://127.0.0.1:9010/v1/files/01k6f2x9q3w8e5r7t1y4z6a8b0/content"
+    );
+    assert_eq!(content_type, "application/octet-stream");
+    assert_eq!(
+        digest, &sha256,
+        "the seal's sha256 is the digest copal checks"
+    );
+    assert_eq!(sent, WEIGHTS);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_adapter_is_one_file_per_workspace_expert_and_sha256() -> anyhow::Result<()> {
+    let sha256 = weights_sha256();
+    let key = |workspace: &'static str, expert: &'static str| {
+        let sha256 = sha256.clone();
+        async move {
+            let (archive, t) = archive_that_holds(&sha256);
+            archive
+                .put_adapter(
+                    workspace,
+                    &antumbra_core::ExpertId::new(expert),
+                    &sha256,
+                    WEIGHTS.to_vec(),
+                )
+                .await?;
+            match t.calls().first() {
+                Some(Call::Post { body, .. }) => Ok(body["idempotency_key"].to_string()),
+                other => bail!("expected a create first, got {other:?}"),
+            }
+        }
+    };
+    let one = key("ws:one", "expert:a").await?;
+    assert_eq!(
+        one,
+        key("ws:one", "expert:a").await?,
+        "a retry replays the file"
+    );
+    assert_ne!(one, key("ws:two", "expert:a").await?);
+    assert_ne!(one, key("ws:one", "expert:b").await?);
+    assert!(one.contains("antumbra-adapter-"), "{one}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_adapter_copal_already_holds_is_not_uploaded_again() -> anyhow::Result<()> {
+    let sha256 = weights_sha256();
+    // The create replays a record that already holds exactly these bytes.
+    let t = Arc::new(FakeTransport {
+        create: Ok(
+            json!({ "id": "01k6f2x9q3w8e5r7t1y4z6a8b0", "digest": sha256, "state": "ready" }),
+        ),
+        upload: Err("an adapter already archived was uploaded again".into()),
+        calls: Mutex::new(Vec::new()),
+    });
+
+    let stored = archive("127.0.0.1:9010", t.clone())
+        .put_adapter(
+            "ws:one",
+            &antumbra_core::ExpertId::new("expert:a"),
+            &sha256,
+            WEIGHTS.to_vec(),
+        )
+        .await?;
+
+    assert_eq!(stored.digest, sha256);
+    assert_eq!(t.calls().len(), 1, "the create alone");
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_archive_that_is_not_the_adapter_is_refused() -> anyhow::Result<()> {
+    let sha256 = weights_sha256();
+    let expert = antumbra_core::ExpertId::new("expert:a");
+
+    // Bytes that are not the sha256 named: nothing is sent.
+    let (archive, t) = archive_that_holds(&sha256);
+    let Err(refused) = archive
+        .put_adapter("ws:one", &expert, &sha256, b"other weights".to_vec())
+        .await
+    else {
+        bail!("bytes that are not the seal's sha256 were archived");
+    };
+    assert!(
+        refused.to_string().contains("nothing was archived"),
+        "{refused}"
+    );
+    assert!(t.calls().is_empty(), "refused before any call");
+
+    // Copal answering with another digest for what it holds.
+    let (archive, _) = archive_that_holds(&content_digest(b"other weights"));
+    let Err(refused) = archive
+        .put_adapter("ws:one", &expert, &sha256, WEIGHTS.to_vec())
+        .await
+    else {
+        bail!("an archive holding other bytes was accepted");
+    };
+    assert!(
+        refused.to_string().contains("whose seal names"),
+        "{refused}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_adapter_is_read_back_within_the_limit_its_caller_gives() -> anyhow::Result<()> {
+    let t = Arc::new(ReadingTransport {
+        content: WEIGHTS.to_vec(),
+        reads: Mutex::new(Vec::new()),
+    });
+    let archive = CopalArchive::with_transport(
+        "127.0.0.1:9010",
+        CopalTenancy::Shared("antumbra".into()),
+        t.clone(),
+    );
+
+    let bytes = archive
+        .read_adapter("ws:one", "01k6f2x9q3w8e5r7t1y4z6a8b0", 37_000_001)
+        .await?;
+
+    assert_eq!(bytes, WEIGHTS);
+    assert_eq!(
+        t.reads(),
+        [(
+            "http://127.0.0.1:9010/v1/files/01k6f2x9q3w8e5r7t1y4z6a8b0/content".to_string(),
+            tenant("antumbra"),
+            37_000_001,
+        )],
+        "past the 16 MiB a page is held to, and no further than asked"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn what_is_not_a_file_id_is_never_put_in_a_url() -> anyhow::Result<()> {
+    let t = Arc::new(ReadingTransport {
+        content: WEIGHTS.to_vec(),
+        reads: Mutex::new(Vec::new()),
+    });
+    let archive = CopalArchive::with_transport(
+        "127.0.0.1:9010",
+        CopalTenancy::Shared("antumbra".into()),
+        t.clone(),
+    );
+
+    let too_long = "a".repeat(65);
+    for not_an_id in [
+        "",
+        "../other",
+        "id/content",
+        "id?x=1",
+        "id with space",
+        &too_long,
+    ] {
+        let Err(refused) = archive.read_adapter("ws:one", not_an_id, 1).await else {
+            bail!("{not_an_id:?} was read as a file id");
+        };
+        assert!(
+            refused.to_string().contains("not a copal file id"),
+            "{refused}"
+        );
+    }
+    assert!(t.reads().is_empty(), "refused before any call");
+    Ok(())
+}

@@ -1,4 +1,5 @@
-//! Pulling an adapter this server does not hold from the server that does.
+//! Getting an adapter this server does not hold, and keeping a second copy
+//! of the ones it trains.
 //!
 //! An expert's row reaches every server on its database; its weights stay on
 //! the machine that trained it. A server told where that machine's Antumbra
@@ -6,14 +7,22 @@
 //! expert, checks it against the sha256 on the expert's card, keeps it under
 //! its own adapter directory and serves it from then on without the source.
 //!
-//! The store is the authority on what the expert is. The source is trusted
-//! for availability only: whatever it answers is kept only if it is the
-//! bytes the row names.
+//! A server that keeps a copal archive has a second place to look: the
+//! training server archives each adapter it admits ([`archive_adapter`]),
+//! and a server whose source does not answer, or that has none, reads the
+//! adapter back from there. The server that trained an expert restores its
+//! own file the same way when it is gone.
+//!
+//! The store is the authority on what the expert is. The source and the
+//! archive are trusted for availability only: whatever either answers is
+//! kept only if it is the bytes the row names.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use antumbra_copal::CopalArchive;
 use antumbra_core::adapter::{self, Seal};
 use antumbra_core::ports::Serve;
 use antumbra_core::{Expert, ExpertId, TenantId, UserId};
@@ -38,13 +47,22 @@ const RETRY_AFTER: Duration = Duration::from_secs(30);
 /// The route an adapter is pulled from, on the server that holds it.
 pub(crate) const ADAPTER_PATH: &str = "/expert/adapter";
 
-/// The server adapters are pulled from, and what this one keeps of them.
-pub struct ExpertSource {
+/// The server adapters are pulled from, and the secret a pull is signed with.
+struct Remote {
     /// The source's address, without a trailing slash.
     url: String,
     /// The HS256 secret both servers verify with: a pull is signed with it,
     /// for the user being answered.
     secret: Vec<u8>,
+}
+
+/// Where this server gets the adapters it does not hold, and what it keeps
+/// of them: the server that trains them, a copal archive, or both.
+pub struct ExpertSource {
+    /// `None` for a server with an archive and no source.
+    remote: Option<Remote>,
+    /// The archive adapters are read back from, when this server keeps one.
+    archive: Option<Arc<CopalArchive>>,
     /// This server's adapter directory.
     dir: String,
     /// One pull at a time: two requests for one expert are one download.
@@ -56,16 +74,37 @@ pub struct ExpertSource {
 }
 
 impl ExpertSource {
-    /// Pull from the Antumbra at `url`, signing with `secret`, into `dir`.
-    pub fn new(url: &str, secret: &[u8], dir: &str) -> Self {
+    fn over(remote: Option<Remote>, archive: Option<Arc<CopalArchive>>, dir: &str) -> Self {
         Self {
-            url: url.trim_end_matches('/').to_string(),
-            secret: secret.to_vec(),
+            remote,
+            archive,
             dir: dir.to_string(),
             pulling: tokio::sync::Mutex::new(()),
             held: std::sync::Mutex::new(HashMap::new()),
             failed: std::sync::Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Pull from the Antumbra at `url`, signing with `secret`, into `dir`.
+    pub fn new(url: &str, secret: &[u8], dir: &str) -> Self {
+        let remote = Remote {
+            url: url.trim_end_matches('/').to_string(),
+            secret: secret.to_vec(),
+        };
+        Self::over(Some(remote), None, dir)
+    }
+
+    /// Read adapters back from `archive` alone, into `dir`: a server with no
+    /// source to pull from.
+    pub fn archive_only(archive: Arc<CopalArchive>, dir: &str) -> Self {
+        Self::over(None, Some(archive), dir)
+    }
+
+    /// Fall back to `archive` when the source does not give an adapter.
+    #[must_use]
+    pub fn with_archive(mut self, archive: Arc<CopalArchive>) -> Self {
+        self.archive = Some(archive);
+        self
     }
 
     /// Whether `expert` is registered under `path` already.
@@ -87,18 +126,32 @@ impl ExpertSource {
             .is_some_and(|at| at.elapsed() < RETRY_AFTER)
     }
 
+    /// Note how a pull of `expert` went, for [`Self::failed_lately`].
+    fn note<T>(&self, expert: &ExpertId, got: &anyhow::Result<T>) {
+        let mut failed = self
+            .failed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match got {
+            Ok(_) => failed.remove(expert),
+            Err(_) => failed.insert(expert.clone(), Instant::now()),
+        };
+    }
+
     /// Make `expert`, placed on another machine, servable here: registered
     /// with `serve` under a file that is the adapter its row names now.
     /// Whether it is.
     ///
     /// `false` is an expert with no seal on its card, which nothing pulled
-    /// could be checked against. A file already here under the name the row
-    /// determines is checked and registered without asking the source. An
-    /// expert retrained since it was pulled has another sha256 on its row:
-    /// that adapter is pulled, and the copy before it removed once the new
-    /// one is registered. A pull that fails is an error once, and `false`
-    /// without another attempt for [`RETRY_AFTER`]; what was registered
-    /// before it stays registered.
+    /// could be checked against, and one there is nowhere to get: no source,
+    /// and no copy in an archive this server keeps. A file already here
+    /// under the name the row determines is checked and registered without
+    /// asking anyone. Otherwise the source is asked, and then the archive
+    /// when the source does not give it. An expert retrained since it was
+    /// pulled has another sha256 on its row: that adapter is pulled, and the
+    /// copy before it removed once the new one is registered. A pull that
+    /// fails is an error once, and `false` without another attempt for
+    /// [`RETRY_AFTER`]; what was registered before it stays registered.
     pub async fn hold(
         &self,
         serve: &dyn Serve,
@@ -125,28 +178,11 @@ impl ExpertSource {
         if self.holds(&expert.id, &path) {
             return Ok(true);
         }
-        let token =
-            crate::auth::mint_hs256(&self.secret, tenant.as_str(), user.as_str(), TOKEN_TTL)?;
-        let (url, id, want, to) = (
-            self.url.clone(),
-            expert.id.clone(),
-            seal.clone(),
-            path.clone(),
-        );
-        // A download and a hash: off the runtime's workers.
-        let pulled =
-            tokio::task::spawn_blocking(move || fetch(&url, &token, &id, &want, Path::new(&to)))
-                .await?;
-        let mut failed = self
-            .failed
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Err(e) = pulled {
-            failed.insert(expert.id.clone(), Instant::now());
-            return Err(e);
+        let had = self.have(expert, &seal, &path, tenant, user).await;
+        self.note(&expert.id, &had);
+        if !had? {
+            return Ok(false);
         }
-        failed.remove(&expert.id);
-        drop(failed);
         serve.register_expert(&expert.id, &path);
         self.held
             .lock()
@@ -164,14 +200,132 @@ impl ExpertSource {
         }
         Ok(true)
     }
+
+    /// Have the adapter `seal` describes at `path`: the file already there
+    /// when it is that adapter, else what the source or the archive gives.
+    /// `false` when it is not there and there is nowhere to get it.
+    async fn have(
+        &self,
+        expert: &Expert,
+        seal: &Seal,
+        path: &str,
+        tenant: &TenantId,
+        user: &UserId,
+    ) -> anyhow::Result<bool> {
+        let (to, want) = (PathBuf::from(path), seal.clone());
+        // A hash and a download: off the runtime's workers.
+        if tokio::task::spawn_blocking(move || present(&to, &want)).await?? {
+            return Ok(true);
+        }
+        let Some(bytes) = self.obtain(expert, seal, tenant, user).await? else {
+            return Ok(false);
+        };
+        let to = PathBuf::from(path);
+        tokio::task::spawn_blocking(move || keep(&bytes, &to)).await??;
+        Ok(true)
+    }
+
+    /// The adapter's bytes, checked against `seal`: the source's when there
+    /// is one and it gives them, else the archive's when the expert's card
+    /// names a copy there. `None` when neither is there to ask.
+    async fn obtain(
+        &self,
+        expert: &Expert,
+        seal: &Seal,
+        tenant: &TenantId,
+        user: &UserId,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        let archived = self
+            .archive
+            .as_ref()
+            .zip(adapter::archived_in(&expert.capability_card));
+        let mut refused = Vec::new();
+        if let Some(remote) = &self.remote {
+            let token =
+                crate::auth::mint_hs256(&remote.secret, tenant.as_str(), user.as_str(), TOKEN_TTL)?;
+            let (url, id, want) = (remote.url.clone(), expert.id.clone(), seal.clone());
+            match tokio::task::spawn_blocking(move || pull(&url, &token, &id, &want)).await? {
+                Ok(bytes) => return Ok(Some(bytes)),
+                Err(e) => refused.push(format!("{e:#}")),
+            }
+        }
+        if let Some((archive, file)) = archived {
+            match from_archive(archive, tenant, file, seal).await {
+                Ok(bytes) => return Ok(Some(bytes)),
+                Err(e) => refused.push(format!("{e:#}")),
+            }
+        }
+        if refused.is_empty() {
+            return Ok(None);
+        }
+        Err(anyhow::anyhow!(refused.join("; ")))
+    }
+
+    /// Restore the adapter of an expert placed on this machine, when the file
+    /// its row names is gone and the archive holds a copy. Whether it was.
+    ///
+    /// The file is written only at the name the expert's id and sha256
+    /// determine, as the row of an expert admitted here names it; a row that
+    /// names anything else is left alone.
+    pub async fn restore(
+        &self,
+        serve: &dyn Serve,
+        expert: &Expert,
+        tenant: &TenantId,
+    ) -> anyhow::Result<bool> {
+        let Some(archive) = &self.archive else {
+            return Ok(false);
+        };
+        let path = PathBuf::from(&expert.artifact_uri);
+        if path.exists() {
+            return Ok(false);
+        }
+        let card = &expert.capability_card;
+        let (Some(seal), Some(file)) = (Seal::of_card(card), adapter::archived_in(card)) else {
+            return Ok(false);
+        };
+        let named = path.file_name().and_then(|name| name.to_str())
+            == Some(adapter::file_name(&expert.id, &seal.sha256).as_str());
+        if !named || self.failed_lately(&expert.id) {
+            return Ok(false);
+        }
+        let _one = self.pulling.lock().await;
+        // Restored by the request that held the lock before this one.
+        if path.exists() {
+            return Ok(true);
+        }
+        let got = from_archive(archive, tenant, file, &seal).await;
+        self.note(&expert.id, &got);
+        let bytes = got?;
+        tokio::task::spawn_blocking(move || keep(&bytes, &path)).await??;
+        serve.register_expert(&expert.id, &expert.artifact_uri);
+        Ok(true)
+    }
 }
 
-/// Have the adapter `want` describes at `to`: the file already there when it
-/// is that adapter, else the source's answer when that is.
-fn fetch(url: &str, token: &str, expert: &ExpertId, want: &Seal, to: &Path) -> anyhow::Result<()> {
-    if to.exists() && Seal::of_file(to)? == *want {
-        return Ok(());
+/// Whether the file at `to` is already the adapter `want` describes.
+fn present(to: &Path, want: &Seal) -> anyhow::Result<bool> {
+    Ok(to.exists() && Seal::of_file(to)? == *want)
+}
+
+/// `bytes` as the adapter `want` describes, or what `whose` answer was instead.
+fn checked(bytes: Vec<u8>, want: &Seal, whose: &str) -> anyhow::Result<Vec<u8>> {
+    let got = Seal::of_bytes(&bytes);
+    if got != *want {
+        anyhow::bail!(
+            "{whose} answered {} bytes with sha256 {}, and the expert's row names {} bytes with \
+             sha256 {}; nothing was kept",
+            got.bytes,
+            got.sha256,
+            want.bytes,
+            want.sha256
+        );
     }
+    Ok(bytes)
+}
+
+/// The source's answer for `expert`, when it is the adapter `want` describes.
+fn pull(url: &str, token: &str, expert: &ExpertId, want: &Seal) -> anyhow::Result<Vec<u8>> {
     // As `antumbra_http::agent`, with a bound on connecting: a refusal's status
     // is read here, not turned into an error.
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -197,42 +351,91 @@ fn fetch(url: &str, token: &str, expert: &ExpertId, want: &Seal, to: &Path) -> a
         .limit(want.bytes.saturating_add(1))
         .read_to_vec()
         .map_err(|e| anyhow::anyhow!("the expert source's answer could not be read: {e}"))?;
-    let got = Seal::of_bytes(&bytes);
-    if got != *want {
-        anyhow::bail!(
-            "the expert source answered {} bytes with sha256 {}, and the expert's row names {} \
-             bytes with sha256 {}; nothing was kept",
-            got.bytes,
-            got.sha256,
-            want.bytes,
-            want.sha256
-        );
-    }
+    checked(bytes, want, "the expert source")
+}
+
+/// The archive's copy at `file`, when it is the adapter `want` describes.
+async fn from_archive(
+    archive: &CopalArchive,
+    tenant: &TenantId,
+    file: &str,
+    want: &Seal,
+) -> anyhow::Result<Vec<u8>> {
+    // One byte past the size on the row is already not the adapter.
+    let bytes = archive
+        .read_adapter(tenant.as_str(), file, want.bytes.saturating_add(1))
+        .await
+        .map_err(|e| anyhow::anyhow!("the archive did not give the adapter: {e}"))?;
+    checked(bytes, want, "the archive")
+}
+
+/// Write `bytes` at `to`: beside its name first and then moved onto it, so a
+/// file under the name is always a whole adapter.
+fn keep(bytes: &[u8], to: &Path) -> anyhow::Result<()> {
     if let Some(dir) = to.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    // Written beside its name and moved onto it, so a file under the name is
-    // always a whole adapter.
     let partial = to.with_extension("part");
-    std::fs::write(&partial, &bytes)?;
+    std::fs::write(&partial, bytes)?;
     std::fs::rename(&partial, to)?;
     Ok(())
 }
 
+/// Archive the adapter at `adapter_uri`, which a training has just had
+/// admitted with `seal`: the copal file it is now in.
+///
+/// `None` when the upload fails, which is said and costs the expert nothing:
+/// the archive is a second copy, and the expert is minted and served without
+/// it.
+// Called by the keeper, which is built only with the model features.
+#[cfg_attr(not(feature = "models"), allow(dead_code))]
+pub(crate) async fn archive_adapter(
+    archive: &CopalArchive,
+    tenant: &TenantId,
+    expert: &ExpertId,
+    seal: &Seal,
+    adapter_uri: &str,
+) -> Option<String> {
+    let path = PathBuf::from(adapter_uri);
+    let archived = async {
+        let bytes = tokio::task::spawn_blocking(move || std::fs::read(&path)).await??;
+        let stored = archive
+            .put_adapter(tenant.as_str(), expert, &seal.sha256, bytes)
+            .await?;
+        anyhow::Ok(stored.file_id)
+    }
+    .await;
+    match archived {
+        Ok(file) => Some(file),
+        Err(e) => {
+            eprintln!(
+                "antumbra-mcp: the adapter of {} was not archived, and is served without a \
+                 second copy: {e:#}",
+                expert.as_str()
+            );
+            None
+        }
+    }
+}
+
 impl McpServer {
-    /// Pull `expert`'s adapter when it is placed on another machine and this
-    /// server has a source to pull from. Without a source, or when the pull
-    /// fails, the expert stays one this server cannot serve, as it was.
+    /// Bring `expert`'s adapter here when this server has somewhere to get
+    /// it: pulled when the expert is placed on another machine, restored
+    /// from the archive when it is this machine's own and its file is gone.
+    /// With nowhere to get it, or when that fails, the expert stays one this
+    /// server cannot serve, as it was.
     pub(super) async fn hold(&self, serve: &dyn Serve, expert: &Expert) {
         let Some(source) = &self.source else {
             return;
         };
-        if expert.is_placed_on(&self.host) {
-            return;
-        }
-        if let Err(e) = source.hold(serve, expert, &self.tenant, &self.user).await {
+        let brought = if expert.is_placed_on(&self.host) {
+            source.restore(serve, expert, &self.tenant).await
+        } else {
+            source.hold(serve, expert, &self.tenant, &self.user).await
+        };
+        if let Err(e) = brought {
             eprintln!(
-                "antumbra-mcp: {} was not pulled from the expert source: {e:#}",
+                "antumbra-mcp: the adapter of {} was not brought here: {e:#}",
                 expert.id.as_str()
             );
         }

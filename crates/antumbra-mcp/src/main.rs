@@ -139,6 +139,15 @@ struct Cli {
     /// the recipe's value stands and the audits are only noted.
     #[arg(long, env = "ANTUMBRA_BEHAVE_TUNE_CONFIDENCE")]
     behave_tune_confidence: bool,
+    /// Which quantized forms of the base an expert is measured on when it is
+    /// admitted: `auto` (Q8_0, the form a server with no GPU serves by
+    /// default), `off`, `q8_0`, `q4_k`, or `q8_0,q4_k`. An expert is trained
+    /// over the dense base and may be served over a quantized one; the
+    /// measurement reads its held-out examples through both and records the
+    /// difference on its card. It costs one more load of the base per form,
+    /// per admitted training, and nothing is refused on it.
+    #[arg(long, env = "ANTUMBRA_BEHAVE_DRIFT", default_value = "auto")]
+    behave_drift: String,
     /// How the base model is held to serve experts: `auto`, `off`, `q8_0` or
     /// `q4_k`. `auto` serves from a Q8_0 base on a build with no GPU backend,
     /// where the dense base is too slow to answer with, and from the dense
@@ -504,27 +513,40 @@ pub(crate) async fn build_serve(
     Ok(None)
 }
 
-/// Where this server pulls the adapters it does not hold, when it was told
-/// where (`--expert-source`) and can sign for them. A pull is signed with the
-/// HS256 secret, so a server verifying with a public key, which takes
-/// precedence, has nothing to sign with: it says so and pulls nothing.
+/// Where this server gets the adapters it does not hold: the server it was
+/// told trains them (`--expert-source`), when it can sign for them; the
+/// copal archive it keeps, which that server archives them in; or both, the
+/// archive asked when the source does not answer. `None` with neither.
+///
+/// A pull from the source is signed with the HS256 secret, so a server
+/// verifying with a public key, which takes precedence, has nothing to sign
+/// with: it says so and pulls from no source.
 fn expert_source(
     url: Option<&str>,
     secret: Option<&str>,
     verifies_with_a_public_key: bool,
+    archive: Option<Arc<antumbra_copal::CopalArchive>>,
 ) -> Option<Arc<server::pull::ExpertSource>> {
-    let url = url.map(str::trim).filter(|u| !u.is_empty())?;
-    match secret {
-        Some(secret) if !verifies_with_a_public_key => Some(Arc::new(
-            server::pull::ExpertSource::new(url, secret.as_bytes(), antumbra_core::adapter::DIR),
-        )),
-        _ => {
+    use server::pull::ExpertSource;
+    let dir = antumbra_core::adapter::DIR;
+    let source = match (url.map(str::trim).filter(|u| !u.is_empty()), secret) {
+        (Some(url), Some(secret)) if !verifies_with_a_public_key => {
+            Some(ExpertSource::new(url, secret.as_bytes(), dir))
+        }
+        (Some(_), _) => {
             eprintln!(
                 "antumbra-mcp: --expert-source is not in effect: a pull is signed with the HS256 \
                  secret (--jwt-secret), and this server verifies with a public key or has none"
             );
             None
         }
+        (None, _) => None,
+    };
+    match (source, archive) {
+        (Some(source), Some(archive)) => Some(Arc::new(source.with_archive(archive))),
+        (Some(source), None) => Some(Arc::new(source)),
+        (None, Some(archive)) => Some(Arc::new(ExpertSource::archive_only(archive, dir))),
+        (None, None) => None,
     }
 }
 
@@ -814,10 +836,15 @@ async fn run() -> Result<()> {
     if let Some(addr) = cli.http {
         // Networked multi-tenant surface: identity per request from a verified JWT.
         let verifier = build_verifier(&jwt_secret, &cli.jwt_public_key, &cli.jwt_audience)?;
+        // Said at start, not at the first training an hour in.
+        #[cfg(feature = "models")]
+        antumbra_serve::ServeQuant::drift_from_setting(&cli.behave_drift)
+            .map_err(|e| anyhow::anyhow!("--behave-drift: {e}"))?;
         let source = expert_source(
             cli.expert_source.as_deref(),
             jwt_secret.as_deref(),
             cli.jwt_public_key.is_some(),
+            copal.clone(),
         );
         return http::serve(
             addr,
@@ -836,6 +863,7 @@ async fn run() -> Result<()> {
             github,
             recipe,
             cli.behave_tune_confidence,
+            cli.behave_drift,
             source,
             &cli.serve_quant,
         )
