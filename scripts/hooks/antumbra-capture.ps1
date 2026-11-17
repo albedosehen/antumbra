@@ -30,9 +30,12 @@ $safeSession = [string]$sessionId -replace '[^A-Za-z0-9_-]', ''
 if (-not $safeSession) { $safeSession = 'default' }
 $safeEvent = [string]$event -replace '[^A-Za-z0-9_-]', ''
 if (-not $safeEvent) { $safeEvent = 'Stop' }
+# One Join-Path inside another: Windows PowerShell 5.1 has no form that takes
+# three parts, and with it the directory came out empty, no sentinel could be
+# written, and every stop was nudged.
 $runDir = if ($env:XDG_RUNTIME_DIR) { $env:XDG_RUNTIME_DIR }
-          elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'antumbra' 'run' }
-          else { Join-Path $HOME '.antumbra' 'run' }
+          elseif ($env:LOCALAPPDATA) { Join-Path (Join-Path $env:LOCALAPPDATA 'antumbra') 'run' }
+          else { Join-Path (Join-Path $HOME '.antumbra') 'run' }
 New-Item -ItemType Directory -Path $runDir -Force | Out-Null
 $sentinel = Join-Path $runDir "antumbra-capture-$safeEvent-$safeSession"
 if (Test-Path $sentinel) { Remove-Item $sentinel -Force; exit 0 }

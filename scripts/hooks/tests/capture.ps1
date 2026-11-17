@@ -121,6 +121,21 @@ foreach ($script:runner in $runners) {
     Check 'is always nudged' (($out | ConvertFrom-Json).decision -eq 'block')
     Remove-Item (Join-Path $run "antumbra-capture-PreCompact-$session") -ErrorAction SilentlyContinue
 
+    Write-Output 'with no runtime directory named'
+    # As a Windows session runs it: the state goes under the user's local data.
+    $local = Join-Path $work "local-$script:runner"
+    $kept = @{ xdg = $env:XDG_RUNTIME_DIR; local = $env:LOCALAPPDATA }
+    Remove-Item Env:XDG_RUNTIME_DIR
+    $env:LOCALAPPDATA = $local
+    $out = Invoke-Hook @{ session_id = "$session-w"; hook_event_name = 'Stop' }
+    Check 'still nudges' (($out | ConvertFrom-Json).decision -eq 'block')
+    $own = Join-Path (Join-Path $local 'antumbra') 'run'
+    Check 'and keeps its sentinel under the local data directory' (Test-Path (Join-Path $own "antumbra-capture-Stop-$session-w"))
+    $out = Invoke-Hook @{ session_id = "$session-w"; hook_event_name = 'Stop' }
+    Check 'so the stop after it goes through' ($out -eq '')
+    $env:XDG_RUNTIME_DIR = $kept.xdg
+    $env:LOCALAPPDATA = $kept.local
+
     Write-Output 'a hostile session id'
     Get-ChildItem $run -Filter 'antumbra-capture-*' | Remove-Item -Force
     $out = Invoke-Hook @{ session_id = '../../x y'; hook_event_name = 'Stop/../z'; last_assistant_message = 'x' }
