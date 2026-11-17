@@ -10,6 +10,7 @@ const DEVICE: &TableSpec = &TableSpec {
     name: "device_profile",
     version_field: "updated_at",
     replicate: Replicate::Owned(|scope: &Scope, row| scope.is_own_user(row)),
+    carried: None,
 };
 
 fn tenant() -> TenantId {

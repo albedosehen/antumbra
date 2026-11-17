@@ -10,6 +10,7 @@ const MEMORY: &TableSpec = &TableSpec {
     name: "memory",
     version_field: "updated_at",
     replicate: Replicate::Owned(|scope: &Scope, row| scope.holds_memory(row)),
+    carried: None,
 };
 
 fn mem(id: &str, tenant: &TenantId, content: &str, at: DateTime<Utc>) -> Memory {
@@ -150,6 +151,7 @@ async fn a_revoke_propagates_and_cannot_be_out_voted_by_a_stale_grant() -> Resul
         name: "grant",
         version_field: "updated_at",
         replicate: Replicate::Owned(|scope: &Scope, row| scope.grants_own_compartment(row)),
+        carried: None,
     };
     let (local, remote) = (mem_store().await?, mem_store().await?);
     let tenant = TenantId::new("t");
@@ -347,6 +349,7 @@ async fn a_compartment_deletion_propagates_and_does_not_resurrect() -> Result<()
         name: "compartment",
         version_field: "updated_at",
         replicate: Replicate::Owned(|scope: &Scope, row| scope.owns_compartment(row)),
+        carried: None,
     };
     let (local, remote) = (mem_store().await?, mem_store().await?);
     let tenant = TenantId::new("t");

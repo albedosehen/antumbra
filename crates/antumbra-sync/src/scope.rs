@@ -7,11 +7,17 @@
 //! is a live read, not a license to take another member's private compartment
 //! home on a laptop.
 //!
-//! The narrower policy is also the implementable one: on five of the six
-//! replicated tables the engine's write rule is narrower than its read rule, so
-//! a collector that replicated everything it could read would have its writes
+//! The narrower policy is also the implementable one: on most of the replicated
+//! tables the engine's write rule is narrower than its read rule, so a
+//! collector that replicated everything it could read would have its writes
 //! refused silently. Own-plus-shared-pool is exactly what the session can write
 //! back, which is what makes read scope and write scope the same set.
+//!
+//! `expert` is the table where they are not the same set. A user's session
+//! reads their own experts and writes none: only an owner connection writes
+//! the population. The policy still names what belongs to a user's fabric,
+//! their standing experts, and a pass signed in as that user has each one
+//! refused and says so.
 
 use std::collections::HashSet;
 
@@ -80,6 +86,14 @@ impl Scope {
             None => true,
             Some(c) => self.owned.contains(c),
         }
+    }
+
+    /// An expert trained from one of this user's compartments, which is what
+    /// a standing expert is. A shared expert names no compartment and belongs
+    /// to no one user's fabric, so unlike a pooled memory it is not carried:
+    /// the shared population is the owner's to move.
+    pub fn holds_expert(&self, row: &Value) -> bool {
+        Self::compartment_of(row).is_some_and(|c| self.owned.contains(c))
     }
 }
 
@@ -164,6 +178,13 @@ mod tests {
         // The fabric tables are keyed on the user directly.
         assert!(scope.is_own_user(&json!({ "user": "user:lily" })));
         assert!(!scope.is_own_user(&json!({ "user": "user:oslo" })));
+
+        // An expert follows the compartment it was trained from. One with
+        // none is the shared population, which is not a user's to carry.
+        assert!(scope.holds_expert(&json!({ "compartment": "comp:hers" })));
+        assert!(!scope.holds_expert(&json!({ "compartment": "comp:his" })));
+        assert!(!scope.holds_expert(&json!({ "key": "expert:shared" })));
+        assert!(!scope.holds_expert(&json!({ "compartment": null })));
         Ok(())
     }
 

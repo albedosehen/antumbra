@@ -311,8 +311,10 @@ pub enum Command {
     /// global `--url`, an embedded penumbra) with a remote authoritative
     /// SurrealDB, last-write-wins by each row's version timestamp. Runs on a
     /// cadence until ctrl-c, or `--once` for a single pass. Replicates the
-    /// penumbra tables (memory, edges, compartments, grants) across the fleet;
-    /// experts/adapters (on-disk safetensors) are out of scope.
+    /// penumbra tables (memory, edges, compartments, grants, devices, genesis
+    /// requests) and each expert's row across the fleet. An expert's adapter
+    /// is a file and is not carried: a server pulls it for itself, from the
+    /// server that trained the expert or from the archive.
     Sync {
         /// Remote authoritative SurrealDB url, e.g. `ws://host:8000/rpc`.
         #[arg(long)]
