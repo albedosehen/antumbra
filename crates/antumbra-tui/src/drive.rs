@@ -5,7 +5,7 @@
 //! a test presses keys against the demo's store and reads what the console
 //! did.
 
-use crate::app::{App, Mode};
+use crate::app::{App, Mode, Page};
 use crate::backend::Backend;
 use crate::command::Action;
 use crate::keys::{self, Key};
@@ -72,6 +72,9 @@ pub(crate) async fn apply(
             app.show(target);
             *transition = Some(transition::focus_switch());
         }
+        // The next list: the next kind on the Memory page, else the next of
+        // the population's three.
+        Action::FocusNext if app.page == Page::Memory => app.next_memory_kind(),
         Action::FocusNext => {
             app.toggle_focus();
             *transition = Some(transition::focus_switch());
@@ -81,6 +84,12 @@ pub(crate) async fn apply(
         Action::Layout(mode) => {
             app.set_layout(mode);
             app.note(Tone::Open, format!("layout · {}", app.layout.name()));
+            *transition = Some(transition::layout_switch());
+        }
+        Action::LayoutNext if app.page == Page::Memory => {
+            app.toggle_memory_graph();
+            let shown = if app.memory_graph { "graph" } else { "list" };
+            app.note(Tone::Open, format!("memory · {shown}"));
             *transition = Some(transition::layout_switch());
         }
         Action::LayoutNext => {

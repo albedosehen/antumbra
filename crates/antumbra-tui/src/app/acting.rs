@@ -145,11 +145,11 @@ impl App {
     pub fn show(&mut self, focus: Focus) {
         self.page = Page::Population;
         let drawn = match self.layout {
-            LayoutMode::Focused | LayoutMode::Dashboard => true,
+            LayoutMode::List | LayoutMode::Dashboard => true,
             LayoutMode::Graph | LayoutMode::Table => focus == Focus::Experts,
         };
         if !drawn {
-            self.layout = LayoutMode::Focused;
+            self.layout = LayoutMode::List;
         }
         self.focus = focus;
     }

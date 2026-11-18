@@ -215,12 +215,24 @@ pub fn page_bindings(app: &App) -> Vec<Binding> {
         ));
     }
     // Tab moves the keys to the next list, where that list is drawn.
-    if population && matches!(app.layout, LayoutMode::Focused | LayoutMode::Dashboard) {
+    if population && matches!(app.layout, LayoutMode::List | LayoutMode::Dashboard) {
         b.push(bind(
             "tab",
             "",
             "next list",
             "move to the next list: experts, candidates, boundaries",
+            Group::Move,
+            Some(4),
+            &[(Tab, A::FocusNext)],
+        ));
+    }
+    // On the Memory page the lists are the kinds of memory.
+    if app.page == Page::Memory && !app.memory_graph {
+        b.push(bind(
+            "tab",
+            "",
+            "next kind",
+            "list the next kind: all, world, bank, opinion",
             Group::Move,
             Some(4),
             &[(Tab, A::FocusNext)],
@@ -279,7 +291,7 @@ pub fn page_bindings(app: &App) -> Vec<Binding> {
             "l",
             "L",
             "layout",
-            "change the layout: focused, dashboard, graph, table",
+            "change the layout: list, dashboard, graph, table",
             Group::View,
             Some(9),
             &[(Char('l'), A::LayoutNext), (Char('L'), A::LayoutNext)],
@@ -292,6 +304,17 @@ pub fn page_bindings(app: &App) -> Vec<Binding> {
             Group::View,
             None,
             &[(Char('s'), A::CycleSort)],
+        ));
+    }
+    if app.page == Page::Memory {
+        b.push(bind(
+            "l",
+            "L",
+            if app.memory_graph { "list" } else { "graph" },
+            "swap the list for the graph of the kinds and their links",
+            Group::View,
+            Some(9),
+            &[(Char('l'), A::LayoutNext), (Char('L'), A::LayoutNext)],
         ));
     }
     b.extend([

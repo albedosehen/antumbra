@@ -64,7 +64,7 @@ fn every_frame() -> anyhow::Result<Vec<(String, String)>> {
     for (kind, make) in kinds {
         for page in Page::ALL {
             for layout in [
-                LayoutMode::Focused,
+                LayoutMode::List,
                 LayoutMode::Dashboard,
                 LayoutMode::Graph,
                 LayoutMode::Table,

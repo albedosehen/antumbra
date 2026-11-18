@@ -38,7 +38,7 @@ fn plain_views(theme: &Theme) -> anyhow::Result<Vec<(String, Buffer)>> {
         ));
     }
     for layout in [
-        LayoutMode::Focused,
+        LayoutMode::List,
         LayoutMode::Dashboard,
         LayoutMode::Graph,
         LayoutMode::Table,

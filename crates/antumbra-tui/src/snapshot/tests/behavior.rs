@@ -16,10 +16,10 @@ fn headless_render_shows_the_console() -> anyhow::Result<()> {
         text.contains("Antumbra"),
         "header wordmark missing:\n{text}"
     );
-    assert!(text.contains("╭ Experts ─"), "graph panel title missing");
+    assert!(text.contains("Experts 1"), "the list's title is missing");
     assert!(
-        text.contains("arith-specialist"),
-        "expert name not rendered"
+        text.contains("▸ arith-specialist"),
+        "the expert is listed, and marked as selected"
     );
     assert!(text.contains("╭ Routing ─"), "routing panel title missing");
     assert!(text.contains("0.90"), "selected expert's fitness rendered");
@@ -511,7 +511,7 @@ fn theme_layout_focus_cycle_and_wrap() -> anyhow::Result<()> {
     app.cycle_theme();
     assert_eq!(app.theme().name, "night", "theme wraps");
 
-    assert_eq!(app.layout, LayoutMode::Focused);
+    assert_eq!(app.layout, LayoutMode::List);
     app.cycle_layout();
     assert_eq!(app.layout, LayoutMode::Dashboard);
     app.cycle_layout();
@@ -519,7 +519,7 @@ fn theme_layout_focus_cycle_and_wrap() -> anyhow::Result<()> {
     app.cycle_layout();
     assert_eq!(app.layout, LayoutMode::Table);
     app.cycle_layout();
-    assert_eq!(app.layout, LayoutMode::Focused, "layout wraps");
+    assert_eq!(app.layout, LayoutMode::List, "layout wraps");
 
     assert_eq!(app.focus, Focus::Experts);
     app.toggle_focus();
@@ -723,8 +723,8 @@ fn shadows_focus_shows_the_penumbra() -> anyhow::Result<()> {
     app.focus = Focus::Shadows;
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
-        text.contains("Candidates · 1"),
-        "shadows list title missing:\n{text}"
+        text.contains("Candidates 1"),
+        "candidates list title missing:\n{text}"
     );
     assert!(
         text.contains("╭ Candidate ─"),
@@ -773,7 +773,7 @@ fn a_standing_experts_training_reads_by_its_scope() -> anyhow::Result<()> {
     app.focus = Focus::Shadows;
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
-        text.contains("● code · 0.42 → 0.91"),
+        text.contains("▸ code") && text.contains("0.42 → 0.91 ● graduated"),
         "the list row names the scope and the change:\n{text}"
     );
     assert!(text.contains("standing expert's training"), "titled as one");
@@ -810,7 +810,8 @@ fn a_repository_scope_leaves_room_in_the_lists() -> anyhow::Result<()> {
     app.focus = Focus::Shadows;
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
-        text.contains("● orders-service-backend · 0.68"),
+        text.lines()
+            .any(|row| row.contains("▸ orders-service-backend") && row.contains("0.68")),
         "the repository's name and the reading fit:\n{text}"
     );
 
@@ -830,11 +831,11 @@ fn a_repository_scope_leaves_room_in_the_lists() -> anyhow::Result<()> {
     app.focus = Focus::Boundaries;
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
-        text.contains("○ Before handing back a branch"),
+        text.contains("▸ Before handing back a branch"),
         "one behavior reads:\n{text}"
     );
     assert!(
-        text.contains("○ Never log an order's"),
+        text.contains("  Never log an order's"),
         "and the other, apart from it:\n{text}"
     );
     Ok(())
@@ -849,7 +850,7 @@ fn an_open_boundary_shows_the_task_it_missed() -> anyhow::Result<()> {
     app.focus = Focus::Boundaries;
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
-        text.contains("○ Run the test suite"),
+        text.contains("▸ Run the test suite"),
         "the list row leads with the behavior:\n{text}"
     );
     assert!(
@@ -923,7 +924,7 @@ fn boundaries_focus_shows_the_inspector() -> anyhow::Result<()> {
     app.focus = Focus::Boundaries;
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
-        text.contains("Boundaries · 1"),
+        text.contains("Boundaries 1"),
         "boundaries list title missing:\n{text}"
     );
     assert!(

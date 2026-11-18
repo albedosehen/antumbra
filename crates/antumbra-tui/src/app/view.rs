@@ -5,6 +5,8 @@
 //! A child module of `app`, so these are the same inherent methods on the same
 //! `App`; they moved here only because `app.rs` had grown past the size rule.
 
+use std::borrow::Cow;
+
 use super::*;
 
 impl App {
@@ -32,14 +34,22 @@ impl App {
     /// The label every item of the focused list filters/jumps by: the list
     /// the navigation keys drive on this page, in the same order, so a match's
     /// index is that item's place in it.
-    fn focused_labels(&self) -> Vec<String> {
+    fn focused_labels(&self) -> Vec<Cow<'_, str>> {
+        // Borrowed wherever the label is a field: a store holds thousands of
+        // memories, and a label is read to be scored, not kept.
         match self.page {
-            Page::Memory => return self.memories.iter().map(|m| m.content.clone()).collect(),
+            Page::Memory => {
+                return self
+                    .listed_memories()
+                    .into_iter()
+                    .map(|i| Cow::Borrowed(self.memories[i].content.as_str()))
+                    .collect()
+            }
             Page::Evals => {
                 return self
                     .evals
                     .iter()
-                    .map(|e| format!("{} · {}", e.subject_id, e.corpus_task_id))
+                    .map(|e| Cow::Owned(format!("{} · {}", e.subject_id, e.corpus_task_id)))
                     .collect()
             }
             Page::Sovereign => {
@@ -47,26 +57,34 @@ impl App {
                     .sovereign
                     .skills
                     .iter()
-                    .map(|s| s.skill.clone())
+                    .map(|s| Cow::Borrowed(s.skill.as_str()))
                     .collect()
             }
             Page::Loop => {
                 return self
                     .loop_heads
                     .iter()
-                    .map(|h| h.run_id.as_str().to_string())
+                    .map(|h| Cow::Borrowed(h.run_id.as_str()))
                     .collect()
             }
             Page::Population => {}
         }
         match self.focus {
-            Focus::Experts => self.experts.iter().map(|e| e.name.clone()).collect(),
+            Focus::Experts => self
+                .experts
+                .iter()
+                .map(|e| Cow::Borrowed(e.name.as_str()))
+                .collect(),
             Focus::Shadows => self
                 .shadows
                 .iter()
-                .map(|s| s.id.as_str().to_string())
+                .map(|s| Cow::Borrowed(s.id.as_str()))
                 .collect(),
-            Focus::Boundaries => self.boundaries.iter().map(|b| b.behavior.clone()).collect(),
+            Focus::Boundaries => self
+                .boundaries
+                .iter()
+                .map(|b| Cow::Borrowed(b.behavior.as_str()))
+                .collect(),
         }
     }
 
@@ -74,18 +92,49 @@ impl App {
     pub fn open_filter(&mut self) {
         self.mode = Mode::Filter;
         self.filter.clear();
-        self.filter_selected = 0;
+        self.refilter();
     }
 
     /// Append a typed character to the filter query (resets the selection).
     pub fn filter_input(&mut self, c: char) {
         self.filter.push(c);
-        self.filter_selected = 0;
+        self.refilter();
     }
 
     /// Delete the last character of the filter query (resets the selection).
     pub fn filter_backspace(&mut self) {
         self.filter.pop();
+        self.refilter();
+    }
+
+    /// The most matches the filter keeps. The overlay shows a dozen, and a
+    /// longer query narrows the rest.
+    pub const FILTER_KEPT: usize = 200;
+
+    /// Work out the filter's matches for the query as it now reads, and put
+    /// the highlight on the best. Done when the query or the list changes,
+    /// never while drawing: scoring every memory of a large store is too much
+    /// to do on each frame.
+    pub(super) fn refilter(&mut self) {
+        let needle = command::lowered(&self.filter);
+        let labels = self.focused_labels();
+        let mut scored: Vec<(usize, i32)> = labels
+            .iter()
+            .enumerate()
+            .filter_map(|(i, label)| command::score_chars(label, &needle).map(|score| (i, score)))
+            .collect();
+        // Stable, so equal matches keep the list's order.
+        scored.sort_by_key(|&(_, score)| score);
+        scored.truncate(Self::FILTER_KEPT);
+        let hits = scored
+            .into_iter()
+            .map(|(i, _)| {
+                // One line, of a length a row can show.
+                let flat = labels[i].split_whitespace().collect::<Vec<_>>().join(" ");
+                (i, antumbra_core::text::clipped(&flat, 96).into_owned())
+            })
+            .collect();
+        self.filter_hits = hits;
         self.filter_selected = 0;
     }
 
@@ -101,38 +150,32 @@ impl App {
     }
 
     /// The focused list's items matching the filter query, best first, as
-    /// `(original index, label)` pairs.
-    pub fn filtered(&self) -> Vec<(usize, String)> {
-        let mut scored: Vec<(usize, String, i32)> = self
-            .focused_labels()
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, label)| {
-                command::fuzzy_score(&label, &self.filter).map(|score| (i, label, score))
-            })
-            .collect();
-        scored.sort_by_key(|&(_, _, score)| score);
-        scored.into_iter().map(|(i, label, _)| (i, label)).collect()
+    /// `(the item's place in its list, its label)` pairs: at most
+    /// [`Self::FILTER_KEPT`] of them, as last worked out ([`Self::refilter`]).
+    pub fn filtered(&self) -> &[(usize, String)] {
+        &self.filter_hits
     }
 
     /// Jump the focused selection to the highlighted filter match and close.
     pub fn filter_apply(&mut self) {
-        let matches = self.filtered();
-        let idx = self.filter_selected.min(matches.len().saturating_sub(1));
-        if let Some(&(target, _)) = matches.get(idx) {
+        let idx = self
+            .filter_selected
+            .min(self.filter_hits.len().saturating_sub(1));
+        if let Some(target) = self.filter_hits.get(idx).map(|(place, _)| *place) {
             self.set_focused_selection(target);
         }
         self.mode = Mode::Normal;
         self.filter.clear();
+        self.filter_hits.clear();
     }
 
     /// Cycle the body layout: focused -> dashboard -> graph.
     pub fn cycle_layout(&mut self) {
         let next = match self.layout {
-            LayoutMode::Focused => LayoutMode::Dashboard,
+            LayoutMode::List => LayoutMode::Dashboard,
             LayoutMode::Dashboard => LayoutMode::Graph,
             LayoutMode::Graph => LayoutMode::Table,
-            LayoutMode::Table => LayoutMode::Focused,
+            LayoutMode::Table => LayoutMode::List,
         };
         self.set_layout(next);
     }
@@ -249,7 +292,16 @@ impl App {
     /// truth all the selection movers (next/prev/first/last/page) dispatch on.
     fn focused_list(&self) -> (usize, usize) {
         match self.page {
-            Page::Memory => return (self.memories.len(), self.selected_memory),
+            // The list is the kind in front; the selection's place in it is
+            // where it sits among that kind, or the top when it is of another.
+            Page::Memory => {
+                let listed = self.listed_memories();
+                let at = listed
+                    .iter()
+                    .position(|&i| i == self.selected_memory)
+                    .unwrap_or(0);
+                return (listed.len(), at);
+            }
             Page::Evals => return (self.evals.len(), self.selected_eval),
             Page::Sovereign => return (self.sovereign.skills.len(), self.selected_skill),
             Page::Loop => return (self.loop_heads.len(), self.selected_loop),
@@ -267,7 +319,9 @@ impl App {
     fn set_focused_selection(&mut self, idx: usize) {
         match self.page {
             Page::Memory => {
-                self.selected_memory = idx;
+                if let Some(&memory) = self.listed_memories().get(idx) {
+                    self.selected_memory = memory;
+                }
                 return;
             }
             Page::Evals => {
@@ -337,6 +391,72 @@ impl App {
 
     pub fn selected_memory(&self) -> Option<&Memory> {
         self.memories.get(self.selected_memory)
+    }
+
+    /// The memories the Memory page lists, as indices into `memories` in the
+    /// order they are shown: those of the kind in front, or every one, kind
+    /// after kind in the order the title names the kinds. The server sends
+    /// each kind strongest first, and that order is kept within it.
+    pub fn listed_memories(&self) -> Vec<usize> {
+        let of = |kind: MemoryNetwork| {
+            self.memories
+                .iter()
+                .enumerate()
+                .filter(move |(_, m)| m.network == kind)
+                .map(|(i, _)| i)
+        };
+        match self.memory_kind {
+            Some(kind) => of(kind).collect(),
+            None => Self::MEMORY_KINDS
+                .into_iter()
+                .flatten()
+                .flat_map(of)
+                .collect(),
+        }
+    }
+
+    /// How many memories there are of `kind`, or in all.
+    pub fn memory_count(&self, kind: Option<MemoryNetwork>) -> usize {
+        match kind {
+            None => self.memories.len(),
+            Some(kind) => self.memories.iter().filter(|m| m.network == kind).count(),
+        }
+    }
+
+    /// The kinds the Memory page lists, in the order Tab moves through them:
+    /// all, then each network.
+    pub const MEMORY_KINDS: [Option<MemoryNetwork>; 4] = [
+        None,
+        Some(MemoryNetwork::World),
+        Some(MemoryNetwork::Bank),
+        Some(MemoryNetwork::Opinion),
+    ];
+
+    /// List the next kind of memory (Tab on the Memory page), wrapping. The
+    /// selection stays where it is when it is of that kind, and moves to the
+    /// strongest of that kind when it is not, so what is selected is always
+    /// in the list.
+    pub fn next_memory_kind(&mut self) {
+        let at = Self::MEMORY_KINDS
+            .iter()
+            .position(|kind| *kind == self.memory_kind)
+            .unwrap_or(0);
+        self.memory_kind = Self::MEMORY_KINDS[(at + 1) % Self::MEMORY_KINDS.len()];
+        let listed = self.listed_memories();
+        if !listed.contains(&self.selected_memory) {
+            if let Some(&first) = listed.first() {
+                self.selected_memory = first;
+            }
+        }
+    }
+
+    /// Swap the Memory page's list for the graph of the kinds and their
+    /// links, or back (`l` on the Memory page). The graph draws every kind.
+    pub fn toggle_memory_graph(&mut self) {
+        self.memory_graph = !self.memory_graph;
+        if self.memory_graph {
+            self.memory_kind = None;
+        }
     }
 
     /// Edges touching `id`, as `(edge, is_outgoing)`: the selected trace's links.

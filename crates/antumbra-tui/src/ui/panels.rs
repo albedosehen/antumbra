@@ -127,11 +127,10 @@ fn routing(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-/// The boundaries in front: the list over the selected one's detail.
-pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
-    let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(9)]).split(area);
-    boundary_list(f, app, rows[0], true, false);
-    boundary_detail(f, app, rows[1]);
+/// Beside the boundaries' list: the selected one's detail, in the whole
+/// column, so the case it was wrong in has room.
+pub(super) fn boundary_side(f: &mut Frame, app: &App, area: Rect) {
+    boundary_detail(f, app, area);
 }
 
 /// The boundaries, in force ● or recorded ○. `lit` marks the panel as the
@@ -228,17 +227,11 @@ fn boundary_detail(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-/// The candidates in front: the list, the selected one's detail, and its
-/// reward as a chart.
-pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
-    let rows = Layout::vertical([
-        Constraint::Min(0),
-        Constraint::Length(6),
-        Constraint::Length(9),
-    ])
-    .split(area);
-    candidate_list(f, app, rows[0], true, false);
-    candidate_detail(f, app, rows[1]);
+/// Beside the candidates' list: the selected one's detail over its reward as
+/// a chart.
+pub(super) fn candidate_side(f: &mut Frame, app: &App, area: Rect) {
+    let rows = Layout::vertical([Constraint::Length(6), Constraint::Min(0)]).split(area);
+    candidate_detail(f, app, rows[0]);
     let kept = app
         .selected_shadow()
         .is_some_and(|s| behavior::shadow_scope(&s.id).is_some());
@@ -246,7 +239,7 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
         .selected_shadow()
         .map(|s| s.reward_curve.as_slice())
         .unwrap_or(&[]);
-    reward_chart(f, app, rows[2], curve, kept);
+    reward_chart(f, app, rows[1], curve, kept);
 }
 
 /// The candidates, newest first: graduated ●, under way ○, pruned ×.
