@@ -26,6 +26,7 @@ pub mod copilot;
 pub mod gemini;
 pub mod goose;
 pub mod hook;
+pub mod opencode;
 
 /// A coding agent `antumbra setup` connects besides Claude Code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -38,11 +39,19 @@ pub enum Agent {
     Copilot,
     /// goose.
     Goose,
+    /// OpenCode, 1.x and 2.x.
+    Opencode,
 }
 
 impl Agent {
     /// Every agent, in the order setup connects them.
-    pub const ALL: [Agent; 4] = [Agent::Gemini, Agent::Codex, Agent::Copilot, Agent::Goose];
+    pub const ALL: [Agent; 5] = [
+        Agent::Gemini,
+        Agent::Codex,
+        Agent::Copilot,
+        Agent::Goose,
+        Agent::Opencode,
+    ];
 
     /// The name it is chosen by (`--agent`), recorded under, and named to the
     /// server with.
@@ -52,6 +61,7 @@ impl Agent {
             Agent::Codex => "codex",
             Agent::Copilot => "copilot",
             Agent::Goose => "goose",
+            Agent::Opencode => "opencode",
         }
     }
 
@@ -62,6 +72,7 @@ impl Agent {
             Agent::Codex => "Codex",
             Agent::Copilot => "Copilot CLI",
             Agent::Goose => "goose",
+            Agent::Opencode => "OpenCode",
         }
     }
 
@@ -72,6 +83,7 @@ impl Agent {
             Agent::Codex => "codex",
             Agent::Copilot => "copilot",
             Agent::Goose => "goose",
+            Agent::Opencode => "opencode",
         }
     }
 
@@ -264,6 +276,7 @@ pub fn present(agent: Agent, ground: &Ground<'_>) -> bool {
             Agent::Codex => codex::home(ground).is_dir(),
             Agent::Copilot => copilot::home(ground).is_dir(),
             Agent::Goose => goose::config_dir(ground).is_dir(),
+            Agent::Opencode => opencode::config_dir(ground).is_dir(),
         }
 }
 
@@ -275,6 +288,7 @@ pub fn connect(agent: Agent, ground: &Ground<'_>, report: &dyn Report) -> anyhow
         Agent::Codex => codex::connect(ground, report),
         Agent::Copilot => copilot::connect(ground, report),
         Agent::Goose => goose::connect(ground, report),
+        Agent::Opencode => opencode::connect(ground, report),
     }
 }
 
@@ -285,6 +299,7 @@ pub fn check(agent: Agent, ground: &Ground<'_>) -> Vec<Finding> {
         Agent::Codex => codex::check(ground),
         Agent::Copilot => copilot::check(ground),
         Agent::Goose => goose::check(ground),
+        Agent::Opencode => opencode::check(ground),
     }
 }
 

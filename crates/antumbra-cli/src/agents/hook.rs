@@ -257,9 +257,17 @@ pub fn answer(agent: Agent, event: Event, what: &Said) -> Option<String> {
         (Agent::Goose, Event::Stop, Said::Reminder(text)) => {
             json!({ "decision": "block", "reason": text })
         }
+        // OpenCode: the answer goes to Antumbra's own plugin, which is told
+        // which of the two it is and puts it where OpenCode reads it.
+        (Agent::Opencode, Event::SessionStart | Event::Prompt, Said::Context(text)) => {
+            json!({ "context": text })
+        }
+        (Agent::Opencode, Event::Stop, Said::Reminder(text)) => json!({ "reminder": text }),
         // A reminder where a turn is not ending, or context where one is,
         // has no place to go.
-        (Agent::Gemini | Agent::Codex | Agent::Copilot | Agent::Goose, _, _) => return None,
+        (Agent::Gemini | Agent::Codex | Agent::Copilot | Agent::Goose | Agent::Opencode, _, _) => {
+            return None
+        }
     };
     Some(out.to_string())
 }
@@ -366,7 +374,7 @@ fn context_limit(agent: Agent) -> Option<u32> {
         Agent::Codex => Some(7_000),
         // goose is handed the bootstrap again with every turn.
         Agent::Goose => Some(4_000),
-        Agent::Gemini | Agent::Copilot => None,
+        Agent::Gemini | Agent::Copilot | Agent::Opencode => None,
     }
 }
 

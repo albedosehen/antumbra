@@ -449,3 +449,37 @@ fn goose_is_heard_in_its_own_names_and_reads_only_a_turns_end() -> anyhow::Resul
     );
     Ok(())
 }
+
+#[test]
+fn opencode_is_answered_through_its_plugin() -> anyhow::Result<()> {
+    // The plugin hands the hook what it knows in the scripts' own names.
+    let heard = heard(
+        Agent::Opencode,
+        Event::Stop,
+        &json!({ "session_id": "ses_1", "cwd": "/home/me/work", "last_assistant_message": "Done." }),
+    );
+    assert_eq!(heard["session_id"], "ses_1");
+    assert_eq!(heard["last_assistant_message"], "Done.");
+
+    let parsed = |text: Option<String>| -> anyhow::Result<Value> {
+        let text = text.ok_or_else(|| anyhow::anyhow!("nothing was answered"))?;
+        Ok(serde_json::from_str(&text)?)
+    };
+    let context = Said::Context("what is remembered".into());
+    for event in [Event::SessionStart, Event::Prompt] {
+        assert_eq!(
+            parsed(answer(Agent::Opencode, event, &context))?,
+            json!({ "context": "what is remembered" })
+        );
+    }
+    assert_eq!(
+        parsed(answer(
+            Agent::Opencode,
+            Event::Stop,
+            &Said::Reminder("store what was learned".into())
+        ))?,
+        json!({ "reminder": "store what was learned" })
+    );
+    assert_eq!(answer(Agent::Opencode, Event::Stop, &Said::Nothing), None);
+    Ok(())
+}

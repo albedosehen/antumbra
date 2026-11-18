@@ -2,7 +2,7 @@
 
 You are setting up Antumbra for the person you are working with. Antumbra gives their coding agent a memory that carries across sessions: it recalls what matters at the start of each session and with each prompt, and stores what was learned at the end. Setup is one command, `antumbra setup`, which you run on their behalf. This guide tells you what to check, what to ask, and how to confirm it worked.
 
-Setup connects Claude Code, and every other agent it knows that it finds on the machine (Gemini CLI, Codex, Copilot CLI, goose). To connect only some, name them: `--agent gemini`, or `--agent claude,codex`.
+Setup connects Claude Code, and every other agent it knows that it finds on the machine (Gemini CLI, Codex, Copilot CLI, goose, OpenCode). To connect only some, name them: `--agent gemini`, or `--agent claude,codex`.
 
 Antumbra is before 1.0, so the steps can change between releases. If a command here fails in a way this guide does not describe, run `antumbra setup --help` and follow the CLI over this page.
 
@@ -129,6 +129,7 @@ Say this if they ask:
 - `~/.claude/settings.json`: hooks on SessionStart, UserPromptSubmit, Stop and PreCompact; `ANTUMBRA_URL`, `ANTUMBRA_WORKSPACE_ID` and (when absent) `ANTUMBRA_HOST_ID` under `env`; `autoMemoryEnabled: false` when the file did not say (pass `--keep-auto-memory` to skip). A backup sits beside it, `settings.json.antumbra-backup-<time>`.
 - Claude Code's MCP servers: `antumbra`, user scope, reading the token from its file on each connection.
 - Gemini CLI, when it is connected: the extension `~/.gemini/extensions/antumbra` (a manifest and `hooks/hooks.json`). Its `settings.json` is not touched.
+- OpenCode, when it is connected: one file, `~/.config/opencode/plugins/antumbra.js`. Its `opencode.json` is not touched.
 - goose, when it is connected: the plugin `~/.agents/plugins/antumbra` (a manifest, `.mcp.json` and `hooks/hooks.json`); one line, `GOOSE_MOIM_MESSAGE_FILE`, added to goose's `config.yaml` when it names no such file, with a backup beside it; and `~/.antumbra/goose/`, where the hooks keep what goose is to read.
 - Copilot CLI, when it is connected: `~/.copilot/hooks/antumbra.json`, and `mcpServers.antumbra` added to `~/.copilot/mcp-config.json`, with a backup beside it, `mcp-config.json.antumbra-backup-<time>`.
 - Codex, when it is connected: `[mcp_servers.antumbra]` in `~/.codex/config.toml`, written by `codex mcp add`, and hooks on SessionStart, UserPromptSubmit and Stop added to `~/.codex/hooks.json`, with a backup beside it, `hooks.json.antumbra-backup-<time>`.
@@ -142,7 +143,7 @@ claude mcp remove antumbra --scope user
 docker compose -f ~/.antumbra/stack/docker/docker-compose.yml down   # local only (from a clone: docker/docker-compose.yml)
 ```
 
-Then restore the settings backup over `~/.claude/settings.json` and delete `~/.antumbra`. For Gemini CLI: `gemini extensions uninstall antumbra`, or delete `~/.gemini/extensions/antumbra`. For goose: delete `~/.agents/plugins/antumbra` and the `GOOSE_MOIM_MESSAGE_FILE` line of its `config.yaml`. For Copilot CLI: delete `~/.copilot/hooks/antumbra.json` and the `antumbra` entry of `~/.copilot/mcp-config.json` (`copilot mcp remove antumbra`). For Codex: `codex mcp remove antumbra`, and restore the backup over `~/.codex/hooks.json` (or delete the three entries whose command is `antumbra hook codex ...`).
+Then restore the settings backup over `~/.claude/settings.json` and delete `~/.antumbra`. For Gemini CLI: `gemini extensions uninstall antumbra`, or delete `~/.gemini/extensions/antumbra`. For OpenCode: delete `~/.config/opencode/plugins/antumbra.js`. For goose: delete `~/.agents/plugins/antumbra` and the `GOOSE_MOIM_MESSAGE_FILE` line of its `config.yaml`. For Copilot CLI: delete `~/.copilot/hooks/antumbra.json` and the `antumbra` entry of `~/.copilot/mcp-config.json` (`copilot mcp remove antumbra`). For Codex: `codex mcp remove antumbra`, and restore the backup over `~/.codex/hooks.json` (or delete the three entries whose command is `antumbra hook codex ...`).
 
 ## When something goes wrong
 
