@@ -36,7 +36,7 @@ fn standing_app() -> App {
     app.experts = vec![
         standing("github.com/acme/orders", 0.87),
         standing("github.com/acme/billing", 0.91),
-        standing("github.com/other/data-plane-transaction-hub", 0.74),
+        standing("github.com/other/warehouse-stock-reconciler", 0.74),
         standing("everywhere", 0.66),
     ];
     app.sort_experts();
@@ -66,7 +66,7 @@ fn a_standing_expert_is_named_by_its_scope_and_not_by_its_id() -> anyhow::Result
         vec![
             "billing",
             "orders",
-            "data-plane-transaction-hub",
+            "warehouse-stock-reconciler",
             "everywhere"
         ],
         "strongest first, each by its scope in brief"
@@ -250,9 +250,9 @@ fn a_prompt_and_a_notice_name_a_standing_expert_by_its_scope() -> anyhow::Result
         names,
         vec![
             "billing",
-            "data-plane-transaction-hub",
             "everywhere",
-            "orders"
+            "orders",
+            "warehouse-stock-reconciler"
         ]
     );
     Ok(())
