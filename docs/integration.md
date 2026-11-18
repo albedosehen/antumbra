@@ -197,9 +197,9 @@ It never fails the agent: whatever goes wrong is said on standard error, and not
 
 ### Which agents, and what setup writes for each
 
-`antumbra setup` connects Claude Code and every other agent it finds on the machine: one whose program is on the PATH, or whose config directory is there. `--agent` names them instead (`--agent gemini`, `--agent claude,codex`, `--agent copilot`, `--agent all`), and `--no-claude` leaves Claude Code out.
+`antumbra setup` connects Claude Code and every other agent it finds on the machine: one whose program is on the PATH, or whose config directory is there. `--agent` names them instead (`--agent gemini`, `--agent claude,codex`, `--agent opencode`, `--agent all`; the names are `claude`, `gemini`, `codex`, `copilot`, `goose` and `opencode`), and `--no-claude` leaves Claude Code out.
 
-Setup touches as little of a person's own files as each agent allows. Where an agent reads a directory of Antumbra's own, that is all setup writes: nothing the person wrote is edited, and connecting again replaces it (Gemini CLI, and goose's plugin). Where an agent reads only its user's files, setup adds to them as it does for Claude Code: with the agent's own command, or as text, adding only, with a backup, and never twice (Codex, Copilot CLI's list of MCP servers, and one line of goose's config). Either way `antumbra setup check` reads back what was written.
+Setup touches as little of a person's own files as each agent allows. Where an agent reads a directory of Antumbra's own, that is all setup writes: nothing the person wrote is edited, and connecting again replaces it (Gemini CLI, goose's plugin, and OpenCode's). Where an agent reads only its user's files, setup adds to them as it does for Claude Code: with the agent's own command, or as text, adding only, with a backup, and never twice (Codex, Copilot CLI's list of MCP servers, and one line of goose's config). Either way `antumbra setup check` reads back what was written.
 
 | Agent | What setup writes | Opens with memory | Recall for each prompt | Reminder to store |
 | --- | --- | --- | --- | --- |
@@ -208,6 +208,7 @@ Setup touches as little of a person's own files as each agent allows. Where an a
 | Codex | the bridge, with `codex mcp add`; three hooks added to `~/.codex/hooks.json` | yes, once you approve the hooks | yes, once you approve the hooks | yes, once you approve the hooks |
 | Copilot CLI | a hooks file, `~/.copilot/hooks/antumbra.json`; the bridge added to `~/.copilot/mcp-config.json` | yes | yes | yes |
 | goose | a plugin, `~/.agents/plugins/antumbra`: the bridge and three hooks; one line in goose's `config.yaml` | yes, through the file goose keeps in mind | yes, the same way | yes |
+| OpenCode (1.x and 2.x) | one plugin file, `~/.config/opencode/plugins/antumbra.js` | yes | yes | yes, while the session stays open |
 
 **Gemini CLI.** The extension holds a manifest with the bridge as its MCP server and a `hooks/hooks.json` with `SessionStart`, `BeforeAgent` and `AfterAgent`. Gemini CLI lists it (`gemini extensions list`) and `gemini extensions uninstall antumbra` removes it. Two things are Gemini CLI's own to decide, and setup leaves them as they are:
 
@@ -247,6 +248,14 @@ What goose does read on every turn is a file its config names, `GOOSE_MOIM_MESSA
 - **On Windows goose runs its hooks with `sh`**, as it does everywhere, so its hooks need one on the PATH (Git for Windows has one). Setup and `setup check` say when there is none. The tools work either way.
 - At a turn's end goose shows "Stop hook `antumbra` blocked ending this turn": that is the reminder reaching the agent, which is asked once more and stops.
 - goose's config is `~/.config/goose/config.yaml`, on Windows `%APPDATA%\Block\goose\config\config.yaml`; `GOOSE_PATH_ROOT` moves both it and the plugins.
+
+**OpenCode.** OpenCode has no hooks that run a command. It has plugins, and two release lines, 1.x and 2.x, that share a config directory and a binary name and whose plugins are written differently. Antumbra is one file, `plugins/antumbra.js` in `~/.config/opencode` (on Windows too; `OPENCODE_CONFIG_DIR` and `XDG_CONFIG_HOME` move it), whose default export is both: `server` for 1.x and `setup` for 2.x. Each line takes the half it knows.
+
+- The plugin runs `antumbra hook opencode <event>` at a session's first prompt, at every prompt, and when a turn ends, and puts what the hook answers in that session's system prompt, where the model reads it with every call.
+- It registers the bridge as an MCP server from inside the plugin, which both lines allow, so nothing is added to `opencode.json`. A server you already have under the name `antumbra` is left yours.
+- The reminder at a turn's end is sent to the session as a prompt, so it needs the session still there: in the terminal interface and against `opencode serve` it is. `opencode run` on 1.x exits as the turn ends, before it can be sent; the turn is still reported.
+- 2.x offers MCP tools to the model through its Code Mode by default, so the model calls Antumbra's as `tools.antumbra.recall_memories(...)` inside `execute`. That is OpenCode's own setting (`codemode`), and the tools are the same.
+- The plugin also runs for the short request OpenCode makes to title a session, which is told what the session is told.
 
 ## Leaving work for another of your machines
 

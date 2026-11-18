@@ -51,6 +51,8 @@ The `.sh` hooks hand the token to `curl` as a config line on its stdin (`--confi
 
 For an agent other than Claude Code, these scripts are run by `antumbra hook <agent> <event>`, which hands them that agent's hook input in the names they read, sets the first four of these from what `antumbra setup` recorded, and answers in the agent's own shape. See "Agents other than Claude Code" in `docs/integration.md`.
 
+`antumbra-opencode.js` is not a hook script: it is the plugin `antumbra setup` writes for OpenCode, which has no hooks that run a command. It runs `antumbra hook opencode <event>` at the same three moments. Its tests are `tests/opencode-plugin.test.mjs` (`node --test`).
+
 ### The MCP connection, with the token in a file
 
 The agent's own connection to the surface needs the bearer too. Rather than a static `Authorization: Bearer ${ANTUMBRA_TOKEN}` header, which needs the token in the settings file's `env` block, point the server entry at `antumbra-mcp-headers` as its `headersHelper`. It prints the header from the same token file the hooks read, so the token can live only in that file:

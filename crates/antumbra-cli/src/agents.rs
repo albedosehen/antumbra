@@ -9,10 +9,15 @@
 //! ([`bridge`]); and the command that answers an agent's hook with the hook
 //! scripts Claude Code runs ([`hook`]).
 //!
-//! What differs is one module an agent: where its config lives, and the files
-//! Antumbra writes there. Each writes only files that are Antumbra's own, so
-//! connecting an agent again replaces them whole, and nothing a person wrote
-//! is edited. `antumbra setup` connects every agent it finds
+//! What differs is one module an agent: where its config lives, and what
+//! Antumbra writes there. Where an agent reads a directory or a file of
+//! Antumbra's own, that is all its module writes: connecting again replaces
+//! it whole, and nothing a person wrote is edited ([`gemini`], [`opencode`],
+//! [`goose`]'s plugin, [`copilot`]'s hooks). Where an agent reads only its
+//! user's files, its module adds to them as setup adds to Claude Code's
+//! settings: with the agent's own command, or as text, adding only, with a
+//! backup, and never twice ([`codex`], [`copilot`]'s servers, one line of
+//! [`goose`]'s config). `antumbra setup` connects every agent it finds
 //! ([`connect`]), and `antumbra setup check` reads back what it wrote
 //! ([`check`]).
 
@@ -26,6 +31,7 @@ pub mod copilot;
 pub mod gemini;
 pub mod goose;
 pub mod hook;
+pub mod opencode;
 
 /// A coding agent `antumbra setup` connects besides Claude Code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
@@ -38,11 +44,19 @@ pub enum Agent {
     Copilot,
     /// goose.
     Goose,
+    /// OpenCode, 1.x and 2.x.
+    Opencode,
 }
 
 impl Agent {
     /// Every agent, in the order setup connects them.
-    pub const ALL: [Agent; 4] = [Agent::Gemini, Agent::Codex, Agent::Copilot, Agent::Goose];
+    pub const ALL: [Agent; 5] = [
+        Agent::Gemini,
+        Agent::Codex,
+        Agent::Copilot,
+        Agent::Goose,
+        Agent::Opencode,
+    ];
 
     /// The name it is chosen by (`--agent`), recorded under, and named to the
     /// server with.
@@ -52,6 +66,7 @@ impl Agent {
             Agent::Codex => "codex",
             Agent::Copilot => "copilot",
             Agent::Goose => "goose",
+            Agent::Opencode => "opencode",
         }
     }
 
@@ -62,6 +77,7 @@ impl Agent {
             Agent::Codex => "Codex",
             Agent::Copilot => "Copilot CLI",
             Agent::Goose => "goose",
+            Agent::Opencode => "OpenCode",
         }
     }
 
@@ -72,6 +88,7 @@ impl Agent {
             Agent::Codex => "codex",
             Agent::Copilot => "copilot",
             Agent::Goose => "goose",
+            Agent::Opencode => "opencode",
         }
     }
 
@@ -264,6 +281,7 @@ pub fn present(agent: Agent, ground: &Ground<'_>) -> bool {
             Agent::Codex => codex::home(ground).is_dir(),
             Agent::Copilot => copilot::home(ground).is_dir(),
             Agent::Goose => goose::config_dir(ground).is_dir(),
+            Agent::Opencode => opencode::config_dir(ground).is_dir(),
         }
 }
 
@@ -275,6 +293,7 @@ pub fn connect(agent: Agent, ground: &Ground<'_>, report: &dyn Report) -> anyhow
         Agent::Codex => codex::connect(ground, report),
         Agent::Copilot => copilot::connect(ground, report),
         Agent::Goose => goose::connect(ground, report),
+        Agent::Opencode => opencode::connect(ground, report),
     }
 }
 
@@ -285,6 +304,7 @@ pub fn check(agent: Agent, ground: &Ground<'_>) -> Vec<Finding> {
         Agent::Codex => codex::check(ground),
         Agent::Copilot => copilot::check(ground),
         Agent::Goose => goose::check(ground),
+        Agent::Opencode => opencode::check(ground),
     }
 }
 
