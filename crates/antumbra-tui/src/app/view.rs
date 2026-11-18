@@ -23,6 +23,7 @@ impl App {
             Page::Evals => "evaluations",
             Page::Sovereign => "skills",
             Page::Loop => "training runs",
+            Page::Services => "services",
             Page::Population => match self.focus {
                 Focus::Experts => "experts",
                 Focus::Shadows => "candidates",
@@ -65,6 +66,14 @@ impl App {
                     .loop_heads
                     .iter()
                     .map(|h| Cow::Borrowed(h.run_id.as_str()))
+                    .collect()
+            }
+            Page::Services => {
+                return self
+                    .services
+                    .names
+                    .iter()
+                    .map(|name| Cow::Borrowed(name.as_str()))
                     .collect()
             }
             Page::Population => {}
@@ -306,6 +315,7 @@ impl App {
             Page::Evals => return (self.evals.len(), self.selected_eval),
             Page::Sovereign => return (self.sovereign.skills.len(), self.selected_skill),
             Page::Loop => return (self.loop_heads.len(), self.selected_loop),
+            Page::Services => return (self.services.names.len(), self.selected_service),
             Page::Population => {}
         }
         match self.focus {
@@ -335,6 +345,10 @@ impl App {
             }
             Page::Loop => {
                 self.selected_loop = idx;
+                return;
+            }
+            Page::Services => {
+                self.selected_service = idx;
                 return;
             }
             Page::Population => {}

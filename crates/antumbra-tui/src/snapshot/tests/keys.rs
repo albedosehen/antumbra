@@ -13,6 +13,7 @@ fn full_app() -> App {
     let mut app = demo_app();
     app.shadows = vec![graduated_shadow(), kept_shadow()];
     app.boundaries = vec![actionable_boundary(), missed_boundary()];
+    with_services(&mut app);
     app
 }
 
@@ -203,9 +204,12 @@ fn tab_is_bound_only_where_the_list_it_moves_to_is_drawn() -> anyhow::Result<()>
         let lists = app.page == Page::Population
             && matches!(app.layout, LayoutMode::List | LayoutMode::Dashboard);
         let kinds = app.page == Page::Memory && !app.memory_graph;
+        // And on the Services page it turns the walk round, where there is
+        // a graph to walk.
+        let walk = app.page == Page::Services && !app.services.is_empty();
         assert_eq!(
             keys::action_for(&app, Key::Tab),
-            (lists || kinds).then_some(Action::FocusNext),
+            (lists || kinds || walk).then_some(Action::FocusNext),
             "{view}"
         );
         // Where it is not, the keys drive the list that is drawn.

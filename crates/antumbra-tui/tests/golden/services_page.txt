@@ -1,0 +1,30 @@
+ ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                           ● live
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent  ·  6 Services
+ Services: what depends on what. Pick a service to see what a change to it reaches, and what says so.
+╭ Services 8 · 7 dependencies ────────────────────────────────────────────────────╮╭ Blast radius ───────────────────────────────╮
+│                                                                                 ││ledger-core                                  │
+│                                                                                 ││github.com/acme/ledger-core                  │
+│                                                                                 ││what depends on it · within 3 hops           │
+│                                                                                 ││                                             │
+│                                                                                 ││ledger-api                       0.90 · 1 hop│
+│   billing-ui ───────────╮                                                       ││  declared · Cargo.toml names it             │
+│                         ├─▸ ledger-api ────┬┄┄▸ auth-service                    ││payments-webhook                 0.90 · 1 hop│
+│                         ╎                  │                                    ││  declared · Cargo.toml names it             │
+│   reports-job ╌╌╌╌╌╌╌╌╌╌╯                  │                                    ││payouts-worker                   0.90 · 1 hop│
+│                                            │                                    ││  declared · Cargo.toml names it             │
+│                                            ├──▸ ledger-core ────────▸ ledger-db ││billing-ui                      0.81 · 2 hops│
+│   payments-webhook ────╮                   │                                    ││  via ledger-api                             │
+│                        ├───────────────────╯                                    ││reports-job                     0.76 · 2 hops│
+│                        │                                                        ││  via ledger-api                             │
+│   payouts-worker ──────╯                                                        ││                                             │
+│                                                                                 ││                                             │
+│                                                                                 ││                                             │
+│                                                                                 ││                                             │
+│                                                                                 ││                                             │
+│                                                                                 ││                                             │
+│                                                                                 ││                                             │
+│                                                                                 ││                                             │
+│ ── declared   ╌╌ observed   ┄┄ learned or claimed   ▸ what a service depends on ││                                             │
+╰─────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────╯
+
+ ↑↓  move   enter  details   tab  turn round   h  hops   /  find   1-6  pages   a  ask   :  commands   ?  help   q  quit

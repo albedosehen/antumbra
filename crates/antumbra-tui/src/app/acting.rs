@@ -172,7 +172,7 @@ impl App {
                     None => self.note(Tone::Open, "no boundary is selected"),
                 },
             },
-            Page::Memory | Page::Evals | Page::Sovereign => {
+            Page::Memory | Page::Evals | Page::Sovereign | Page::Services => {
                 self.note(Tone::Open, "nothing on this page can be acted on")
             }
         }

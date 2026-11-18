@@ -1,5 +1,5 @@
  ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                 ● live
-  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent  ·  6 Services
  Memory: what your agents stored. World is facts, bank is experiences, opinion is judgments.
 ╭ Memory · by kind ──────────────────────────────────────────────────╮╭ Selected memory ───────────────────────────────╮
 │                                                                    ││prefer deno over node for new scripts           │
@@ -33,4 +33,4 @@
 │                                                                    ││                                                │
 ╰────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
 
- ↑↓  move   /  find   1-5  pages   l  list   a  ask   :  commands   ?  help   q  quit
+ ↑↓  move   /  find   1-6  pages   l  list   a  ask   :  commands   ?  help   q  quit

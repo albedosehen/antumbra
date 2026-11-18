@@ -145,7 +145,7 @@ fn act_words(app: &App) -> Option<(&'static str, &'static str)> {
             Some(("cancel halt", "cancel the selected run's halt"))
         }
         Page::Loop => Some(("halt", "halt the selected run, or cancel its halt")),
-        Page::Memory | Page::Evals | Page::Sovereign => None,
+        Page::Memory | Page::Evals | Page::Sovereign | Page::Services => None,
     }
 }
 
@@ -201,7 +201,10 @@ pub fn page_bindings(app: &App) -> Vec<Binding> {
     let opens = match app.page {
         Page::Population => Some("open everything about what is selected"),
         Page::Evals | Page::Loop => Some("open everything about the selected run"),
-        Page::Memory | Page::Sovereign => None,
+        Page::Services if !app.services.is_empty() => {
+            Some("open every claim about the selected service")
+        }
+        Page::Memory | Page::Sovereign | Page::Services => None,
     };
     if let Some(does) = opens {
         b.push(bind(
@@ -236,6 +239,28 @@ pub fn page_bindings(app: &App) -> Vec<Binding> {
             Group::Move,
             Some(4),
             &[(Tab, A::FocusNext)],
+        ));
+    }
+    // On the Services page the walk from the selected service is turned
+    // round and let go further.
+    if app.page == Page::Services && !app.services.is_empty() {
+        b.push(bind(
+            "tab",
+            "",
+            "turn round",
+            "turn the walk round: its dependents, or what it needs",
+            Group::Move,
+            Some(4),
+            &[(Tab, A::FocusNext)],
+        ));
+        b.push(bind(
+            "h",
+            "",
+            "hops",
+            "let the walk go further: one hop, three, six",
+            Group::View,
+            Some(5),
+            &[(Char('h'), A::Hops)],
         ));
     }
     b.push(bind(
@@ -278,10 +303,10 @@ pub fn page_bindings(app: &App) -> Vec<Binding> {
         }
     }
     b.push(bind(
-        "1-5",
+        "1-6",
         "[ ]",
         "pages",
-        "pages: Population, Memory, Training, Evaluations, Agent",
+        "Population, Memory, Training, Evaluations, Agent, Services",
         Group::View,
         Some(7),
         &pages,

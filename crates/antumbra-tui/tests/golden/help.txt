@@ -1,34 +1,34 @@
-╭ Help · Population ───────────────────────────────────────────────────────╮
-│move                                                                      │
-│  ↑↓  j k        move the selection                                       │
-│  home end  g G  jump to the first or the last                            │
-│  pgup pgdn      move ten at a time                                       │
-│  enter          open everything about what is selected                   │
-│  tab            move to the next list: experts, candidates, boundaries   │
-│  /              find in this list, and jump to it                        │
-│                                                                          │
-│act on the selection                                                      │
-│  x              thaw the selected expert, or freeze one that is not      │
-│                                                                          │
-│view                                                                      │
-│  1-5  [ ]       pages: Population, Memory, Training, Evaluations, Agent  │
-│  l  L           change the layout: list, dashboard, graph, table         │
-│  s              sort the experts: by fitness, name or generation         │
-│  t              change the theme: night, mist, mono                      │
-│  + -  0         raise or lower the frame-rate cap; 0 follows the monitor │
-│                                                                          │
-│console                                                                   │
-│  a              ask which expert would take a task                       │
-│  K              the memory knobs: how memories are kept                  │
-│  :              run a command by its name                                │
-│  e              what changed since the console opened, and what it did   │
-│  c              how to connect an agent, and what this console reads     │
-│  r              read the server again now                                │
-│  ?              this help                                                │
-│  q  ctrl-c      quit                                                     │
-│                                                                          │
-│in a panel                                                                │
-│  esc            close it; the footer shows its other keys                │
-│                                                                          │
-│words                                                                     │
-╰──────────────────────────────────────────────────────────────────────────╯
+╭ Help · Population ─────────────────────────────────────────────────────────╮
+│move                                                                        │
+│  ↑↓  j k        move the selection                                         │
+│  home end  g G  jump to the first or the last                              │
+│  pgup pgdn      move ten at a time                                         │
+│  enter          open everything about what is selected                     │
+│  tab            move to the next list: experts, candidates, boundaries     │
+│  /              find in this list, and jump to it                          │
+│                                                                            │
+│act on the selection                                                        │
+│  x              thaw the selected expert, or freeze one that is not        │
+│                                                                            │
+│view                                                                        │
+│  1-6  [ ]       Population, Memory, Training, Evaluations, Agent, Services │
+│  l  L           change the layout: list, dashboard, graph, table           │
+│  s              sort the experts: by fitness, name or generation           │
+│  t              change the theme: night, mist, mono                        │
+│  + -  0         raise or lower the frame-rate cap; 0 follows the monitor   │
+│                                                                            │
+│console                                                                     │
+│  a              ask which expert would take a task                         │
+│  K              the memory knobs: how memories are kept                    │
+│  :              run a command by its name                                  │
+│  e              what changed since the console opened, and what it did     │
+│  c              how to connect an agent, and what this console reads       │
+│  r              read the server again now                                  │
+│  ?              this help                                                  │
+│  q  ctrl-c      quit                                                       │
+│                                                                            │
+│in a panel                                                                  │
+│  esc            close it; the footer shows its other keys                  │
+│                                                                            │
+│words                                                                       │
+╰────────────────────────────────────────────────────────────────────────────╯

@@ -18,8 +18,10 @@ mod knobs;
 mod lists;
 mod loops;
 mod memory;
+mod netdraw;
 mod overlays;
 mod panels;
+mod services;
 mod sovereign;
 mod table;
 
@@ -139,6 +141,7 @@ fn page_body(f: &mut Frame, app: &App, area: Rect) {
     match app.page {
         Page::Population => body(f, app, area),
         Page::Memory => memory::page(f, app, area),
+        Page::Services => services::page(f, app, area),
         Page::Loop => loops::page(f, app, area),
         Page::Evals => evals::page(f, app, area),
         Page::Sovereign => sovereign::page(f, app, area),

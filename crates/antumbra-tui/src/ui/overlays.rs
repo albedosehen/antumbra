@@ -26,7 +26,7 @@ pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
     match app.mode {
         Mode::Help => {
             let rows = u16::try_from(help_rows(app).len()).unwrap_or(u16::MAX);
-            Some(overlay::centered(frame, 76, rows.saturating_add(2)))
+            Some(overlay::centered(frame, 78, rows.saturating_add(2)))
         }
         Mode::Palette => {
             let listed = app.palette_matches().len().max(1) as u16;
@@ -651,6 +651,7 @@ pub(super) fn detail_overlay(f: &mut Frame, app: &App) {
     let (title, lines) = match app.page {
         Page::Evals => super::detail::eval_detail(app, &t),
         Page::Loop => super::detail::loop_detail(app, &t),
+        Page::Services => super::detail::service_detail(app, &t),
         _ => match app.focus {
             Focus::Experts => super::detail::expert_detail(app, &t),
             Focus::Shadows => super::detail::shadow_detail(app, &t),

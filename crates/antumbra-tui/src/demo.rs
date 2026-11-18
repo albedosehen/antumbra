@@ -273,6 +273,70 @@ pub(crate) async fn seed() -> Result<Store> {
         }
         memory::upsert(&store, &m).await?;
     }
+    // What depends on what, as manifests, traffic and people say it: the
+    // claims the Services page draws, each a memory as the server keeps one.
+    {
+        use antumbra_core::depgraph::{Claim, Source};
+        let declared = |from: &str, to: &str| {
+            (
+                from.to_string(),
+                to.to_string(),
+                Source::Declared,
+                "Cargo.toml names it",
+            )
+        };
+        let claims = [
+            declared("payments-webhook", "ledger-core"),
+            declared("payouts-worker", "ledger-core"),
+            declared("ledger-api", "ledger-core"),
+            declared("billing-ui", "ledger-api"),
+            declared("ledger-core", "ledger-db"),
+            (
+                "reports-job".to_string(),
+                "ledger-api".to_string(),
+                Source::Observed,
+                "seen calling it",
+            ),
+            (
+                "reports-job".to_string(),
+                "ledger-db".to_string(),
+                Source::Observed,
+                "seen reading it",
+            ),
+            (
+                "ledger-api".to_string(),
+                "auth-service".to_string(),
+                Source::Claimed,
+                "said in review",
+            ),
+            (
+                "billing-ui".to_string(),
+                "auth-service".to_string(),
+                Source::Declared,
+                "package.json names it",
+            ),
+        ];
+        let workspace = antumbra_core::TenantId::new(tenant);
+        for (from, to, source, detail) in claims {
+            let claim = Claim::new(
+                &format!("github.com/acme/{from}"),
+                &format!("github.com/acme/{to}"),
+                source,
+                detail,
+            );
+            let m = Memory::new(
+                claim.memory_id(&workspace),
+                tenant,
+                MemoryNetwork::World,
+                claim.content(),
+                source.confidence(),
+                now,
+            )
+            .by("user:operator", "windows")
+            .with_evidence(claim.evidence(None));
+            memory::upsert(&store, &m).await?;
+        }
+    }
     let edges = [
         (
             "memory:node-incident",

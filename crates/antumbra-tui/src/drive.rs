@@ -75,6 +75,24 @@ pub(crate) async fn apply(
         // The next list: the next kind on the Memory page, else the next of
         // the population's three.
         Action::FocusNext if app.page == Page::Memory => app.next_memory_kind(),
+        // On the Services page it turns the walk round.
+        Action::FocusNext if app.page == Page::Services => {
+            app.turn_walk();
+            let shows = match app.service_direction {
+                antumbra_core::depgraph::Direction::Dependents => "what depends on it",
+                antumbra_core::depgraph::Direction::Dependencies => "what it depends on",
+            };
+            app.note(Tone::Open, format!("blast radius · {shows}"));
+        }
+        Action::Hops => {
+            app.cycle_hops();
+            let hops = app.service_hops;
+            let plural = if hops == 1 { "" } else { "s" };
+            app.note(
+                Tone::Open,
+                format!("blast radius · within {hops} hop{plural}"),
+            );
+        }
         Action::FocusNext => {
             app.toggle_focus();
             *transition = Some(transition::focus_switch());

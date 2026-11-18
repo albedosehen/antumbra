@@ -28,6 +28,7 @@ pub(super) struct Kept {
     run: Option<String>,
     /// A skill is counted per workspace.
     skill: Option<(String, String)>,
+    service: Option<String>,
 }
 
 /// The row of the first of `items` that `is` the one wanted; where it is
@@ -64,6 +65,7 @@ impl App {
                 .skills
                 .get(self.selected_skill)
                 .map(|s| (s.skill.clone(), s.workspace.clone())),
+            service: self.selected_service_name().map(str::to_string),
         }
     }
 
@@ -98,6 +100,9 @@ impl App {
             kept.skill
                 .as_ref()
                 .is_some_and(|(skill, workspace)| &s.skill == skill && &s.workspace == workspace)
+        });
+        self.selected_service = found(&self.services.names, self.selected_service, |name| {
+            Some(name.as_str()) == kept.service.as_deref()
         });
     }
 }
