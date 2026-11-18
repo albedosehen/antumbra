@@ -13,6 +13,7 @@ mod drive;
 mod events;
 mod here;
 mod keys;
+mod named;
 mod overlay;
 mod pacing;
 mod render;
@@ -117,14 +118,17 @@ enum Command {
         /// too).
         #[arg(long, default_value = "population")]
         page: String,
-        /// Body layout to render: focused, dashboard, graph, or table.
-        #[arg(long, default_value = "focused")]
+        /// The population page's layout: list, dashboard, graph, or table
+        /// (focused, the list's former name, is taken too).
+        #[arg(long, default_value = "list")]
         layout: String,
-        /// Focused region: experts, shadows, or boundaries.
+        /// The list in front: experts, candidates, or boundaries (shadows,
+        /// the candidates' former name, is taken too).
         #[arg(long, default_value = "experts")]
         focus: String,
-        /// Overlay to render on top: none, help, palette, events, detail, gate,
-        /// connect, knobs, ask, or confirm.
+        /// Panel to render on top: none, help, palette, events, detail,
+        /// router, connect, knobs, ask, or confirm (gate, the router's former
+        /// name, is taken too).
         #[arg(long, default_value = "none")]
         overlay: String,
         /// Render the seeded demo population instead of reading the server.
@@ -168,44 +172,42 @@ pub async fn run(args: Args) -> Result<()> {
             ref overlay,
             demo,
         }) => {
+            // Read what is asked for before anything is read from a server: a
+            // name nothing has is refused at once, and never drawn as
+            // something else.
+            let page = named::page(page)?;
+            let layout = named::layout(layout)?;
+            let list = named::list(focus)?;
+            let panel = named::panel(overlay)?;
             let backend = backend(&args, demo || args.demo).await?;
             let mut app = App::load(&backend)
                 .await
                 .with_context(|| backend.unreachable())?;
             app.demo = demo || args.demo;
             app.theme_idx = theme::Theme::index_of(&args.theme);
-            app.set_page(app::Page::from_name(page));
-            app.set_layout(match layout.as_str() {
-                "dashboard" => app::LayoutMode::Dashboard,
-                "graph" => app::LayoutMode::Graph,
-                "table" => app::LayoutMode::Table,
-                _ => app::LayoutMode::List,
-            });
-            app.set_focus(match focus.as_str() {
-                "shadows" => app::Focus::Shadows,
-                "boundaries" => app::Focus::Boundaries,
-                _ => app::Focus::Experts,
-            });
-            match overlay.as_str() {
-                "help" => app.toggle_help(),
-                "palette" => app.open_palette(),
-                "events" => app.open_events(),
-                "gate" => app.open_gate(),
-                "connect" => app.open_connect(),
-                "knobs" => app.open_knobs(),
-                "detail" => app.open_detail(),
-                "confirm" => {
+            app.set_page(page);
+            app.set_layout(layout);
+            app.set_focus(list);
+            match panel {
+                named::Panel::None => {}
+                named::Panel::Help => app.toggle_help(),
+                named::Panel::Palette => app.open_palette(),
+                named::Panel::Events => app.open_events(),
+                named::Panel::Router => app.open_gate(),
+                named::Panel::Connect => app.open_connect(),
+                named::Panel::Knobs => app.open_knobs(),
+                named::Panel::Detail => app.open_detail(),
+                named::Panel::Confirm => {
                     app.set_focus(app::Focus::Boundaries);
                     app.request_action();
                 }
-                "ask" => {
+                named::Panel::Ask => {
                     app.open_ask();
                     for c in "string handling".chars() {
                         app.ask_input(c);
                     }
                     drive::ask_route(&mut app, &backend).await;
                 }
-                _ => {}
             }
             let buf = snapshot::render(&mut app, width, height, at_ms)?;
             let text = snapshot::to_text(&buf);

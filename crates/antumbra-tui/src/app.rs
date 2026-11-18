@@ -133,23 +133,6 @@ impl Page {
         }
     }
 
-    /// The page a name asks for (`tui snapshot --page`): its tab's label in
-    /// any case, or the name it had before the tabs were reworded. Anything
-    /// else is the first page.
-    pub fn from_name(name: &str) -> Page {
-        let name = name.to_lowercase();
-        let former = |page: Page| match page {
-            Page::Loop => "loop",
-            Page::Evals => "evals",
-            Page::Sovereign => "sovereign",
-            Page::Population | Page::Memory => "",
-        };
-        Page::ALL
-            .into_iter()
-            .find(|page| page.title().to_lowercase() == name || former(*page) == name)
-            .unwrap_or(Page::Population)
-    }
-
     /// The number key that goes to this page: `1` for the first. Asked of
     /// [`Page::ALL`], so a page added to it cannot be left without its key.
     pub fn key(self) -> Option<char> {
