@@ -9,10 +9,15 @@
 //! ([`bridge`]); and the command that answers an agent's hook with the hook
 //! scripts Claude Code runs ([`hook`]).
 //!
-//! What differs is one module an agent: where its config lives, and the files
-//! Antumbra writes there. Each writes only files that are Antumbra's own, so
-//! connecting an agent again replaces them whole, and nothing a person wrote
-//! is edited. `antumbra setup` connects every agent it finds
+//! What differs is one module an agent: where its config lives, and what
+//! Antumbra writes there. Where an agent reads a directory or a file of
+//! Antumbra's own, that is all its module writes: connecting again replaces
+//! it whole, and nothing a person wrote is edited ([`gemini`], [`opencode`],
+//! [`goose`]'s plugin, [`copilot`]'s hooks). Where an agent reads only its
+//! user's files, its module adds to them as setup adds to Claude Code's
+//! settings: with the agent's own command, or as text, adding only, with a
+//! backup, and never twice ([`codex`], [`copilot`]'s servers, one line of
+//! [`goose`]'s config). `antumbra setup` connects every agent it finds
 //! ([`connect`]), and `antumbra setup check` reads back what it wrote
 //! ([`check`]).
 
