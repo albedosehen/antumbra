@@ -336,7 +336,7 @@ pub fn page_bindings(app: &App) -> Vec<Binding> {
             "l",
             "L",
             if app.memory_graph { "list" } else { "graph" },
-            "swap the list for the graph of the kinds and their links",
+            "swap the list for the selected memory's links, drawn",
             Group::View,
             Some(9),
             &[(Char('l'), A::LayoutNext), (Char('L'), A::LayoutNext)],

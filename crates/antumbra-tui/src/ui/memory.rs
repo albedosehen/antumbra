@@ -1,16 +1,11 @@
-//! The Memory page (the penumbra): the world/bank/opinion networks as a typed
-//! edge graph beside the selected trace's detail. Memories cluster by network on
-//! a hand-rolled Canvas; edges color by kind (contradiction/supersession are the
-//! consolidation→retire signal). This is the soft store the population graduates
-//! from: the hippocampus to the umbra's neocortex.
-
-use std::collections::HashMap;
-use std::f64::consts::{FRAC_PI_2, TAU};
+//! The Memory page: the memories as a list, kind by kind, or the selected
+//! memory's links drawn (`links`), beside the selected memory's detail: its
+//! strength, how it has been used, where it was learned and what it is linked
+//! with.
 
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::canvas::{Canvas, Line as CanvasLine};
 use ratatui::widgets::{Cell, Paragraph, Row, Wrap};
 use ratatui::Frame;
 
@@ -23,30 +18,12 @@ use crate::words;
 use super::lists::{self, Grid};
 use super::{clip, gauge_row, gauge_spans, heading, kv, panel, since, state_row};
 
-/// The three networks and where their clusters anchor on the canvas.
-const ANCHORS: [(MemoryNetwork, (f64, f64)); 3] = [
-    (MemoryNetwork::World, (0.0, 62.0)),
-    (MemoryNetwork::Bank, (-60.0, -38.0)),
-    (MemoryNetwork::Opinion, (60.0, -38.0)),
-];
-
-/// Cap the nodes drawn per network on the canvas. The graph is a visualization,
-/// not a list: a real store holds thousands of memories, and laying out and
-/// drawing every one each frame pegs a core and starves input for no visual gain
-/// (the ring just fills solid). Memories arrive sorted strongest-first per
-/// network, so the cap keeps the most reinforced anchors.
-const MAX_GRAPH_NODES_PER_NETWORK: usize = 48;
-
-/// Bound the edge scan too, so a dense relation set can't stall the frame (only
-/// edges joining drawn nodes paint anyway).
-const MAX_GRAPH_EDGES: usize = 256;
-
-/// The Memory page: the list of memories, or the graph of the kinds and
-/// their links (`l` swaps them), beside the detail of the one selected.
+/// The Memory page: the list of memories, or the selected memory's links,
+/// drawn (`l` swaps them), beside the detail of the one selected.
 pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     let [left, right] = super::list_columns(area);
     if app.memory_graph {
-        graph(f, app, left);
+        super::links::page(f, app, left);
     } else {
         list(f, app, left);
     }
@@ -160,94 +137,6 @@ fn edge_color(t: &Theme, e: EdgeType) -> Color {
         EdgeType::Caused | EdgeType::Follows => t.ink2,
         EdgeType::References => t.ink3,
     }
-}
-
-/// The penumbra graph: memories clustered by network, edges drawn between them.
-fn graph(f: &mut Frame, app: &App, area: Rect) {
-    let t = app.theme();
-    let block = panel(
-        &t,
-        Span::styled(" Memory · by kind ", Style::default().fg(t.ink2)),
-    );
-    let canvas = Canvas::default()
-        .block(block)
-        // A canvas resets its cells' background unless told the page's.
-        .background_color(t.ground)
-        .marker(app.canvas_marker())
-        .x_bounds([-100.0, 100.0])
-        .y_bounds([-100.0, 100.0])
-        .paint(move |ctx| {
-            // Lay each network's traces on a ring around its anchor. Only the
-            // capped subset is positioned and drawn (a real store holds thousands;
-            // the ring fills solid past a few dozen and drawing every one pegs the
-            // render). Keep each node's global index so the selection still lands.
-            let mut pos: HashMap<&str, (f64, f64)> = HashMap::new();
-            let mut nodes: Vec<(usize, &_, f64, f64)> = Vec::new();
-            for (net, (ax, ay)) in ANCHORS {
-                let mems: Vec<(usize, &_)> = app
-                    .memories
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, m)| m.network == net)
-                    .take(MAX_GRAPH_NODES_PER_NETWORK)
-                    .collect();
-                let n = mems.len();
-                for (j, (gi, m)) in mems.iter().enumerate() {
-                    let p = if n <= 1 {
-                        (ax, ay)
-                    } else {
-                        let ang = (j as f64 / n as f64) * TAU - FRAC_PI_2;
-                        (ax + 24.0 * ang.cos(), ay + 24.0 * ang.sin())
-                    };
-                    pos.insert(m.id.as_str(), p);
-                    nodes.push((*gi, *m, p.0, p.1));
-                }
-            }
-            // Edges first, under the nodes (only those joining drawn nodes).
-            for e in app.edges.iter().take(MAX_GRAPH_EDGES) {
-                if let (Some(&(x1, y1)), Some(&(x2, y2))) =
-                    (pos.get(e.from_id.as_str()), pos.get(e.to_id.as_str()))
-                {
-                    ctx.draw(&CanvasLine {
-                        x1,
-                        y1,
-                        x2,
-                        y2,
-                        color: edge_color(&t, e.edge_type),
-                    });
-                }
-            }
-            // Nodes: strength tints the glyph; the selected trace is accented,
-            // a consolidated one is filled. Iterate only the capped set.
-            for (gi, m, x, y) in &nodes {
-                let selected = *gi == app.selected_memory;
-                let glyph = if selected {
-                    "◉"
-                } else if m.is_consolidated() {
-                    "●"
-                } else {
-                    "○"
-                };
-                let col = if selected {
-                    t.accent
-                } else {
-                    t.fitness(app.strength_of(m), 0.9)
-                };
-                ctx.print(*x, *y, Span::styled(glyph, Style::default().fg(col)));
-            }
-            // Network labels under each cluster.
-            for (net, (ax, ay)) in ANCHORS {
-                ctx.print(
-                    ax - 3.0,
-                    ay - 30.0,
-                    Span::styled(
-                        net.as_str(),
-                        Style::default().fg(t.ink2).add_modifier(Modifier::BOLD),
-                    ),
-                );
-            }
-        });
-    f.render_widget(canvas, area);
 }
 
 /// A bold, dim section label.

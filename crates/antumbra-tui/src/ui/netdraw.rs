@@ -191,6 +191,19 @@ pub(super) fn fits(area: Rect, layout: &Layout, nodes: &[Node]) -> bool {
     longest <= usize::from(area.height) && columns(area.width, layout, nodes).is_some()
 }
 
+/// Whether drawing `layout` in `width` cells would cut a column's names to
+/// under `least` cells, where they are longer than that: true too when it
+/// would not fit at all. A name cut to a few letters says nothing.
+pub(super) fn cramped(width: u16, layout: &Layout, nodes: &[Node], least: u16) -> bool {
+    match columns(width, layout, nodes) {
+        Some(columns) => widest(layout, nodes)
+            .iter()
+            .zip(&columns)
+            .any(|(wanted, column)| column.chip < (*wanted).min(least)),
+        None => true,
+    }
+}
+
 /// Each slot's row. The first layer is spread down the picture; every later
 /// one puts a slot level with what points at it, where the slots above leave
 /// room, so most lines run straight across.
@@ -352,7 +365,11 @@ pub(super) fn draw(
                 along(&mut cells, area, to.enter, to.leave, to.y, solid);
             }
         }
-        *arrives.entry(edge.to).or_insert(false) |= edge.lit;
+        // An arrowhead only where a line arrives: an edge left undrawn for
+        // pointing backward has none.
+        if layout.layer_of(edge.to) > layout.layer_of(edge.from) {
+            *arrives.entry(edge.to).or_insert(false) |= edge.lit;
+        }
     }
 
     for ((x, y), cell) in &cells {

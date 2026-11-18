@@ -413,6 +413,11 @@ impl App {
     /// after kind in the order the title names the kinds. The server sends
     /// each kind strongest first, and that order is kept within it.
     pub fn listed_memories(&self) -> Vec<usize> {
+        // The graph is of links, so its keys move through the memories that
+        // have one.
+        if self.memory_graph {
+            return self.linked_memories();
+        }
         let of = |kind: MemoryNetwork| {
             self.memories
                 .iter()
@@ -465,12 +470,41 @@ impl App {
         }
     }
 
-    /// Swap the Memory page's list for the graph of the kinds and their
-    /// links, or back (`l` on the Memory page). The graph draws every kind.
+    /// The memories that are linked to another, as indices into `memories`:
+    /// the most linked first, then in the order the server sent them. A store
+    /// holds thousands of memories and a few links, so these are the ones a
+    /// picture of links has anything to say about.
+    pub fn linked_memories(&self) -> Vec<usize> {
+        let mut links: HashMap<&str, usize> = HashMap::new();
+        for e in &self.edges {
+            *links.entry(e.from_id.as_str()).or_default() += 1;
+            *links.entry(e.to_id.as_str()).or_default() += 1;
+        }
+        let mut linked: Vec<(usize, usize)> = self
+            .memories
+            .iter()
+            .enumerate()
+            .filter_map(|(i, m)| links.get(m.id.as_str()).map(|count| (i, *count)))
+            .collect();
+        linked.sort_by_key(|(i, count)| (std::cmp::Reverse(*count), *i));
+        linked.into_iter().map(|(i, _)| i).collect()
+    }
+
+    /// Swap the Memory page's list for the selected memory's links, drawn,
+    /// or back (`l` on the Memory page). The graph is of every kind, and its
+    /// keys move through the memories that have a link; when the one selected
+    /// has none, the selection goes to the most linked, so the graph opens on
+    /// a picture and not on a sentence saying there is none.
     pub fn toggle_memory_graph(&mut self) {
         self.memory_graph = !self.memory_graph;
         if self.memory_graph {
             self.memory_kind = None;
+            let linked = self.linked_memories();
+            if !linked.contains(&self.selected_memory) {
+                if let Some(&most) = linked.first() {
+                    self.selected_memory = most;
+                }
+            }
         }
     }
 

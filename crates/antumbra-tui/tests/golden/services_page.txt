@@ -24,7 +24,7 @@
 │                                                                                 ││                                             │
 │                                                                                 ││                                             │
 │                                                                                 ││                                             │
-│ ── declared   ╌╌ observed   ┄┄ learned or claimed   ▸ what a service depends on ││                                             │
+│ ── declared   ╌╌ observed   ┄┄ learned or claimed   ▸ depends on                ││                                             │
 ╰─────────────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────────────────╯
 
  ↑↓  move   enter  details   tab  turn round   h  hops   /  find   1-6  pages   a  ask   :  commands   ?  help   q  quit
