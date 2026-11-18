@@ -1,31 +1,33 @@
-╭ command ─────────────────────────────────────────────╮
-│› ▏                                                   │
-│                                                      │
-│▸ page · population                                   │
-│  page · memory networks                              │
-│  page · generational loop                            │
-│  page · evaluations                                  │
-│  page · sovereign mode                               │
-│  focus umbra · experts                               │
-│  focus penumbra · shadows                            │
-│  focus antumbra · boundaries                         │
-│  theme · cycle palette                               │
-│  layout · dashboard (all regions)                    │
-│  layout · focused (single detail)                    │
-│  layout · graph (full width)                         │
-│  layout · table (sortable experts)                   │
-│  sort · cycle the table column                       │
-│  fps · follow active monitor                         │
-│  fps · increase cap                                  │
-│  fps · decrease cap                                  │
-│  ask · route a task through the gate                 │
-│  connect · wire your agent (hooks + token)           │
-│  events · live store changes                         │
-│  gate · inspect the router (weights · self-routing)  │
-│  graduate the selected shadow                        │
-│  freeze · thaw the selected expert                   │
-│  loop · cancel a pending halt                        │
-│  reload from the store                               │
-│  help · keybindings                                  │
-│  quit                                                │
-╰──────────────────────────────────────────────────────╯
+╭ Commands ──────────────────────────────────────────────────╮
+│› ▏                                                         │
+│                                                            │
+│▸ Go to Population                                      1   │
+│  Go to Memory                                          2   │
+│  Go to Training                                        3   │
+│  Go to Evaluations                                     4   │
+│  Go to Agent                                           5   │
+│  Show the experts                                          │
+│  Show the candidates                                       │
+│  Show the boundaries                                       │
+│  Ask which expert would take a task                    a   │
+│  Router: how tasks are routed                              │
+│  Find in this list                                     /   │
+│  Freeze or thaw the selected expert                        │
+│  Graduate the selected candidate                           │
+│  Cancel the selected run's halt                            │
+│  Memory knobs                                          K   │
+│  Connect an agent                                      c   │
+│  History: what changed and what was done               e   │
+│  Layout: focused, one list and its detail                  │
+│  Layout: dashboard, all three lists at once                │
+│  Layout: graph, the experts alone                          │
+│  Layout: table, the experts as a table                     │
+│  Sort the experts by the next column                   s   │
+│  Theme: change to the next                             t   │
+│  Frame rate: follow the monitor                        0   │
+│  Frame rate: raise the cap                             +   │
+│  Frame rate: lower the cap                             -   │
+│  Reload now                                            r   │
+│  Help: every key, and what each word means             ?   │
+│  Quit                                                  q   │
+╰────────────────────────────────────────────────────────────╯

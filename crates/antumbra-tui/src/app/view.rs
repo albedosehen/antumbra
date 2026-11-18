@@ -20,10 +20,10 @@ impl App {
             Page::Memory => "memories",
             Page::Evals => "evaluations",
             Page::Sovereign => "skills",
-            Page::Loop => "loop runs",
+            Page::Loop => "training runs",
             Page::Population => match self.focus {
                 Focus::Experts => "experts",
-                Focus::Shadows => "shadows",
+                Focus::Shadows => "candidates",
                 Focus::Boundaries => "boundaries",
             },
         }
@@ -337,57 +337,6 @@ impl App {
 
     pub fn selected_memory(&self) -> Option<&Memory> {
         self.memories.get(self.selected_memory)
-    }
-
-    /// The KPI strip: five `[0,1]` quality ratios across the substrate, namely mean
-    /// population fitness, the frozen ratio, the shadow graduation rate, the
-    /// share of boundaries actively gating, and mean memory strength. Always
-    /// rendered above the body, so every page carries the same health readout.
-    pub fn dashboard_metrics(&self) -> [(&'static str, f32); 5] {
-        let mean = |vals: &[f32]| {
-            if vals.is_empty() {
-                0.0
-            } else {
-                vals.iter().sum::<f32>() / vals.len() as f32
-            }
-        };
-        let ratio = |num: usize, den: usize| {
-            if den == 0 {
-                0.0
-            } else {
-                num as f32 / den as f32
-            }
-        };
-        let fitness = mean(&self.experts.iter().map(|e| e.fitness).collect::<Vec<_>>());
-        let frozen = ratio(
-            self.experts.iter().filter(|e| e.is_frozen()).count(),
-            self.experts.len(),
-        );
-        let graduated = ratio(
-            self.shadows
-                .iter()
-                .filter(|s| s.status.as_str() == "graduated")
-                .count(),
-            self.shadows.len(),
-        );
-        let gating = ratio(
-            self.boundaries.iter().filter(|b| b.is_actionable()).count(),
-            self.boundaries.len(),
-        );
-        let memory = mean(
-            &self
-                .memories
-                .iter()
-                .map(|m| m.confidence)
-                .collect::<Vec<_>>(),
-        );
-        [
-            ("fitness", fitness),
-            ("frozen", frozen),
-            ("graduated", graduated),
-            ("gating", gating),
-            ("memory", memory),
-        ]
     }
 
     /// Edges touching `id`, as `(edge, is_outgoing)`: the selected trace's links.

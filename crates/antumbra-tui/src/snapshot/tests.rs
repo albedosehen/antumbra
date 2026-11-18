@@ -369,10 +369,10 @@ fn the_memory_detail_names_its_anchor_and_scope() -> anyhow::Result<()> {
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(text.contains("github.com/acme/orders@abc1234"), "{text}");
     assert!(text.contains("branch     feature/retry"), "{text}");
-    assert!(text.contains("other_branch"), "{text}");
+    assert!(text.contains("learned    ○ on another branch"), "{text}");
     app.git.branch = Some("feature/retry".into());
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
-    assert!(text.contains("in_scope"), "{text}");
+    assert!(text.contains("learned    ● here"), "{text}");
     Ok(())
 }
 
@@ -678,3 +678,4 @@ fn golden_focused_boundaries_panel() -> anyhow::Result<()> {
 mod behavior;
 mod keys;
 mod look;
+mod wording;

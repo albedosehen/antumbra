@@ -149,7 +149,7 @@ async fn a_read_only_console_answers_x_on_screen() -> anyhow::Result<()> {
     let (tone, text) = said(&app)?;
     assert_eq!(tone, Tone::Failed, "a refusal");
     assert!(
-        text.contains("read-only") && text.contains("--operator"),
+        text.contains("Read-only") && text.contains("--operator"),
         "{text}"
     );
     Ok(())

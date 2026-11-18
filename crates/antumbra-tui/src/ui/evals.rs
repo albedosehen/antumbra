@@ -5,8 +5,8 @@
 
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState};
+use ratatui::text::Span;
+use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 use ratatui::Frame;
 
 use antumbra_core::EvalStatus;
@@ -14,7 +14,7 @@ use antumbra_core::EvalStatus;
 use crate::app::App;
 use crate::theme::Tone;
 
-use super::panel;
+use super::{nothing_here, panel};
 
 /// What a run's status is to the eye: a pass is settled, a failure or an
 /// error failed, and one running or waiting still open.
@@ -23,6 +23,15 @@ pub(super) fn status_tone(s: EvalStatus) -> Tone {
         EvalStatus::Success => Tone::Settled,
         EvalStatus::Failure | EvalStatus::Error => Tone::Failed,
         EvalStatus::Running | EvalStatus::Pending => Tone::Open,
+    }
+}
+
+/// What a run checked, in the console's words: the stored kind `shadow` is a
+/// candidate here, and the rest read as they are stored.
+pub(super) fn kind_label(kind: &str) -> &str {
+    match kind {
+        "shadow" => "candidate",
+        other => other,
     }
 }
 
@@ -49,7 +58,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         .filter(|e| matches!(e.status, EvalStatus::Failure | EvalStatus::Error))
         .count();
     let title = format!(
-        " evaluations · {} runs · {} regressions ",
+        " Evaluations · {} runs · {} failed ",
         app.evals.len(),
         failures
     );
@@ -58,22 +67,20 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     if app.evals.is_empty() {
         let inner = block.inner(area);
         f.render_widget(block, area);
+        let why = "No evaluations yet: the training loop records one each time it checks an expert or a candidate.";
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "no evaluation runs yet; the tripwire is quiet",
-                Style::default().fg(t.ink3),
-            ))),
+            Paragraph::new(nothing_here(app, &t, why)).wrap(Wrap { trim: true }),
             inner,
         );
         return;
     }
 
     let header = Row::new([
-        Cell::from("subject"),
-        Cell::from("kind"),
-        Cell::from("task"),
-        Cell::from("status"),
-        Cell::from("fingerprint"),
+        Cell::from("SUBJECT"),
+        Cell::from("KIND"),
+        Cell::from("TASK"),
+        Cell::from("RESULT"),
+        Cell::from("FINGERPRINT"),
     ])
     .style(Style::default().fg(t.ink2).add_modifier(Modifier::BOLD));
 
@@ -86,14 +93,14 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
             .regression_fingerprint
             .as_deref()
             .map(|s| s.chars().take(8).collect::<String>())
-            .unwrap_or_else(|| "n/a".to_string());
+            .unwrap_or_else(|| "none".to_string());
         Row::new(vec![
             Cell::from(Span::styled(
                 e.subject_id.clone(),
                 Style::default().fg(t.ink),
             )),
             Cell::from(Span::styled(
-                e.subject_kind.as_str(),
+                kind_label(e.subject_kind.as_str()),
                 Style::default().fg(t.ink2),
             )),
             Cell::from(Span::styled(
@@ -112,7 +119,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
 
     let widths = [
         Constraint::Min(18),
-        Constraint::Length(8),
+        Constraint::Length(10),
         Constraint::Length(14),
         Constraint::Length(10),
         Constraint::Min(10),

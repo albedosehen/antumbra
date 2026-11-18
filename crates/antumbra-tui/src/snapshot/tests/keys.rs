@@ -303,7 +303,7 @@ fn the_help_lists_every_key_of_the_page_it_was_opened_on() -> anyhow::Result<()>
             // Tall enough that the help does not need to scroll.
             let text = to_text(&render(&mut app, 120, 70, 1600.0)?);
             assert!(
-                text.contains(&format!("help · {}", page.title())),
+                text.contains(&format!("Help · {}", page.title())),
                 "{}: titled for its page:\n{text}",
                 page.title()
             );
@@ -325,16 +325,38 @@ fn the_help_lists_every_key_of_the_page_it_was_opened_on() -> anyhow::Result<()>
 fn the_help_scrolls_where_it_does_not_fit() -> anyhow::Result<()> {
     let mut app = full_app();
     app.toggle_help();
+    // The help ends with the glossary, whose last entry is the operator.
+    let last = "reads its own workspace and acts on nothing";
     let top = to_text(&render(&mut app, 100, 20, 1600.0)?);
     assert!(top.contains("move the selection"), "{top}");
-    assert!(
-        !top.contains("this help"),
-        "the end is below the fold:\n{top}"
-    );
+    assert!(!top.contains(last), "the end is below the fold:\n{top}");
     app.detail_move(100);
     let end = to_text(&render(&mut app, 100, 20, 1600.0)?);
-    assert!(end.contains("this help"), "scrolled to the end:\n{end}");
+    assert!(end.contains(last), "scrolled to the end:\n{end}");
     assert!(!end.contains("move the selection"), "{end}");
+    Ok(())
+}
+
+#[test]
+fn a_palette_command_shows_the_key_that_does_the_same() -> anyhow::Result<()> {
+    // The key beside a command is the one bound to its action on the main
+    // view, so the palette cannot teach a key that does something else.
+    let app = full_app();
+    for command in crate::command::COMMANDS {
+        let mut chars = command.key.chars();
+        let key = match (chars.next(), chars.next()) {
+            (None, _) => continue,
+            (Some(c), None) => Key::Char(c),
+            _ => anyhow::bail!("`{}`: `{}` is not one key", command.label, command.key),
+        };
+        assert_eq!(
+            keys::action_for(&app, key),
+            Some(command.action),
+            "`{}` shows `{}`",
+            command.label,
+            command.key
+        );
+    }
     Ok(())
 }
 

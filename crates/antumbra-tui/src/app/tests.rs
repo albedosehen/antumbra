@@ -553,23 +553,6 @@ async fn eval_history_groups_by_subject_and_drill_down_opens() -> anyhow::Result
 }
 
 #[tokio::test]
-async fn dashboard_metrics_summarize_the_substrate() -> anyhow::Result<()> {
-    let (_store, mut app) = seeded().await?;
-    let m = app.dashboard_metrics();
-    assert_eq!(
-        m.map(|(label, _)| label),
-        ["fitness", "frozen", "graduated", "gating", "memory"]
-    );
-    // No experts seeded → zero mean fitness; the one shadow is exploring.
-    assert_eq!(m[0].1, 0.0, "no experts");
-    assert_eq!(m[2].1, 0.0, "no graduated shadows");
-    // Graduate the lone shadow → the graduation ratio becomes 1/1.
-    app.shadows[0].status = ShadowStatus::Graduated;
-    assert_eq!(app.dashboard_metrics()[2].1, 1.0);
-    Ok(())
-}
-
-#[tokio::test]
 async fn memories_and_edges_load_and_drive_the_memory_page() -> anyhow::Result<()> {
     let (store, mut app) = seeded().await?;
     assert!(app.memories.is_empty(), "no memory traces in the base seed");
@@ -647,7 +630,7 @@ async fn a_read_only_console_stages_no_action_and_says_why() -> anyhow::Result<(
     assert!(app.pending.is_none());
     assert_eq!(app.mode, Mode::Normal);
     assert!(
-        app.events.iter().any(|e| e.text.contains("read-only")),
+        app.events.iter().any(|e| e.text.contains("Read-only")),
         "the event stream says it is read-only"
     );
     Ok(())

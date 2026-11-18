@@ -19,7 +19,7 @@ pub(super) fn knobs_overlay(f: &mut Frame, app: &App) {
     let Some(area) = overlay_area(app, f.area()) else {
         return;
     };
-    let inner = overlay::modal(f, &t, area, "memory knobs");
+    let inner = overlay::modal(f, &t, area, "Memory knobs");
     let dim = Style::default().fg(t.ink2);
     let mut lines = vec![
         Line::from(Span::styled(

@@ -1,4 +1,4 @@
-╭ boundaries · 1 ─────────────────────────╮
+╭ Boundaries · 1 ─────────────────────────╮
 │▸ ● run `npm install`                    │
 │                                         │
 │                                         │
@@ -17,13 +17,15 @@
 │                                         │
 │                                         │
 │                                         │
+│                                         │
+│                                         │
 ╰─────────────────────────────────────────╯
-╭ scope ──────────────────────────────────╮
+╭ Boundary ───────────────────────────────╮
 │run `npm install`                        │
-│status     ● actionable · gates routing  │
-│feature    runtime                       │
-│grain      Project                       │
+│status     ● in force · routing avoids it│
+│decided by runtime                       │
+│applies to project                       │
 │confidence █████████▋── 0.80             │
-│incorrect  {"runtime":"deno"}            │
-│acceptable {"runtime":"node"}            │
+│wrong when {"runtime":"deno"}            │
+│right when {"runtime":"node"}            │
 ╰─────────────────────────────────────────╯

@@ -9,12 +9,12 @@ use ratatui::text::{Line, Span};
 use crate::app::App;
 use crate::theme::{Theme, Tone};
 
-use super::evals::{status_label, status_text, status_tone};
+use super::evals::{kind_label, status_label, status_text, status_tone};
 use super::loops::{stage_blurb, stage_label, STAGES};
 use super::overlays::{json_lines, section};
 use super::{
-    boundary_tone, context_fields, gauge_row, gauge_spans, heading, kv, reward_span, shadow_name,
-    shadow_tone, sparkline_row, state_row,
+    boundary_tone, context_fields, expert_state, gauge_row, gauge_spans, heading, kv, reward_span,
+    shadow_name, shadow_tone, sparkline_row, state_row,
 };
 /// The evaluation drill-down: the run's fields, the regression comparison
 /// against the previous run for the same subject (the no-forgetting
@@ -22,9 +22,9 @@ use super::{
 pub(super) fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
     let Some(run) = app.evals.get(app.selected_eval) else {
         return (
-            "evaluation".into(),
+            "Evaluation".into(),
             vec![Line::from(Span::styled(
-                "(no run selected)",
+                "No run is selected.",
                 Style::default().fg(t.ink3),
             ))],
         );
@@ -37,11 +37,11 @@ pub(super) fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
     };
     let short = |fp: Option<&str>| {
         fp.map(|s| s.chars().take(12).collect::<String>())
-            .unwrap_or_else(|| "n/a".to_string())
+            .unwrap_or_else(|| "none".to_string())
     };
 
     let mut l = vec![heading(t, run.subject_id.clone())];
-    l.push(kv(t, "kind", run.subject_kind.as_str()));
+    l.push(kv(t, "kind", kind_label(run.subject_kind.as_str())));
     l.push(kv(t, "task", &run.corpus_task_id));
     l.push(state_row(
         t,
@@ -54,7 +54,7 @@ pub(super) fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
         Span::styled(
             run.regression_fingerprint
                 .as_deref()
-                .unwrap_or("n/a")
+                .unwrap_or("none")
                 .to_string(),
             Style::default().fg(t.ink),
         ),
@@ -72,11 +72,11 @@ pub(super) fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
         .copied();
     l.push(Line::from(""));
     l.push(group(
-        "regression  (vs previous run for this subject)".into(),
+        "Regression check · against this subject's previous run".into(),
     ));
     match prev {
         None => l.push(Line::from(Span::styled(
-            "  no prior run to compare",
+            "  no earlier run to compare with",
             Style::default().fg(t.ink3),
         ))),
         Some(p) => {
@@ -84,14 +84,14 @@ pub(super) fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
             // tripwire is there to catch.
             let (verdict, color) = match (&run.regression_fingerprint, &p.regression_fingerprint) {
                 (Some(_), Some(_)) if run.fingerprint_matches(p) => (
-                    format!("{} stable", Tone::Settled.glyph()),
+                    format!("{} unchanged", Tone::Settled.glyph()),
                     t.tone(Tone::Settled),
                 ),
                 (Some(_), Some(_)) => (
-                    format!("{} DRIFTED: no-forgetting tripwire", Tone::Failed.glyph()),
+                    format!("{} changed since the previous run", Tone::Failed.glyph()),
                     t.tone(Tone::Failed),
                 ),
-                _ => ("n/a (no fingerprint)".to_string(), t.ink3),
+                _ => ("no fingerprint to compare".to_string(), t.ink3),
             };
             l.push(Line::from(vec![
                 Span::styled("  this      ", Style::default().fg(t.ink2)),
@@ -116,7 +116,7 @@ pub(super) fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
 
     // The subject's run history (newest first).
     l.push(Line::from(""));
-    l.push(group(format!("history  ·  {} runs", history.len())));
+    l.push(group(format!("History · {} runs", history.len())));
     for r in &history {
         let marker = if r.run_id.as_str() == run.run_id.as_str() {
             "▸"
@@ -137,7 +137,7 @@ pub(super) fn eval_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
         ]));
     }
 
-    (format!("evaluation · {}", run.subject_id), l)
+    (format!("Evaluation · {}", run.subject_id), l)
 }
 
 /// The loop drill-down: the focused run's place in the generational cycle (a
@@ -148,9 +148,9 @@ pub(super) fn loop_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
     use antumbra_core::generational::LoopState;
     let Some(head) = app.selected_loop_head() else {
         return (
-            "generational loop".into(),
+            "Training loop".into(),
             vec![Line::from(Span::styled(
-                "(no run selected)",
+                "No run is selected.",
                 Style::default().fg(t.ink3),
             ))],
         );
@@ -164,12 +164,12 @@ pub(super) fn loop_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
 
     let mut l = vec![heading(t, head.run_id.as_str().to_string())];
     l.push(kv(t, "generation", &head.generation.0.to_string()));
-    l.push(kv(t, "state", stage_label(head.state)));
+    l.push(kv(t, "stage", stage_label(head.state)));
 
     // Lifecycle ladder: stages before the current are done, the current is lit,
     // the rest pending. Paused has no current stage (the cycle is at rest).
     l.push(Line::from(""));
-    l.push(group("lifecycle".into()));
+    l.push(group("Stages".into()));
     let current_idx = STAGES.iter().position(|&s| s == head.state);
     for (i, &s) in STAGES.iter().enumerate() {
         let current = Some(i) == current_idx;
@@ -198,7 +198,7 @@ pub(super) fn loop_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
     }
     if head.state == LoopState::Paused {
         l.push(Line::from(Span::styled(
-            "  ‖ paused; resumes into grow",
+            "  ‖ paused: it resumes where it stopped",
             Style::default().fg(t.ink2),
         )));
     }
@@ -206,12 +206,12 @@ pub(super) fn loop_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
     l.push(Line::from(""));
     if app.halt_pending(&head.run_id) {
         l.push(Line::from(Span::styled(
-            "● graceful halt requested; stops at the next generation",
+            "● halt requested: this run stops at its next generation",
             Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
         )));
     } else {
         l.push(Line::from(Span::styled(
-            "running · x requests a graceful halt",
+            "running",
             Style::default().fg(t.ink3),
         )));
     }
@@ -220,7 +220,7 @@ pub(super) fn loop_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
     let history = app.loop_eval_history(head);
     l.push(Line::from(""));
     l.push(group(format!(
-        "evaluations  ·  {} for this run",
+        "Evaluations · {} for this run",
         history.len()
     )));
     if history.is_empty() {
@@ -238,7 +238,7 @@ pub(super) fn loop_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("{:<8}", r.subject_kind.as_str()),
+                    format!("{:<10}", kind_label(r.subject_kind.as_str())),
                     Style::default().fg(t.ink2),
                 ),
                 Span::styled(r.subject_id.clone(), Style::default().fg(t.ink)),
@@ -246,32 +246,33 @@ pub(super) fn loop_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
         }
     }
 
-    (format!("generational loop · {}", head.run_id.as_str()), l)
+    (format!("Training loop · {}", head.run_id.as_str()), l)
 }
 
 pub(super) fn expert_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
     let Some(e) = app.selected_expert() else {
         return (
-            "expert".into(),
+            "Expert".into(),
             vec![Line::from(Span::styled(
-                "(no expert selected)",
+                "No expert is selected.",
                 Style::default().fg(t.ink3),
             ))],
         );
     };
     let mut l = vec![heading(t, e.name.clone())];
     l.push(gauge_row(t, "fitness", e.fitness, t.accent));
-    l.push(kv(t, "frozen", if e.is_frozen() { "yes" } else { "no" }));
+    let (tone, state) = expert_state(e);
+    l.push(state_row(t, "state", tone, state));
     l.push(kv(t, "generation", &e.generation.0.to_string()));
-    l.push(kv(t, "base", &e.base_model));
-    l.push(kv(t, "artifact", &e.artifact_uri));
+    l.push(kv(t, "base model", &e.base_model));
+    l.push(kv(t, "adapter", &e.artifact_uri));
     if e.owner.is_some() || e.compartment.is_some() {
         l.push(kv(t, "owner", &format!("{:?}", e.owner)));
         l.push(kv(t, "compartment", &format!("{:?}", e.compartment)));
     }
     l.push(kv(t, "created", &e.created_at.to_rfc3339()));
     l.push(Line::from(""));
-    l.push(section(t, "capability card"));
+    l.push(section(t, "What it does"));
     if let Some(desc) = e
         .capability_card
         .get("description")
@@ -288,7 +289,7 @@ pub(super) fn expert_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
         .and_then(|v| v.as_array())
     {
         l.push(Line::from(Span::styled(
-            format!("  {} exemplars", ex.len()),
+            format!("  learned from {} examples", ex.len()),
             Style::default().fg(t.ink2),
         )));
         for (i, x) in ex.iter().enumerate() {
@@ -305,11 +306,11 @@ pub(super) fn expert_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
     // needed, the vector is already learned).
     if let (Some(router), Some(vec)) = (&app.router, &e.capability_vec) {
         l.push(Line::from(""));
-        l.push(section(t, "gate routing · this specialty"));
+        l.push(section(t, "Routing · a task of this kind goes to"));
         let routed = router.route(vec);
         if routed.is_empty() {
             l.push(Line::from(Span::styled(
-                "  escalates · out of distribution",
+                "  no expert: it goes to your agent",
                 Style::default().fg(t.ink2),
             )));
         } else {
@@ -336,15 +337,15 @@ pub(super) fn expert_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
             }
         }
     }
-    (format!("expert · {}", e.name), l)
+    (format!("Expert · {}", e.name), l)
 }
 
 pub(super) fn shadow_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
     let Some(s) = app.selected_shadow() else {
         return (
-            "shadow".into(),
+            "Candidate".into(),
             vec![Line::from(Span::styled(
-                "(no shadow selected)",
+                "No candidate is selected.",
                 Style::default().fg(t.ink3),
             ))],
         );
@@ -376,14 +377,14 @@ pub(super) fn shadow_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
             l.push(kv(t, "generation", &s.generation.0.to_string()));
             l.push(kv(
                 t,
-                "parent",
+                "trained from",
                 s.parent_expert.as_ref().map_or("-", |p| p.as_str()),
             ));
         }
     }
     l.push(kv(t, "adapter", s.adapter_uri.as_deref().unwrap_or("-")));
     let final_reward = s.reward_curve.last().copied().unwrap_or(0.0);
-    l.push(gauge_row(t, "final reward", final_reward, t.accent));
+    l.push(gauge_row(t, "reward", final_reward, t.accent));
     if !s.reward_curve.is_empty() {
         l.push(sparkline_row(t, "reward", &s.reward_curve));
         let vals = s
@@ -398,24 +399,24 @@ pub(super) fn shadow_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
         )));
     }
     l.push(kv(t, "created", &s.created_at.to_rfc3339()));
-    (format!("shadow · {}", shadow_name(s)), l)
+    (format!("Candidate · {}", shadow_name(s)), l)
 }
 
 pub(super) fn boundary_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
     let Some(b) = app.selected_boundary() else {
         return (
-            "boundary".into(),
+            "Boundary".into(),
             vec![Line::from(Span::styled(
-                "(no boundary selected)",
+                "No boundary is selected.",
                 Style::default().fg(t.ink3),
             ))],
         );
     };
     let mut l = vec![heading(t, b.behavior.clone())];
     let status = if b.is_actionable() {
-        "actionable · gates routing"
+        "in force · routing avoids it"
     } else {
-        "open · recorded, inert"
+        "recorded · not yet in force"
     };
     l.push(state_row(t, "status", boundary_tone(b), status));
     l.push(gauge_row(t, "confidence", b.confidence, t.accent));
@@ -426,8 +427,9 @@ pub(super) fn boundary_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static
     ));
     l.push(kv(
         t,
-        "grain",
-        &b.grain.map_or_else(|| "-".into(), |g| format!("{g:?}")),
+        "applies to",
+        &b.grain
+            .map_or_else(|| "-".into(), |g| format!("{g:?}").to_lowercase()),
     ));
     l.push(kv(t, "generation", &b.generation.0.to_string()));
     let feat = if b.governing_features.is_empty() {
@@ -435,11 +437,11 @@ pub(super) fn boundary_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static
     } else {
         b.governing_features.join(", ")
     };
-    l.push(kv(t, "features", &feat));
+    l.push(kv(t, "decided by", &feat));
     l.push(kv(t, "id", b.id.as_str()));
     l.push(kv(t, "created", &b.created_at.to_rfc3339()));
     l.push(Line::from(""));
-    l.push(section(t, "fail context (C)"));
+    l.push(section(t, "Wrong in this case"));
     // A training's context is its scope, the task and the answer given, read
     // as fields; a nested one, as the loop records, as JSON.
     if fields_read_flat(&b.fail_context) {
@@ -451,10 +453,10 @@ pub(super) fn boundary_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static
     }
     if let Some(ok) = &b.near_ok_context {
         l.push(Line::from(""));
-        l.push(section(t, "acceptable context (C')"));
+        l.push(section(t, "Right in this case"));
         l.extend(json_lines(t, ok));
     }
-    (format!("boundary · {}", b.behavior), l)
+    (format!("Boundary · {}", b.behavior), l)
 }
 
 /// Whether `context` is an object of plain values, which read better as

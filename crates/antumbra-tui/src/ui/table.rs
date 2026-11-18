@@ -16,18 +16,18 @@ use super::{gauge_spans, panel};
 pub(super) fn experts_table(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let title = format!(
-        " population · {} experts · sort: {} (s) ",
+        " Experts · {} · sorted by {} ",
         app.experts.len(),
         app.sort.name()
     );
     let block = panel(&t, Span::styled(title, Style::default().fg(t.ink2)));
 
     let header = Row::new([
-        Cell::from("name"),
-        Cell::from("fitness"),
-        Cell::from("gen"),
-        Cell::from("state"),
-        Cell::from("model"),
+        Cell::from("EXPERT"),
+        Cell::from("FITNESS"),
+        Cell::from("GEN"),
+        Cell::from("STATE"),
+        Cell::from("BASE MODEL"),
     ])
     .style(Style::default().fg(t.ink2).add_modifier(Modifier::BOLD));
 
@@ -41,11 +41,12 @@ pub(super) fn experts_table(f: &mut Frame, app: &App, area: Rect) {
             format!(" {:.2}", e.fitness),
             Style::default().fg(t.ink),
         ));
-        // Frozen is settled, sealed for good; live is still open to training.
+        // Frozen is settled, sealed for good; one that is not is still open
+        // to training.
         let (tone, state) = if e.is_frozen() {
             (Tone::Settled, "frozen")
         } else {
-            (Tone::Open, "live")
+            (Tone::Open, "open")
         };
         Row::new(vec![
             Cell::from(Span::styled(e.name.clone(), Style::default().fg(t.ink))),
