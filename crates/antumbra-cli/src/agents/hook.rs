@@ -252,9 +252,14 @@ pub fn answer(agent: Agent, event: Event, what: &Said) -> Option<String> {
         (Agent::Copilot, Event::Stop, Said::Reminder(text)) => {
             json!({ "decision": "block", "reason": text })
         }
+        // goose: a turn's end blocked with the reminder is all it reads from
+        // a hook. Context goes to the file it keeps in mind, not to it.
+        (Agent::Goose, Event::Stop, Said::Reminder(text)) => {
+            json!({ "decision": "block", "reason": text })
+        }
         // A reminder where a turn is not ending, or context where one is,
         // has no place to go.
-        (Agent::Gemini | Agent::Codex | Agent::Copilot, _, _) => return None,
+        (Agent::Gemini | Agent::Codex | Agent::Copilot | Agent::Goose, _, _) => return None,
     };
     Some(out.to_string())
 }
@@ -359,6 +364,8 @@ fn run_script(
 fn context_limit(agent: Agent) -> Option<u32> {
     match agent {
         Agent::Codex => Some(7_000),
+        // goose is handed the bootstrap again with every turn.
+        Agent::Goose => Some(4_000),
         Agent::Gemini | Agent::Copilot => None,
     }
 }
@@ -432,7 +439,17 @@ fn serve(args: &HookArgs) -> anyhow::Result<Option<String>> {
         &script_env(&reach, args.agent),
         cwd.as_deref(),
     )?;
-    Ok(answer(args.agent, args.event, &said(args.event, &stdout)))
+    let said = said(args.event, &stdout);
+    if args.agent == Agent::Goose {
+        // goose reads nothing a hook prints, so what the script said goes
+        // where goose will read it. Failing to is said, and is not the hook's
+        // failure.
+        let session = heard.get("session_id").and_then(Value::as_str);
+        if let Err(problem) = super::goose::keep_in_mind(&home, args.event, session, &said) {
+            eprintln!("antumbra hook goose: what was recalled was not kept for goose: {problem}");
+        }
+    }
+    Ok(answer(args.agent, args.event, &said))
 }
 
 /// Serve one hook. Never fails the agent that ran it.

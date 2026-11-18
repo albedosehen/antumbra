@@ -199,7 +199,7 @@ It never fails the agent: whatever goes wrong is said on standard error, and not
 
 `antumbra setup` connects Claude Code and every other agent it finds on the machine: one whose program is on the PATH, or whose config directory is there. `--agent` names them instead (`--agent gemini`, `--agent claude,codex`, `--agent copilot`, `--agent all`), and `--no-claude` leaves Claude Code out.
 
-Setup touches as little of a person's own files as each agent allows. Where an agent reads a directory of Antumbra's own, that is all setup writes: nothing the person wrote is edited, and connecting again replaces it (Gemini CLI). Where an agent reads only its user's files, setup adds to them as it does for Claude Code: with the agent's own command, or as text, adding only, with a backup, and never twice (Codex, and Copilot CLI's list of MCP servers). Either way `antumbra setup check` reads back what was written.
+Setup touches as little of a person's own files as each agent allows. Where an agent reads a directory of Antumbra's own, that is all setup writes: nothing the person wrote is edited, and connecting again replaces it (Gemini CLI, and goose's plugin). Where an agent reads only its user's files, setup adds to them as it does for Claude Code: with the agent's own command, or as text, adding only, with a backup, and never twice (Codex, Copilot CLI's list of MCP servers, and one line of goose's config). Either way `antumbra setup check` reads back what was written.
 
 | Agent | What setup writes | Opens with memory | Recall for each prompt | Reminder to store |
 | --- | --- | --- | --- | --- |
@@ -207,6 +207,7 @@ Setup touches as little of a person's own files as each agent allows. Where an a
 | Gemini CLI | an extension, `~/.gemini/extensions/antumbra`: the bridge and three hooks | yes | yes | yes |
 | Codex | the bridge, with `codex mcp add`; three hooks added to `~/.codex/hooks.json` | yes, once you approve the hooks | yes, once you approve the hooks | yes, once you approve the hooks |
 | Copilot CLI | a hooks file, `~/.copilot/hooks/antumbra.json`; the bridge added to `~/.copilot/mcp-config.json` | yes | yes | yes |
+| goose | a plugin, `~/.agents/plugins/antumbra`: the bridge and three hooks; one line in goose's `config.yaml` | yes, through the file goose keeps in mind | yes, the same way | yes |
 
 **Gemini CLI.** The extension holds a manifest with the bridge as its MCP server and a `hooks/hooks.json` with `SessionStart`, `BeforeAgent` and `AfterAgent`. Gemini CLI lists it (`gemini extensions list`) and `gemini extensions uninstall antumbra` removes it. Two things are Gemini CLI's own to decide, and setup leaves them as they are:
 
@@ -236,6 +237,16 @@ Codex moves a hook's context to a file past some 2,500 tokens, so its bootstrap 
 - It puts an MCP server's instructions in its system prompt only for servers on a list of its own, so the bridge's are not read there (`--allow-all-mcp-server-instructions` reads them for one run). The hooks carry what a session needs.
 - It asks before an Antumbra tool runs unless you allow it: `--allow-tool antumbra` for a run, or its permission settings.
 - Copilot in VS Code reads the same `~/.copilot` hooks and MCP servers, by VS Code's own account. That was not run here.
+
+**goose.** Antumbra is a plugin, `~/.agents/plugins/antumbra`, with the bridge as its MCP server (`.mcp.json`; goose lists it as `antumbra:antumbra`) and hooks on `SessionStart`, `UserPromptSubmit` and `Stop`. goose's hooks differ from the others' in one thing that shapes the rest: what a hook prints never reaches the model. A prompt hook's output is dropped, and a session-start hook can only show you a line.
+
+What goose does read on every turn is a file its config names, `GOOSE_MOIM_MESSAGE_FILE`, which it puts in front of the model as what is on its mind. So the hooks write that file (`~/.antumbra/goose/top-of-mind.md`): the session's bootstrap, kept to 4,000 characters because goose hands it over again with each turn, and under it what was recalled for the prompt in front of the model. Setup names the file in goose's `config.yaml` by adding one line, with a backup, and only when the config names none.
+
+- **If you already keep a file of your own in mind there, setup leaves it yours** and says so: goose then has Antumbra's tools, the bridge's instructions and the reminder, and nothing recalled is put in its context. Remove your line and run setup again to change that.
+- **The file is one for the machine.** Two goose sessions at once each write it, so a turn may read what the other session's prompt recalled. It is your own memory either way, and the next prompt rewrites it.
+- **On Windows goose runs its hooks with `sh`**, as it does everywhere, so its hooks need one on the PATH (Git for Windows has one). Setup and `setup check` say when there is none. The tools work either way.
+- At a turn's end goose shows "Stop hook `antumbra` blocked ending this turn": that is the reminder reaching the agent, which is asked once more and stops.
+- goose's config is `~/.config/goose/config.yaml`, on Windows `%APPDATA%\Block\goose\config\config.yaml`; `GOOSE_PATH_ROOT` moves both it and the plugins.
 
 ## Leaving work for another of your machines
 
