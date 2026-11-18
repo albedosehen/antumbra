@@ -1,17 +1,17 @@
-╭ help · population ───────────────────────────────────────────────────────╮
+╭ Help · Population ───────────────────────────────────────────────────────╮
 │move                                                                      │
 │  ↑↓  j k        move the selection                                       │
 │  home end  g G  jump to the first or the last                            │
 │  pgup pgdn      move ten at a time                                       │
 │  enter          open everything about what is selected                   │
-│  tab            move to the next list: experts, shadows, boundaries      │
+│  tab            move to the next list: experts, candidates, boundaries   │
 │  /              find in this list, and jump to it                        │
 │                                                                          │
 │act on the selection                                                      │
 │  x              thaw the selected expert, or freeze one that is not      │
 │                                                                          │
 │view                                                                      │
-│  1-5  [ ]       go to a page: population, memory, loop, evals, sovereign │
+│  1-5  [ ]       pages: Population, Memory, Training, Evaluations, Agent  │
 │  l  L           change the layout: focused, dashboard, graph, table      │
 │  s              sort the experts: by fitness, name or generation         │
 │  t              change the theme: night, mist, mono                      │
@@ -29,4 +29,6 @@
 │                                                                          │
 │in a panel                                                                │
 │  esc            close it; the footer shows its other keys                │
+│                                                                          │
+│words                                                                     │
 ╰──────────────────────────────────────────────────────────────────────────╯

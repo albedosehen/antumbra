@@ -239,7 +239,7 @@ It drafts `Source control` from the remotes of your working trees, proposing an 
 
 `/skill-doctor`, which finds the skills nobody uses, goes as well. `antumbra claude skills` reports the same from counters that two hooks keep ([hooks](../scripts/hooks/README.md)): one for a skill the agent calls and one for a skill you type, since neither hook sees the other's.
 
-The operator console shows both on its Sovereign page (`5` in `antumbra tui`, or `antumbra tui snapshot --page sovereign` for one frame): the rules, current or retired, and skill use, stalest first, from the memories of the workspace the console's token reads. It is read-only and queries nothing new.
+The operator console shows both on its Agent page (`5` in `antumbra tui`, or `antumbra tui snapshot --page agent` for one frame): the rules, current or retired, and skill use, least recently used first, from the memories of the workspace the console's token reads. It is read-only and queries nothing new.
 
 ## How the system keeps its memories
 
@@ -258,7 +258,7 @@ The counts live in their own table, apart from the memory, so counting a recall 
 
 ## The operator console
 
-`antumbra tui` (or `antumbra --tui`) shows the population, the memory, the loop and its evaluations, read from the Antumbra server your agent uses. It needs no flags after `antumbra setup`, or a Claude Code wired by hand:
+`antumbra tui` (or `antumbra --tui`) shows the population, the memory, the training loop and its evaluations, read from the Antumbra server your agent uses. It needs no flags after `antumbra setup`, or a Claude Code wired by hand:
 
 - The server is `--surface`, else `ANTUMBRA_URL`, else the one Claude Code's settings name (`env.ANTUMBRA_URL` in `settings.json`, under `CLAUDE_CONFIG_DIR` or `~/.claude`, where `antumbra setup` writes it), else the one `antumbra setup` recorded in `~/.antumbra/setup.json`, else `http://127.0.0.1:8081`.
 - The token is `--token`, else whichever token on hand is an operator's, else the first found: `ANTUMBRA_TOKEN`, the file `ANTUMBRA_TOKEN_FILE` names, `~/.antumbra/token.txt`, then those two in Claude Code's settings. A hook token in the environment and an operator's token saved to the file give the console the operator's.
@@ -269,7 +269,9 @@ The footer lists the keys of the view in front of you, and `?` lists every key o
 
 It is drawn in the dashboard's palette. `--theme` (`ANTUMBRA_THEME`) picks which: `night`, the dark one and the default; `mist`, the light one, for a light terminal; or `mono`, greys on the terminal's own background, for a terminal with few colours or one whose background should show through. `t` cycles them while it runs. A state is told by a shape and a word, never by colour alone: a filled dot for what is settled or in force, a ring for what is open or under way, a cross for what ended and a triangle for what failed, which is the one thing drawn in another colour.
 
-What it shows depends on the token. Any token shows its own workspace: its memories and their links, and the experts it may route to. An operator's token also shows the substrate, which belongs to no workspace: shadows in training, failure boundaries, the loop and its evaluations, and the router. Only an operator's token may act from the console: prune or graduate a shadow, freeze or thaw an expert, delete a boundary, halt the loop or cancel the halt, and turn the workspace's memory knobs (`K`). The Memory page shows each memory's strength beside its confidence, how often it was recalled, used and passed over, and when it was last of use, and lists each network strongest first. The server's operator mints one with `antumbra-mcp --mint-token --operator`, and `antumbra setup local` mints one for whoever runs the stack. A hosted workspace's tokens are never operators'.
+It uses the dashboard's words. Its pages are Population (the experts, the candidates in training and the boundaries), Memory, Training, Evaluations and Agent; a candidate is what the rest of this document calls a shadow, and its id still begins `shadow:`. The top bar says which server is read, whether the token is an operator's or read-only, and whether reads are succeeding. Under the tabs, a sentence says what the page in front is, and the help (`?`) ends with what each word means.
+
+What it shows depends on the token. Any token shows its own workspace: its memories and their links, and the experts it may route to. An operator's token also shows the substrate, which belongs to no workspace: shadows in training, failure boundaries, the loop and its evaluations, and the router. With any other token those lists say an operator's token is needed, not that they are empty. Only an operator's token may act from the console: prune or graduate a shadow, freeze or thaw an expert, delete a boundary, halt the loop or cancel the halt, and turn the workspace's memory knobs (`K`). The Memory page shows each memory's strength beside its confidence, how often it was recalled, used and passed over, and when it was last of use, and lists each network strongest first. The server's operator mints one with `antumbra-mcp --mint-token --operator`, and `antumbra setup local` mints one for whoever runs the stack. A hosted workspace's tokens are never operators'.
 
 The console reads `GET /console/snapshot` and acts with `POST /console/action`, both with the bearer token. Neither is an MCP tool, so no agent is offered them.
 

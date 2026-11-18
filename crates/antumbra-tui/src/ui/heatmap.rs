@@ -30,7 +30,7 @@ pub(super) fn reward_heatmap(f: &mut Frame, app: &App, area: Rect) {
     let block = panel(
         &t,
         Span::styled(
-            " reward landscape · shadows × steps ",
+            " Reward · each candidate, step by step ",
             Style::default().fg(t.ink2),
         ),
     );
@@ -41,7 +41,7 @@ pub(super) fn reward_heatmap(f: &mut Frame, app: &App, area: Rect) {
     if app.shadows.is_empty() || w == 0 {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "(no shadows, the penumbra is quiet)",
+                "No candidates yet.",
                 Style::default().fg(t.ink3),
             ))),
             inner,

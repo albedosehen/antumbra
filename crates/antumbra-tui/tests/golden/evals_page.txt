@@ -1,14 +1,14 @@
-╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│◆◆◆  ANTUMBRA   self-improving substrate · 1 umbra · gen 0  ·  144 fps  ·  focused                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-  1 population  ·  2 memory  ·  3 loop  ·  4 evals  ·  5 sovereign
-  fitness █████▍ 0.90  frozen ██████ 1.00  graduated ────── 0.00  gating ────── 0.00  memory ████▊─ 0.79
-╭ evaluations · 4 runs · 2 regressions ────────────────────────────────────────────────────────────────────────────────╮
-│  subject                                  kind     task           status     fingerprint                             │
-│▸ expert:arith-specialist                  expert   task:arith     ▲ FAIL     ffffffff                                │
-│  expert:arith-specialist                  expert   task:arith     ● pass     a1b2c3d4                                │
-│  shadow:g3                                shadow   task:arith     ▲ FAIL     n/a                                     │
-│  router                                   router   task:arith     ○ running  n/a                                     │
+ ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                 ● live
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent
+ Evaluations: each check of an expert or a candidate against a task. A frozen expert must keep passing.
+╭ Evaluations · 4 runs · 2 failed ─────────────────────────────────────────────────────────────────────────────────────╮
+│  SUBJECT                                 KIND       TASK           RESULT     FINGERPRINT                            │
+│▸ expert:arith-specialist                 expert     task:arith     ▲ FAIL     ffffffff                               │
+│  expert:arith-specialist                 expert     task:arith     ● pass     a1b2c3d4                               │
+│  shadow:g3                               candidate  task:arith     ▲ FAIL     none                                   │
+│  router                                  router     task:arith     ○ running  none                                   │
+│                                                                                                                      │
+│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

@@ -23,6 +23,7 @@ mod sovereign;
 mod theme;
 mod transition;
 mod ui;
+mod words;
 
 /// The workspace `--demo` seeds and reads its memories as.
 pub(crate) const DEMO_TENANT: &str = "ws:demo";
@@ -111,7 +112,9 @@ enum Command {
         /// Animation clock (ms) to freeze the frame at (deterministic output).
         #[arg(long, default_value_t = 1600.0)]
         at_ms: f64,
-        /// Top-level page to render: population, memory, loop, evals, or sovereign.
+        /// Top-level page to render: population, memory, training, evaluations,
+        /// or agent (their former names, loop, evals and sovereign, are taken
+        /// too).
         #[arg(long, default_value = "population")]
         page: String,
         /// Body layout to render: focused, dashboard, graph, or table.
@@ -169,14 +172,9 @@ pub async fn run(args: Args) -> Result<()> {
             let mut app = App::load(&backend)
                 .await
                 .with_context(|| backend.unreachable())?;
+            app.demo = demo || args.demo;
             app.theme_idx = theme::Theme::index_of(&args.theme);
-            app.set_page(match page.as_str() {
-                "memory" => app::Page::Memory,
-                "loop" => app::Page::Loop,
-                "evals" => app::Page::Evals,
-                "sovereign" => app::Page::Sovereign,
-                _ => app::Page::Population,
-            });
+            app.set_page(app::Page::from_name(page));
             app.set_layout(match layout.as_str() {
                 "dashboard" => app::LayoutMode::Dashboard,
                 "graph" => app::LayoutMode::Graph,

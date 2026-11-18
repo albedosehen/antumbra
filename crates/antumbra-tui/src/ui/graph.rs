@@ -15,10 +15,7 @@ use super::{panel, pulse};
 
 pub(super) fn graph(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
-    let block = panel(
-        &t,
-        Span::styled(" population ", Style::default().fg(t.ink2)),
-    );
+    let block = panel(&t, Span::styled(" Experts ", Style::default().fg(t.ink2)));
     // Ease the whole graph in over the first 0.8s (intro reveal).
     let intro = (app.clock_ms / 800.0).min(1.0);
     let canvas = Canvas::default()

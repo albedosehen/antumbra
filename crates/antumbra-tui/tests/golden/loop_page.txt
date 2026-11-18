@@ -1,18 +1,18 @@
-╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│◆◆◆  ANTUMBRA   self-improving substrate · 1 umbra · gen 0  ·  144 fps  ·  focused                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-  1 population  ·  2 memory  ·  3 loop  ·  4 evals  ·  5 sovereign
-  fitness █████▍ 0.90  frozen ██████ 1.00  graduated ────── 0.00  gating ────── 0.00  memory ████▊─ 0.79
-╭ generational loop ───────────────────────────────────────────────────────────────────────────────────────────────────╮
+ ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                 ● live
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent
+ Training: the loop that finds weak spots, trains candidates, checks them and admits the winners.
+╭ Training loop ───────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                                      │
-│  generation 4    ·    run:demo    ·    state score                                                                   │
+│  generation 4    ·    run:demo    ·    stage score                                                                   │
 │                                                                                                                      │
 │  ○ grow  →  ○ explore  →  ◉ score  →  ○ decide  →  ○ consolidate  ↺                                                  │
 │                                                                                                                      │
-│  → verifiers + critic produce reward signals                                                                         │
+│  → each candidate's answers are checked                                                                              │
 │                                                                                                                      │
-│  x · request a graceful halt (stops at the next generation)                                                          │
-│  enter · inspect this run                                                                                            │
+│  x · halt this run at its next generation                                                                            │
+│  enter · everything about this run                                                                                   │
+│                                                                                                                      │
+│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │

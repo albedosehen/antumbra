@@ -25,14 +25,15 @@ fn header<'a>(t: &Theme, names: &[&'a str]) -> Row<'a> {
 fn rules(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let view = &app.sovereign;
-    let title = format!(" rules · {} ", view.rules.len());
+    let title = format!(" Rules · {} ", view.rules.len());
     let block = panel(&t, Span::styled(title, Style::default().fg(t.ink2)));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let note = view.checked.as_deref().unwrap_or(
-        "no rules kept yet: `antumbra claude remember` writes them to a claude-code compartment",
-    );
+    let note = view
+        .checked
+        .as_deref()
+        .unwrap_or("No rules kept yet: `antumbra claude remember` writes one.");
     let parts = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
@@ -63,14 +64,17 @@ fn rules(f: &mut Frame, app: &App, area: Rect) {
         ])
     });
     let table = Table::new(rows, [Constraint::Min(22), Constraint::Min(16)])
-        .header(header(&t, &["rule", "workspaces"]));
+        .header(header(&t, &["RULE", "WORKSPACES"]));
     f.render_widget(table, *table_area);
 }
 
 fn skills(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let view = &app.sovereign;
-    let title = format!(" skill use · {} · stalest first ", view.skills.len());
+    let title = format!(
+        " Skills · {} · least recently used first ",
+        view.skills.len()
+    );
     let block = panel(&t, Span::styled(title, Style::default().fg(t.ink2)));
 
     if view.skills.is_empty() {
@@ -78,7 +82,7 @@ fn skills(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(block, area);
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "no skill has been counted yet: two hooks run `antumbra claude skill-used`",
+                "No skill use counted yet: the hooks count one with `antumbra claude skill-used`.",
                 Style::default().fg(t.ink3),
             )))
             .wrap(Wrap { trim: true }),
@@ -126,7 +130,7 @@ fn skills(f: &mut Frame, app: &App, area: Rect) {
         Constraint::Length(10),
     ];
     let table = Table::new(rows, widths)
-        .header(header(&t, &["skill", "workspace", "uses", "last used"]))
+        .header(header(&t, &["SKILL", "WORKSPACE", "USES", "LAST USED"]))
         .block(block)
         .row_highlight_style(t.selected())
         .highlight_symbol("▸ ");

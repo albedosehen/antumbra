@@ -8,14 +8,14 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use antumbra_core::generational::LoopState;
 
 use crate::app::App;
 
-use super::panel;
+use super::{nothing_here, panel};
 
 /// The forward cycle, in order (Paused is a rest state, shown separately).
 pub(super) const STAGES: [LoopState; 5] = [
@@ -42,12 +42,16 @@ pub(super) fn stage_label(s: LoopState) -> &'static str {
 
 pub(super) fn stage_blurb(s: LoopState) -> &'static str {
     match s {
-        LoopState::Grow => "find where the population is weak; spawn shadows there",
-        LoopState::Explore => "shadows train (DIY candle QLoRA via the trainer)",
-        LoopState::Score => "verifiers + critic produce reward signals",
-        LoopState::Decide => "winners graduate to experts; losers prune + log a boundary",
-        LoopState::Consolidate => "update fitness, merge/decay the stores, reindex, checkpoint",
-        LoopState::Paused => "fully resumable rest state",
+        LoopState::Grow => "find where the experts are weak, and start candidates there",
+        LoopState::Explore => "the candidates train",
+        LoopState::Score => "each candidate's answers are checked",
+        LoopState::Decide => {
+            "the winners become experts; the rest are pruned, and where they failed is recorded"
+        }
+        LoopState::Consolidate => {
+            "fitness is updated and the stores tidied, for the next generation"
+        }
+        LoopState::Paused => "at rest; it resumes where it stopped",
     }
 }
 
@@ -55,17 +59,15 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let block = panel(
         &t,
-        Span::styled(" generational loop ", Style::default().fg(t.ink2)),
+        Span::styled(" Training loop ", Style::default().fg(t.ink2)),
     );
     let inner = block.inner(area);
     f.render_widget(block, area);
 
     let Some(head) = app.selected_loop_head() else {
+        let why = "No training loop has run yet: `antumbra loop` or `antumbra train` runs one.";
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "loop not started; no checkpoint yet",
-                Style::default().fg(t.ink3),
-            ))),
+            Paragraph::new(nothing_here(app, &t, why)).wrap(Wrap { trim: true }),
             inner,
         );
         return;
@@ -109,7 +111,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         }
         if end < app.loop_heads.len() {
             lines.push(Line::from(Span::styled(
-                format!("  + {} more run(s)", app.loop_heads.len() - end),
+                format!("  and {} more", app.loop_heads.len() - end),
                 Style::default().fg(t.ink3),
             )));
         }
@@ -123,7 +125,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("    ·    {}    ·    state ", head.run_id.as_str()),
+            format!("    ·    {}    ·    stage ", head.run_id.as_str()),
             Style::default().fg(t.ink2),
         ),
         Span::styled(
@@ -160,7 +162,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     if head.state == LoopState::Paused {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "  ‖ paused; resumes into grow",
+            "  ‖ paused: it resumes where it stopped",
             Style::default().fg(t.ink2),
         )));
     }
@@ -171,21 +173,21 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         // accent, which marks what is in force, and not the danger colour,
         // which is kept for what failed.
         lines.push(Line::from(Span::styled(
-            "  ● halt requested; the loop will stop at the next generation",
+            "  ● halt requested: this run stops at its next generation",
             Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
             "    x · cancel the halt",
             Style::default().fg(t.ink3),
         )));
-    } else {
+    } else if app.operator {
         lines.push(Line::from(Span::styled(
-            "  x · request a graceful halt (stops at the next generation)",
+            "  x · halt this run at its next generation",
             Style::default().fg(t.ink3),
         )));
     }
     lines.push(Line::from(Span::styled(
-        "  enter · inspect this run",
+        "  enter · everything about this run",
         Style::default().fg(t.ink3),
     )));
 

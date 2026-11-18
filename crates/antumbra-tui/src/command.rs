@@ -64,122 +64,88 @@ pub enum Action {
     Decline,
 }
 
-/// A palette entry: the searchable label and the action it runs.
+/// A palette entry: what it does, in plain words that are also what a query
+/// is matched against, the key that does the same from the main view (empty
+/// for one that has none), and the action it runs.
 pub struct Command {
     pub label: &'static str,
+    pub key: &'static str,
     pub action: Action,
 }
 
-/// The palette's full command list, in default (unfiltered) order.
+const fn command(label: &'static str, key: &'static str, action: Action) -> Command {
+    Command { label, key, action }
+}
+
+/// The palette's full command list, in default (unfiltered) order. Each key
+/// is the one [`crate::keys`] binds to the same action, which a test holds
+/// it to.
 pub const COMMANDS: &[Command] = &[
-    Command {
-        label: "page · population",
-        action: Action::Page(Page::Population),
-    },
-    Command {
-        label: "page · memory networks",
-        action: Action::Page(Page::Memory),
-    },
-    Command {
-        label: "page · generational loop",
-        action: Action::Page(Page::Loop),
-    },
-    Command {
-        label: "page · evaluations",
-        action: Action::Page(Page::Evals),
-    },
-    Command {
-        label: "page · sovereign mode",
-        action: Action::Page(Page::Sovereign),
-    },
-    Command {
-        label: "focus umbra · experts",
-        action: Action::Focus(Focus::Experts),
-    },
-    Command {
-        label: "focus penumbra · shadows",
-        action: Action::Focus(Focus::Shadows),
-    },
-    Command {
-        label: "focus antumbra · boundaries",
-        action: Action::Focus(Focus::Boundaries),
-    },
-    Command {
-        label: "theme · cycle palette",
-        action: Action::CycleTheme,
-    },
-    Command {
-        label: "layout · dashboard (all regions)",
-        action: Action::Layout(LayoutMode::Dashboard),
-    },
-    Command {
-        label: "layout · focused (single detail)",
-        action: Action::Layout(LayoutMode::Focused),
-    },
-    Command {
-        label: "layout · graph (full width)",
-        action: Action::Layout(LayoutMode::Graph),
-    },
-    Command {
-        label: "layout · table (sortable experts)",
-        action: Action::Layout(LayoutMode::Table),
-    },
-    Command {
-        label: "sort · cycle the table column",
-        action: Action::CycleSort,
-    },
-    Command {
-        label: "fps · follow active monitor",
-        action: Action::FollowMonitor,
-    },
-    Command {
-        label: "fps · increase cap",
-        action: Action::FpsUp,
-    },
-    Command {
-        label: "fps · decrease cap",
-        action: Action::FpsDown,
-    },
-    Command {
-        label: "ask · route a task through the gate",
-        action: Action::Ask,
-    },
-    Command {
-        label: "connect · wire your agent (hooks + token)",
-        action: Action::Connect,
-    },
-    Command {
-        label: "events · live store changes",
-        action: Action::Events,
-    },
-    Command {
-        label: "gate · inspect the router (weights · self-routing)",
-        action: Action::Gate,
-    },
-    Command {
-        label: "graduate the selected shadow",
-        action: Action::GraduateShadow,
-    },
-    Command {
-        label: "freeze · thaw the selected expert",
-        action: Action::FreezeExpert,
-    },
-    Command {
-        label: "loop · cancel a pending halt",
-        action: Action::CancelHalt,
-    },
-    Command {
-        label: "reload from the store",
-        action: Action::Reload,
-    },
-    Command {
-        label: "help · keybindings",
-        action: Action::Help,
-    },
-    Command {
-        label: "quit",
-        action: Action::Quit,
-    },
+    command("Go to Population", "1", Action::Page(Page::Population)),
+    command("Go to Memory", "2", Action::Page(Page::Memory)),
+    command("Go to Training", "3", Action::Page(Page::Loop)),
+    command("Go to Evaluations", "4", Action::Page(Page::Evals)),
+    command("Go to Agent", "5", Action::Page(Page::Sovereign)),
+    command("Show the experts", "", Action::Focus(Focus::Experts)),
+    command("Show the candidates", "", Action::Focus(Focus::Shadows)),
+    command("Show the boundaries", "", Action::Focus(Focus::Boundaries)),
+    command("Ask which expert would take a task", "a", Action::Ask),
+    command("Router: how tasks are routed", "", Action::Gate),
+    command("Find in this list", "/", Action::Filter),
+    command(
+        "Freeze or thaw the selected expert",
+        "",
+        Action::FreezeExpert,
+    ),
+    command(
+        "Graduate the selected candidate",
+        "",
+        Action::GraduateShadow,
+    ),
+    command("Cancel the selected run's halt", "", Action::CancelHalt),
+    command("Memory knobs", "K", Action::Knobs),
+    command("Connect an agent", "c", Action::Connect),
+    command(
+        "History: what changed and what was done",
+        "e",
+        Action::Events,
+    ),
+    command(
+        "Layout: focused, one list and its detail",
+        "",
+        Action::Layout(LayoutMode::Focused),
+    ),
+    command(
+        "Layout: dashboard, all three lists at once",
+        "",
+        Action::Layout(LayoutMode::Dashboard),
+    ),
+    command(
+        "Layout: graph, the experts alone",
+        "",
+        Action::Layout(LayoutMode::Graph),
+    ),
+    command(
+        "Layout: table, the experts as a table",
+        "",
+        Action::Layout(LayoutMode::Table),
+    ),
+    command(
+        "Sort the experts by the next column",
+        "s",
+        Action::CycleSort,
+    ),
+    command("Theme: change to the next", "t", Action::CycleTheme),
+    command("Frame rate: follow the monitor", "0", Action::FollowMonitor),
+    command("Frame rate: raise the cap", "+", Action::FpsUp),
+    command("Frame rate: lower the cap", "-", Action::FpsDown),
+    command("Reload now", "r", Action::Reload),
+    command(
+        "Help: every key, and what each word means",
+        "?",
+        Action::Help,
+    ),
+    command("Quit", "q", Action::Quit),
 ];
 
 /// Case-insensitive subsequence score (lower is better): rewards an early first
@@ -234,9 +200,9 @@ mod tests {
 
     #[test]
     fn fuzzy_matches_subsequences_case_insensitively() -> anyhow::Result<()> {
-        assert!(fuzzy_score("theme · cycle palette", "theme").is_some());
-        assert!(fuzzy_score("theme · cycle palette", "cyc").is_some());
-        assert!(fuzzy_score("reload from the store", "RLD").is_some());
+        assert!(fuzzy_score("Theme: change to the next", "theme").is_some());
+        assert!(fuzzy_score("Theme: change to the next", "chg").is_some());
+        assert!(fuzzy_score("Reload now", "RLD").is_some());
         // Out-of-order characters are not a subsequence.
         assert!(fuzzy_score("reload", "dler").is_none());
         // An empty query matches everything.
@@ -259,15 +225,14 @@ mod tests {
 
     #[test]
     fn matches_filters_and_ranks() -> anyhow::Result<()> {
-        // The literal `fps` commands score best and lead the list (a fuzzy
-        // subsequence like "focus penumbra · shadows" may also match, but ranks
-        // lower).
-        let fps = matches("fps");
-        assert!(fps.len() >= 3, "the fps commands surface for 'fps'");
+        // The commands that say `frame` outright score best and lead the list
+        // (a looser subsequence elsewhere may also match, but ranks lower).
+        let frame = matches("frame");
+        assert!(frame.len() >= 3, "the frame-rate commands surface");
         assert!(
-            fps.iter().take(3).all(|c| c.label.contains("fps")),
-            "the literal fps commands rank first: {:?}",
-            fps.iter().map(|c| c.label).collect::<Vec<_>>()
+            frame.iter().take(3).all(|c| c.label.contains("Frame rate")),
+            "the frame-rate commands rank first: {:?}",
+            frame.iter().map(|c| c.label).collect::<Vec<_>>()
         );
         // A distinctive query narrows to one command.
         let quit = matches("quit");
@@ -275,6 +240,29 @@ mod tests {
         assert_eq!(quit[0].action, Action::Quit);
         // An empty query returns the whole registry in order.
         assert_eq!(matches("").len(), COMMANDS.len());
+        Ok(())
+    }
+
+    #[test]
+    fn every_command_says_what_it_does_in_plain_words() -> anyhow::Result<()> {
+        for command in COMMANDS {
+            let lower = command.label.to_lowercase();
+            for internal in ["umbra", "shadow", "substrate", "gate"] {
+                assert!(
+                    !lower.contains(internal),
+                    "`{}` says `{internal}`",
+                    command.label
+                );
+            }
+            assert!(
+                command.label.chars().next().is_some_and(char::is_uppercase),
+                "`{}` starts a sentence",
+                command.label
+            );
+        }
+        // No two commands read alike.
+        let labels: std::collections::HashSet<&str> = COMMANDS.iter().map(|c| c.label).collect();
+        assert_eq!(labels.len(), COMMANDS.len());
         Ok(())
     }
 }

@@ -11,13 +11,14 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::canvas::{Canvas, Line as CanvasLine};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use antumbra_core::{scope_of_evidence, EdgeType, GitProvenance, MemoryNetwork, Scope};
 
 use crate::app::App;
 use crate::theme::{Theme, Tone};
+use crate::words;
 
 use super::{clip, gauge_row, heading, kv, panel, state_row};
 
@@ -64,7 +65,7 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let block = panel(
         &t,
-        Span::styled(" penumbra · memory networks ", Style::default().fg(t.ink2)),
+        Span::styled(" Memory · by kind ", Style::default().fg(t.ink2)),
     );
     let canvas = Canvas::default()
         .block(block)
@@ -164,7 +165,7 @@ fn anchor_lines<'a>(t: &Theme, evidence: &[String], app: &App, w: usize) -> Opti
     let room = w.saturating_sub(11);
     let mut lines = vec![kv(
         t,
-        "anchor",
+        "learned at",
         &clip(&format!("{}@{commit}", anchor.repo), room),
     )];
     if let Some(branch) = &anchor.branch {
@@ -174,13 +175,14 @@ fn anchor_lines<'a>(t: &Theme, evidence: &[String], app: &App, w: usize) -> Opti
     // Learned here is in force; learned elsewhere is open to doubt; an
     // anchor whose branch is gone has failed; one that cannot be told is set
     // aside.
-    let tone = match scope {
-        Scope::InScope => Tone::Settled,
-        Scope::OtherBranch | Scope::OtherRepo => Tone::Open,
-        Scope::Orphaned => Tone::Failed,
-        Scope::Unknown => Tone::Ended,
+    let (tone, where_) = match scope {
+        Scope::InScope => (Tone::Settled, "here"),
+        Scope::OtherBranch => (Tone::Open, "on another branch"),
+        Scope::OtherRepo => (Tone::Open, "in another repository"),
+        Scope::Orphaned => (Tone::Failed, "on a branch that is gone"),
+        Scope::Unknown => (Tone::Ended, "unknown"),
     };
-    lines.push(state_row(t, "scope", tone, scope.as_str()));
+    lines.push(state_row(t, "learned", tone, where_));
     Some(lines)
 }
 
@@ -189,7 +191,7 @@ fn anchor_lines<'a>(t: &Theme, evidence: &[String], app: &App, w: usize) -> Opti
 /// use. "never seen" for one the system has not watched yet.
 fn use_lines<'a>(t: &Theme, app: &App, m: &antumbra_core::Memory) -> Vec<Line<'a>> {
     let Some(u) = app.usage_of(m) else {
-        return vec![kv(t, "use", "never seen")];
+        return vec![kv(t, "use", "not seen in use yet")];
     };
     let mut lines = vec![
         kv(t, "recalled", &u.recalled.to_string()),
@@ -225,15 +227,21 @@ fn ago(d: chrono::Duration) -> String {
 /// The selected trace: its fields, evidence, and the edges touching it.
 fn detail(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
-    let block = panel(&t, Span::styled(" memory ", Style::default().fg(t.ink2)));
+    let block = panel(
+        &t,
+        Span::styled(" Selected memory ", Style::default().fg(t.ink2)),
+    );
     let inner = block.inner(area);
     f.render_widget(block, area);
     let Some(m) = app.selected_memory() else {
+        // Every token reads its own workspace's memories, so none listed is
+        // none stored.
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "penumbra is empty; no memory traces",
+                "No memories yet: an agent stores one when it learns something worth keeping. Press c for how to connect one.",
                 Style::default().fg(t.ink3),
-            ))),
+            )))
+            .wrap(Wrap { trim: true }),
             inner,
         );
         return;
@@ -244,16 +252,16 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
     let mut lines = vec![
         heading(&t, clip(&m.content, w)),
         Line::from(""),
-        kv(&t, "network", m.network.as_str()),
+        kv(&t, "kind", words::network(m.network.as_str())),
         kv(&t, "status", m.status.as_str()),
         gauge_row(&t, "strength", strength, t.accent),
         gauge_row(&t, "confidence", m.confidence, t.accent),
-        kv(&t, "reinforce", &m.reinforcement.to_string()),
-        kv(&t, "volatile", if m.volatile { "yes" } else { "no" }),
+        kv(&t, "reinforced", &format!("{} times", m.reinforcement)),
+        kv(&t, "may change", if m.volatile { "yes" } else { "no" }),
     ];
     lines.extend(use_lines(&t, app, m));
     if let Some(exp) = &m.consolidated_expert {
-        lines.push(kv(&t, "expert", exp.as_str()));
+        lines.push(kv(&t, "trained to", exp.as_str()));
     }
     if let Some(author) = &m.author {
         let host = m.author_host.as_deref().unwrap_or("-");
@@ -265,7 +273,7 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
 
     if !m.evidence.is_empty() {
         lines.push(Line::from(""));
-        lines.push(group(&t, "evidence".into()));
+        lines.push(group(&t, "Evidence".into()));
         for ev in &m.evidence {
             lines.push(Line::from(Span::styled(
                 format!("  · {}", clip(ev, w.saturating_sub(4))),
@@ -276,7 +284,7 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
 
     let edges = app.memory_edges(m.id.as_str());
     lines.push(Line::from(""));
-    lines.push(group(&t, format!("edges ({})", edges.len())));
+    lines.push(group(&t, format!("Links · {}", edges.len())));
     for (e, outgoing) in &edges {
         let arrow = if *outgoing { "→" } else { "←" };
         let other = if *outgoing {

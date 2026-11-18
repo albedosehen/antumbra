@@ -1,11 +1,13 @@
-╭ expert ─────────────────────────────────╮
+╭ Expert ─────────────────────────────────╮
 │arith-specialist                         │
 │fitness    ██████████▊─ 0.90             │
-│frozen     yes                           │
+│state      ● frozen                      │
 │generation 0                             │
-│base       base                          │
+│base model base                          │
 │                                         │
-│2 learned exemplars                      │
+│learned from 2 examples                  │
+│                                         │
+│                                         │
 │                                         │
 │                                         │
 │                                         │
@@ -20,10 +22,10 @@
 │                                         │
 │                                         │
 ╰─────────────────────────────────────────╯
-╭ gate ───────────────────────────────────╮
-│router     heuristic (untrained)         │
-│boundaries 0 (0 actionable)              │
-│                                         │
+╭ Routing ────────────────────────────────╮
+│router     not trained yet: a task goes  │
+│to the nearest expert                    │
+│boundaries 0 · 0 in force                │
 │                                         │
 │                                         │
 ╰─────────────────────────────────────────╯

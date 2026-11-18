@@ -1,5 +1,8 @@
-//! The region detail panels: the expert detail + gate (umbra), the shadows
-//! penumbra, the boundaries antumbra, and the all-at-once dashboard.
+//! The population page's panels: an expert's detail and how tasks are routed,
+//! the candidates in training, the boundaries, and all three at once.
+//!
+//! Each list and each detail is a function of its own, so a layout is only an
+//! arrangement of them.
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
@@ -9,29 +12,33 @@ use ratatui::Frame;
 
 use crate::app::{App, Focus};
 use crate::scroll;
+use crate::theme::Tone;
 
 use antumbra_core::behavior;
 
-use crate::theme::Tone;
-
 use super::{
-    boundary_row, boundary_tone, clip, context_fields, gauge_row, heading, kv, panel,
-    panel_focused, shadow_row, shadow_tone, state_line, state_row,
+    boundary_row, boundary_tone, clip, context_fields, expert_state, gauge_row, heading, kv,
+    nothing_here, panel, panel_focused, shadow_row, shadow_tone, state_line, state_row, title,
 };
 
-/// The selected expert's detail plus the gate summary (the umbra focus).
+/// The experts in front: the selected one's detail over how tasks are routed.
 pub(super) fn detail(f: &mut Frame, app: &App, area: Rect) {
-    let t = app.theme();
     let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(7)]).split(area);
+    expert_detail(f, app, rows[0]);
+    routing(f, app, rows[1]);
+}
 
-    // Selected expert.
+/// The selected expert: what it is, how well it does and what it learned from.
+fn expert_detail(f: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme();
     let mut lines: Vec<Line> = Vec::new();
     if let Some(e) = app.selected_expert() {
         lines.push(heading(&t, e.name.clone()));
         lines.push(gauge_row(&t, "fitness", e.fitness, t.accent));
-        lines.push(kv(&t, "frozen", if e.is_frozen() { "yes" } else { "no" }));
+        let (tone, state) = expert_state(e);
+        lines.push(state_row(&t, "state", tone, state));
         lines.push(kv(&t, "generation", &e.generation.0.to_string()));
-        lines.push(kv(&t, "base", &e.base_model));
+        lines.push(kv(&t, "base model", &e.base_model));
         if let Some(desc) = e
             .capability_card
             .get("description")
@@ -50,48 +57,60 @@ pub(super) fn detail(f: &mut Frame, app: &App, area: Rect) {
         {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                format!("{} learned exemplars", ex.len()),
+                format!("learned from {} examples", ex.len()),
                 Style::default().fg(t.ink2),
             )));
         }
     } else {
+        // Every token reads its workspace's experts, so an empty list is
+        // empty.
         lines.push(Line::from(Span::styled(
-            "(no experts yet; grow some with `antumbra train`/`teach`)",
+            "No experts yet: `antumbra train` or `antumbra teach` trains one from verified work.",
             Style::default().fg(t.ink3),
         )));
     }
     f.render_widget(
         Paragraph::new(lines)
-            .block(panel(
-                &t,
-                Span::styled(" expert ", Style::default().fg(t.ink2)),
-            ))
+            .block(panel(&t, title(&t, "Expert")))
             .wrap(Wrap { trim: true }),
-        rows[0],
+        area,
     );
+}
 
-    // Gate + boundaries.
+/// How tasks are routed: whether the router is trained, when it hands a task
+/// on, and the boundaries in force, which are the ones routing avoids.
+fn routing(f: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme();
     let mut g: Vec<Line> = Vec::new();
     match &app.router {
-        Some(r) => g.push(kv(
+        Some(r) => {
+            g.push(kv(
+                &t,
+                "router",
+                &format!("trained on {} experts", r.experts.len()),
+            ));
+            g.push(kv(
+                &t,
+                "hands on",
+                &format!("tasks matching below {:.2}", r.floor),
+            ));
+        }
+        None if app.operator || app.demo => g.push(kv(
             &t,
             "router",
-            &format!(
-                "learned · {} experts · OOD floor {:.2}",
-                r.experts.len(),
-                r.floor
-            ),
+            "not trained yet: a task goes to the nearest expert",
         )),
-        None => g.push(kv(&t, "router", "heuristic (untrained)")),
+        // The router is the server's, which this token does not read.
+        None => g.push(kv(&t, "router", "needs an operator's token")),
     }
-    let actionable = app.boundaries.iter().filter(|b| b.is_actionable()).count();
+    let in_force = app.boundaries.iter().filter(|b| b.is_actionable()).count();
     g.push(kv(
         &t,
         "boundaries",
-        &format!("{} ({} actionable)", app.boundaries.len(), actionable),
+        &format!("{} · {} in force", app.boundaries.len(), in_force),
     ));
-    // Only the actionable ones inhibit routing; an open one is recorded and
-    // inert, and listed here it would read as a gate.
+    // Only the ones in force keep a task from an expert; one that is only
+    // recorded, listed here, would read as doing so.
     for b in app.boundaries.iter().filter(|b| b.is_actionable()).take(3) {
         let feat = b.governing_features.first().cloned().unwrap_or_default();
         g.push(state_line(
@@ -102,84 +121,92 @@ pub(super) fn detail(f: &mut Frame, app: &App, area: Rect) {
     }
     f.render_widget(
         Paragraph::new(g)
-            .block(panel(
-                &t,
-                Span::styled(" gate ", Style::default().fg(t.ink2)),
-            ))
+            .block(panel(&t, title(&t, "Routing")))
             .wrap(Wrap { trim: true }),
-        rows[1],
+        area,
     );
 }
 
-/// The boundaries inspector (the antumbra, the counterfactual boundary of competence): the learned scopes, with
-/// the selected one's detail: actionable vs open, governing feature, grain,
-/// confidence, and the C -> C' contrast it was recovered from.
+/// The boundaries in front: the list over the selected one's detail.
 pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
-    let t = app.theme();
     let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(9)]).split(area);
+    boundary_list(f, app, rows[0], true, false);
+    boundary_detail(f, app, rows[1]);
+}
 
-    let mut lines: Vec<Line> = Vec::new();
-    if app.boundaries.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "(no boundaries yet; the antumbra is empty)",
-            Style::default().fg(t.ink3),
-        )));
+/// The boundaries, in force ● or recorded ○. `lit` marks the panel as the
+/// one the keys drive, when several are drawn at once.
+fn boundary_list(f: &mut Frame, app: &App, area: Rect, selecting: bool, lit: bool) {
+    let t = app.theme();
+    let name = format!("Boundaries · {}", app.boundaries.len());
+    let block = if lit {
+        panel_focused(&t, &name, true)
     } else {
-        for b in &app.boundaries {
-            lines.push(boundary_row(&t, b));
-        }
+        panel(&t, title(&t, &name))
+    };
+    if app.boundaries.is_empty() {
+        let why =
+            "No boundaries yet: one is recorded when an expert is found to be wrong somewhere.";
+        f.render_widget(
+            Paragraph::new(nothing_here(app, &t, why))
+                .block(block)
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
     }
+    let lines: Vec<Line> = app.boundaries.iter().map(|b| boundary_row(&t, b)).collect();
     scroll::list(
         f,
         &t,
-        rows[0],
-        panel(
-            &t,
-            Span::styled(
-                format!(" boundaries · {} ", app.boundaries.len()),
-                Style::default().fg(t.ink2),
-            ),
-        ),
+        area,
+        block,
         lines,
-        (!app.boundaries.is_empty()).then_some(app.selected_boundary),
+        selecting.then_some(app.selected_boundary),
     );
+}
 
+/// The selected boundary: whether it is in force, what decides it, and the
+/// case it was wrong in beside the nearby case it was right in.
+fn boundary_detail(f: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme();
     let mut d: Vec<Line> = Vec::new();
     if let Some(b) = app.selected_boundary() {
         // Each row on one line, so none pushes the next out of the panel: the
         // room inside the border, and beside a row's key.
-        let width = (rows[1].width as usize).saturating_sub(2);
+        let width = (area.width as usize).saturating_sub(2);
         let room = width.saturating_sub(11);
         d.push(heading(&t, clip(&b.behavior, width)));
         let status = if b.is_actionable() {
-            "actionable · gates routing"
+            "in force · routing avoids it"
         } else {
-            "open · recorded, inert"
+            "recorded · not yet in force"
         };
         d.push(state_row(&t, "status", boundary_tone(b), status));
         if !b.governing_features.is_empty() {
-            d.push(kv(&t, "feature", &b.governing_features.join(", ")));
+            d.push(kv(&t, "decided by", &b.governing_features.join(", ")));
         }
         if let Some(g) = b.grain {
-            d.push(kv(&t, "grain", &format!("{g:?}")));
+            d.push(kv(&t, "applies to", &format!("{g:?}").to_lowercase()));
         }
         d.push(gauge_row(&t, "confidence", b.confidence, t.accent));
         if let Some(owner) = &b.owner {
             d.push(kv(&t, "private to", owner.as_str()));
         }
         match &b.near_ok_context {
-            // The contrastive pair that makes it actionable: incorrect in C,
-            // fine in C'.
+            // The pair that puts it in force: wrong in one case, right in a
+            // case beside it.
             Some(ok) => {
                 d.push(kv(
                     &t,
-                    "incorrect",
+                    "wrong when",
                     &clip(&b.fail_context.to_string(), room),
                 ));
-                d.push(kv(&t, "acceptable", &clip(&ok.to_string(), room)));
+                d.push(kv(&t, "right when", &clip(&ok.to_string(), room)));
             }
-            // An open one has only the context it failed in. A training's
-            // names the scope, the held-out task and the answer given.
+            // One that is only recorded has the case it failed in. A
+            // training's names the scope, the held-out task and the answer
+            // given.
             None => {
                 for (k, v) in context_fields(&b.fail_context) {
                     let flat = v.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -187,110 +214,34 @@ pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
                 }
             }
         }
-    } else {
+    } else if !app.boundaries.is_empty() {
         d.push(Line::from(Span::styled(
-            "(select a boundary with ↑↓)",
+            "Select a boundary with ↑↓.",
             Style::default().fg(t.ink3),
         )));
     }
     f.render_widget(
         Paragraph::new(d)
-            .block(panel(
-                &t,
-                Span::styled(" scope ", Style::default().fg(t.ink2)),
-            ))
+            .block(panel(&t, title(&t, "Boundary")))
             .wrap(Wrap { trim: true }),
-        rows[1],
+        area,
     );
 }
 
-/// The penumbra: shadows in (or recently out of) training, newest first, with the
-/// selected one's lineage: status, generation, final reward, and its reward curve
-/// as a sparkline (the anti-collapse signal from the shadow plasticity and the critic).
+/// The candidates in front: the list, the selected one's detail, and its
+/// reward as a chart.
 pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
-    let t = app.theme();
     let rows = Layout::vertical([
         Constraint::Min(0),
         Constraint::Length(6),
         Constraint::Length(9),
     ])
     .split(area);
-
-    let mut lines: Vec<Line> = Vec::new();
-    if app.shadows.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "(no shadows yet; the penumbra is quiet)",
-            Style::default().fg(t.ink3),
-        )));
-    } else {
-        for s in &app.shadows {
-            lines.push(shadow_row(&t, s));
-        }
-    }
-    scroll::list(
-        f,
-        &t,
-        rows[0],
-        panel(
-            &t,
-            Span::styled(
-                format!(" shadows · {} ", app.shadows.len()),
-                Style::default().fg(t.ink2),
-            ),
-        ),
-        lines,
-        (!app.shadows.is_empty()).then_some(app.selected_shadow),
-    );
-
-    let mut d: Vec<Line> = Vec::new();
-    let scope = app
+    candidate_list(f, app, rows[0], true, false);
+    candidate_detail(f, app, rows[1]);
+    let kept = app
         .selected_shadow()
-        .and_then(|s| behavior::shadow_scope(&s.id));
-    let kept = scope.is_some();
-    if let Some(s) = app.selected_shadow() {
-        let width = (rows[1].width as usize).saturating_sub(2);
-        let title = match scope {
-            Some(scope) => format!("{scope} · a standing expert's training"),
-            None => s.id.as_str().to_string(),
-        };
-        d.push(heading(&t, clip(&title, width)));
-        d.push(state_row(
-            &t,
-            "status",
-            shadow_tone(s.status.as_str()),
-            s.status.as_str(),
-        ));
-        let last = s.reward_curve.last().copied().unwrap_or(0.0);
-        if kept {
-            // The held-out pass rate before training and after: the base
-            // model's, then the expert's. One recorded from an expert's card
-            // has only the trained one, which the card keeps.
-            let base = match s.reward_curve.as_slice() {
-                [base, _, ..] => format!("{base:.2}"),
-                _ => "not recorded".into(),
-            };
-            d.push(kv(&t, "base", &base));
-            d.push(gauge_row(&t, "trained", last, t.accent));
-        } else {
-            d.push(kv(&t, "generation", &s.generation.0.to_string()));
-            d.push(gauge_row(&t, "final reward", last, t.accent));
-        }
-    } else {
-        d.push(Line::from(Span::styled(
-            "(select a shadow with ↑↓)",
-            Style::default().fg(t.ink3),
-        )));
-    }
-    f.render_widget(
-        Paragraph::new(d)
-            .block(panel(
-                &t,
-                Span::styled(" training ", Style::default().fg(t.ink2)),
-            ))
-            .wrap(Wrap { trim: true }),
-        rows[1],
-    );
-
+        .is_some_and(|s| behavior::shadow_scope(&s.id).is_some());
     let curve = app
         .selected_shadow()
         .map(|s| s.reward_curve.as_slice())
@@ -298,22 +249,101 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
     reward_chart(f, app, rows[2], curve, kept);
 }
 
-/// The selected shadow's reward curve as a line chart over training steps: the
-/// trajectory that decides graduation vs collapse. A standing expert's
-/// training (`kept`) reads two points, the base model's pass rate and the
-/// trained expert's.
+/// The candidates, newest first: graduated ●, under way ○, pruned ×.
+fn candidate_list(f: &mut Frame, app: &App, area: Rect, selecting: bool, lit: bool) {
+    let t = app.theme();
+    let name = format!("Candidates · {}", app.shadows.len());
+    let block = if lit {
+        panel_focused(&t, &name, true)
+    } else {
+        panel(&t, title(&t, &name))
+    };
+    if app.shadows.is_empty() {
+        let why = "No candidates yet: one appears while an expert is being trained.";
+        f.render_widget(
+            Paragraph::new(nothing_here(app, &t, why))
+                .block(block)
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
+    let lines: Vec<Line> = app.shadows.iter().map(|s| shadow_row(&t, s)).collect();
+    scroll::list(
+        f,
+        &t,
+        area,
+        block,
+        lines,
+        selecting.then_some(app.selected_shadow),
+    );
+}
+
+/// The selected candidate: its status, and where its reward got to.
+fn candidate_detail(f: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme();
+    let mut d: Vec<Line> = Vec::new();
+    let scope = app
+        .selected_shadow()
+        .and_then(|s| behavior::shadow_scope(&s.id));
+    if let Some(s) = app.selected_shadow() {
+        let width = (area.width as usize).saturating_sub(2);
+        let name = match scope {
+            Some(scope) => format!("{scope} · a standing expert's training"),
+            None => s.id.as_str().to_string(),
+        };
+        d.push(heading(&t, clip(&name, width)));
+        d.push(state_row(
+            &t,
+            "status",
+            shadow_tone(s.status.as_str()),
+            s.status.as_str(),
+        ));
+        let last = s.reward_curve.last().copied().unwrap_or(0.0);
+        if scope.is_some() {
+            // The held-out pass rate before training and after: the base
+            // model's, then the expert's. One recorded from an expert's card
+            // has only the trained one, which the card keeps.
+            let base = match s.reward_curve.as_slice() {
+                [base, _, ..] => format!("{base:.2}"),
+                _ => "not recorded".into(),
+            };
+            d.push(kv(&t, "base model", &base));
+            d.push(gauge_row(&t, "trained", last, t.accent));
+        } else {
+            d.push(kv(&t, "generation", &s.generation.0.to_string()));
+            d.push(gauge_row(&t, "reward", last, t.accent));
+        }
+    } else if !app.shadows.is_empty() {
+        d.push(Line::from(Span::styled(
+            "Select a candidate with ↑↓.",
+            Style::default().fg(t.ink3),
+        )));
+    }
+    f.render_widget(
+        Paragraph::new(d)
+            .block(panel(&t, title(&t, "Candidate")))
+            .wrap(Wrap { trim: true }),
+        area,
+    );
+}
+
+/// The selected candidate's reward as a line chart over training steps: the
+/// path that decides whether it graduates. A standing expert's training
+/// (`kept`) reads two points, the base model's pass rate and the trained
+/// expert's.
 fn reward_chart(f: &mut Frame, app: &App, area: Rect, curve: &[f32], kept: bool) {
     let t = app.theme();
-    let title = if kept {
-        " pass rate · base → trained "
+    let name = if kept {
+        "Pass rate · base model → trained"
     } else {
-        " reward · over steps "
+        "Reward · step by step"
     };
-    let block = panel(&t, Span::styled(title, Style::default().fg(t.ink2)));
+    let block = panel(&t, title(&t, name));
     if curve.is_empty() {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "(no reward signal yet)",
+                "No reward recorded yet.",
                 Style::default().fg(t.ink3),
             )))
             .block(block),
@@ -351,88 +381,51 @@ fn reward_chart(f: &mut Frame, app: &App, area: Rect, curve: &[f32], kept: bool)
     f.render_widget(chart, area);
 }
 
-/// All three regions stacked at once, the focused one given more room and an
-/// accent border so the active panel reads at a glance (the dashboard layout).
+/// All three lists at once, the one the keys drive given more room and an
+/// accent border (the dashboard layout).
 pub(super) fn dashboard(f: &mut Frame, app: &App, area: Rect) {
-    let (u, p, a) = match app.focus {
+    let (experts, candidates, boundaries) = match app.focus {
         Focus::Experts => (46, 27, 27),
         Focus::Shadows => (27, 46, 27),
         Focus::Boundaries => (27, 27, 46),
     };
     let rows = Layout::vertical([
-        Constraint::Percentage(u),
-        Constraint::Percentage(p),
-        Constraint::Percentage(a),
+        Constraint::Percentage(experts),
+        Constraint::Percentage(candidates),
+        Constraint::Percentage(boundaries),
     ])
     .split(area);
-    umbra_panel(f, app, rows[0], app.focus == Focus::Experts);
-    penumbra_panel(f, app, rows[1], app.focus == Focus::Shadows);
-    antumbra_panel(f, app, rows[2], app.focus == Focus::Boundaries);
+    expert_summary(f, app, rows[0], app.focus == Focus::Experts);
+    let lit = app.focus == Focus::Shadows;
+    candidate_list(f, app, rows[1], lit, lit);
+    let lit = app.focus == Focus::Boundaries;
+    boundary_list(f, app, rows[2], lit, lit);
 }
 
-/// Compact selected-expert summary (the dashboard's umbra panel).
-fn umbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
+/// The selected expert in brief (the dashboard layout's first panel).
+fn expert_summary(f: &mut Frame, app: &App, area: Rect, focused: bool) {
     let t = app.theme();
     let mut lines: Vec<Line> = Vec::new();
     if let Some(e) = app.selected_expert() {
         lines.push(heading(&t, e.name.clone()));
         lines.push(gauge_row(&t, "fitness", e.fitness, t.accent));
-        lines.push(kv(&t, "frozen", if e.is_frozen() { "yes" } else { "no" }));
+        let (tone, state) = expert_state(e);
+        lines.push(state_row(&t, "state", tone, state));
         lines.push(kv(&t, "generation", &e.generation.0.to_string()));
     } else {
         lines.push(Line::from(Span::styled(
-            "(no experts yet)",
+            "No experts yet.",
             Style::default().fg(t.ink3),
         )));
     }
+    let name = format!("Experts · {}", app.experts.len());
+    let block = if focused {
+        panel_focused(&t, &name, true)
+    } else {
+        panel(&t, title(&t, &name))
+    };
     f.render_widget(
-        Paragraph::new(lines)
-            .block(panel_focused(&t, "umbra · experts", focused))
-            .wrap(Wrap { trim: true }),
+        Paragraph::new(lines).block(block).wrap(Wrap { trim: true }),
         area,
-    );
-}
-
-/// Compact shadows list (the dashboard's penumbra panel).
-fn penumbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
-    let t = app.theme();
-    let lines: Vec<Line> = if app.shadows.is_empty() {
-        vec![Line::from(Span::styled(
-            "(penumbra quiet)",
-            Style::default().fg(t.ink3),
-        ))]
-    } else {
-        app.shadows.iter().map(|s| shadow_row(&t, s)).collect()
-    };
-    let selected = (focused && !app.shadows.is_empty()).then_some(app.selected_shadow);
-    scroll::list(
-        f,
-        &t,
-        area,
-        panel_focused(&t, "penumbra · shadows", focused),
-        lines,
-        selected,
-    );
-}
-
-/// Compact boundaries list (the dashboard's antumbra panel).
-fn antumbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
-    let t = app.theme();
-    let lines: Vec<Line> = if app.boundaries.is_empty() {
-        vec![Line::from(Span::styled(
-            "(antumbra empty)",
-            Style::default().fg(t.ink3),
-        ))]
-    } else {
-        app.boundaries.iter().map(|b| boundary_row(&t, b)).collect()
-    };
-    let selected = (focused && !app.boundaries.is_empty()).then_some(app.selected_boundary);
-    scroll::list(
-        f,
-        &t,
-        area,
-        panel_focused(&t, "antumbra · boundaries", focused),
-        lines,
-        selected,
     );
 }

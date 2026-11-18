@@ -16,6 +16,7 @@ use super::{App, Focus, LayoutMode, Mode, Page, Snapshot};
 use crate::backend::Backend;
 use crate::events::{Event, EventKind};
 use crate::theme::Tone;
+use crate::words;
 
 /// An operator mutation awaiting a yes/no confirmation.
 pub enum Pending {
@@ -55,10 +56,6 @@ pub struct Notice {
 
 /// How long a notice stays on screen.
 pub const NOTICE_MS: f64 = 8000.0;
-
-/// What a read-only console says when asked to act.
-const READ_ONLY: &str =
-    "read-only · acting needs an operator's token (antumbra-mcp --mint-token --operator)";
 
 impl App {
     /// Say `text` on the main view, in `tone`. Nothing is added to the event
@@ -131,7 +128,7 @@ impl App {
     /// Whether this console may act. A read-only one says how to become able.
     pub(super) fn may_act(&mut self) -> bool {
         if !self.operator {
-            self.problem(READ_ONLY);
+            self.problem(words::READ_ONLY);
         }
         self.operator
     }
@@ -185,7 +182,10 @@ impl App {
     /// pending.
     fn request_halt(&mut self) {
         let Some(run) = self.selected_loop_head().map(|h| h.run_id.clone()) else {
-            self.note(Tone::Open, "no loop has run, so there is none to halt");
+            self.note(
+                Tone::Open,
+                "no training loop has run, so there is none to halt",
+            );
             return;
         };
         if self.halt_pending(&run) {
@@ -209,7 +209,7 @@ impl App {
             return false;
         };
         self.operator_event(format!(
-            "{scope}: the keeper settles a standing expert's training · freeze the expert to stop it serving"
+            "{scope}: a standing expert's training is settled by the server · freeze the expert to stop it serving"
         ));
         true
     }
@@ -223,8 +223,8 @@ impl App {
             .selected_shadow()
             .map(|s| (s.id.clone(), s.status.as_str() == "pruned"))
         {
-            None => self.note(Tone::Open, "no shadow is selected"),
-            Some((_, true)) => self.note(Tone::Open, "that shadow is already pruned"),
+            None => self.note(Tone::Open, "no candidate is selected"),
+            Some((_, true)) => self.note(Tone::Open, "that candidate is already pruned"),
             Some((id, false)) => self.stage(Pending::PruneShadow(id)),
         }
     }
@@ -244,8 +244,8 @@ impl App {
             .selected_shadow()
             .map(|s| (s.id.clone(), s.status.as_str() == "graduated"))
         {
-            None => self.note(Tone::Open, "no shadow is selected"),
-            Some((_, true)) => self.note(Tone::Open, "that shadow has already graduated"),
+            None => self.note(Tone::Open, "no candidate is selected"),
+            Some((_, true)) => self.note(Tone::Open, "that candidate has already graduated"),
             Some((id, false)) => self.stage(Pending::GraduateShadow(id)),
         }
     }
@@ -279,11 +279,14 @@ impl App {
         }
         self.page = Page::Loop;
         match self.selected_loop_head().map(|h| h.run_id.clone()) {
-            None => self.note(Tone::Open, "no loop has run, so there is no halt to cancel"),
+            None => self.note(
+                Tone::Open,
+                "no training loop has run, so there is no halt to cancel",
+            ),
             Some(run) if self.halt_pending(&run) => self.stage(Pending::CancelHalt(run)),
             Some(run) => self.note(
                 Tone::Open,
-                format!("no halt is pending for loop {}", run.as_str()),
+                format!("no halt is pending for {}", run.as_str()),
             ),
         }
     }
@@ -291,33 +294,39 @@ impl App {
     /// The confirmation prompt for the staged action, if any.
     pub fn pending_prompt(&self) -> Option<String> {
         self.pending.as_ref().map(|p| match p {
-            Pending::PruneShadow(id) => format!("Prune shadow {} ?", id.as_str()),
-            Pending::GraduateShadow(id) => format!("Graduate shadow {} ?", id.as_str()),
-            Pending::FreezeExpert(id, freeze) => {
-                let verb = if *freeze { "Freeze" } else { "Thaw" };
-                format!("{verb} expert {} ?", id.as_str())
-            }
-            Pending::HaltLoop(run) => {
-                format!(
-                    "Halt loop {} ? (stops at the next generation)",
-                    run.as_str()
-                )
-            }
-            Pending::CancelHalt(run) => {
-                format!("Cancel the halt of loop {} ?", run.as_str())
-            }
+            Pending::PruneShadow(id) => format!("Prune candidate {}?", id.as_str()),
+            Pending::GraduateShadow(id) => format!("Graduate candidate {}?", id.as_str()),
+            Pending::FreezeExpert(id, true) => format!("Freeze expert {}?", id.as_str()),
+            Pending::FreezeExpert(id, false) => format!("Thaw expert {}?", id.as_str()),
+            Pending::HaltLoop(run) => format!("Halt {}?", run.as_str()),
+            Pending::CancelHalt(run) => format!("Cancel the halt of {}?", run.as_str()),
             Pending::DeleteBoundary(id) => {
                 let behavior = self
                     .boundaries
                     .iter()
                     .find(|b| b.id.as_str() == id.as_str())
                     .map_or_else(|| id.as_str().to_string(), |b| b.behavior.clone());
-                format!("Delete boundary \"{behavior}\" ?")
+                format!("Delete boundary \"{behavior}\"?")
             }
             Pending::SetMemoryPolicy(policy) => match self.knobs_changed(policy) {
-                1 => format!("Apply {} ?", self.knob_changes(policy)),
-                n => format!("Apply {n} knob changes ?"),
+                1 => format!("Apply {}?", self.knob_changes(policy)),
+                n => format!("Apply {n} knob changes?"),
             },
+        })
+    }
+
+    /// What going ahead with the staged action does, in a sentence under the
+    /// prompt, so the answer is to a question that was understood.
+    pub fn pending_effect(&self) -> Option<&'static str> {
+        self.pending.as_ref().map(|p| match p {
+            Pending::PruneShadow(_) => "It is dropped from training.",
+            Pending::GraduateShadow(_) => "It becomes an expert.",
+            Pending::FreezeExpert(_, true) => "Training will no longer change it.",
+            Pending::FreezeExpert(_, false) => "Training may change it again.",
+            Pending::HaltLoop(_) => "It stops at its next generation.",
+            Pending::CancelHalt(_) => "It keeps running.",
+            Pending::DeleteBoundary(_) => "Routing will no longer avoid it.",
+            Pending::SetMemoryPolicy(_) => "It applies from the next recall.",
         })
     }
 
@@ -368,11 +377,11 @@ impl App {
                 (ConsoleAction::DeleteBoundary { boundary }, said, false)
             }
             Pending::HaltLoop(run) => {
-                let said = format!("halt requested · loop {}", run.as_str());
+                let said = format!("halt requested · {}", run.as_str());
                 (ConsoleAction::HaltLoop { run }, said, false)
             }
             Pending::CancelHalt(run) => {
-                let said = format!("halt canceled · loop {}", run.as_str());
+                let said = format!("halt canceled · {}", run.as_str());
                 (ConsoleAction::CancelHalt { run }, said, false)
             }
             Pending::SetMemoryPolicy(policy) => {

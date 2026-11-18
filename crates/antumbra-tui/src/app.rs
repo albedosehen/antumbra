@@ -121,15 +121,32 @@ impl Page {
         Page::Sovereign,
     ];
 
-    /// The lowercase tab label.
+    /// The tab's label: what the page holds, in the dashboard's words.
     pub fn title(self) -> &'static str {
         match self {
-            Page::Population => "population",
-            Page::Memory => "memory",
+            Page::Population => "Population",
+            Page::Memory => "Memory",
+            Page::Loop => "Training",
+            Page::Evals => "Evaluations",
+            Page::Sovereign => "Agent",
+        }
+    }
+
+    /// The page a name asks for (`tui snapshot --page`): its tab's label in
+    /// any case, or the name it had before the tabs were reworded. Anything
+    /// else is the first page.
+    pub fn from_name(name: &str) -> Page {
+        let name = name.to_lowercase();
+        let former = |page: Page| match page {
             Page::Loop => "loop",
             Page::Evals => "evals",
             Page::Sovereign => "sovereign",
-        }
+            Page::Population | Page::Memory => "",
+        };
+        Page::ALL
+            .into_iter()
+            .find(|page| page.title().to_lowercase() == name || former(*page) == name)
+            .unwrap_or(Page::Population)
     }
 
     /// The number key that goes to this page: `1` for the first. Asked of
@@ -480,7 +497,7 @@ impl App {
             emit.push((
                 EventKind::System,
                 format!(
-                    "connected · {} experts · {} shadows · {} boundaries",
+                    "connected · {} experts · {} candidates · {} boundaries",
                     self.experts.len(),
                     self.shadows.len(),
                     self.boundaries.len()
@@ -489,7 +506,7 @@ impl App {
         } else {
             for e in &self.experts {
                 match self.ev_experts.get(e.id.as_str()) {
-                    None => emit.push((EventKind::Spawn, format!("expert {} emerged", e.name))),
+                    None => emit.push((EventKind::Spawn, format!("expert {} added", e.name))),
                     Some(&frozen) if !frozen && e.is_frozen() => {
                         emit.push((EventKind::Freeze, format!("expert {} frozen", e.name)))
                     }
@@ -504,7 +521,7 @@ impl App {
                 match self.ev_shadows.get(s.id.as_str()) {
                     None => emit.push((
                         EventKind::Spawn,
-                        format!("shadow {} spawned ({status})", s.id.as_str()),
+                        format!("candidate {} started ({status})", s.id.as_str()),
                     )),
                     Some(prev) if prev != status => {
                         let kind = match status {
@@ -512,7 +529,7 @@ impl App {
                             "pruned" => EventKind::Prune,
                             _ => EventKind::System,
                         };
-                        emit.push((kind, format!("shadow {} {status}", s.id.as_str())));
+                        emit.push((kind, format!("candidate {} {status}", s.id.as_str())));
                     }
                     _ => {}
                 }
@@ -525,7 +542,7 @@ impl App {
                     )),
                     Some(&actionable) if !actionable && b.is_actionable() => emit.push((
                         EventKind::Boundary,
-                        format!("boundary now gates · {}", b.behavior),
+                        format!("boundary now in force · {}", b.behavior),
                     )),
                     _ => {}
                 }

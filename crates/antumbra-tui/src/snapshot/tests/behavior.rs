@@ -13,15 +13,15 @@ fn headless_render_shows_the_console() -> anyhow::Result<()> {
     let buf = render(&mut app, 120, 36, 1600.0)?;
     let text = to_text(&buf);
     assert!(
-        text.contains("ANTUMBRA"),
+        text.contains("Antumbra"),
         "header wordmark missing:\n{text}"
     );
-    assert!(text.contains("population"), "graph panel title missing");
+    assert!(text.contains("╭ Experts ─"), "graph panel title missing");
     assert!(
         text.contains("arith-specialist"),
         "expert name not rendered"
     );
-    assert!(text.contains("gate"), "gate panel title missing");
+    assert!(text.contains("╭ Routing ─"), "routing panel title missing");
     assert!(text.contains("0.90"), "selected expert's fitness rendered");
     Ok(())
 }
@@ -31,7 +31,7 @@ fn empty_population_renders_the_hint() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.experts.clear();
     let text = to_text(&render(&mut app, 100, 30, 1600.0)?);
-    assert!(text.contains("no experts yet"), "empty-state hint shown");
+    assert!(text.contains("No experts yet"), "empty-state hint shown");
     Ok(())
 }
 
@@ -48,18 +48,25 @@ fn fully_empty_store_shows_the_first_run_card() -> anyhow::Result<()> {
     assert!(app.is_empty(), "a store with nothing in it reads as empty");
     let text = to_text(&render(&mut app, 100, 30, 1600.0)?);
     assert!(
-        text.contains("store is empty"),
-        "the first-run card is shown"
+        text.contains("Nothing is here yet"),
+        "the first-run card is shown:\n{text}"
     );
+    // It points at what exists: the connect panel, the help and the demo.
+    assert!(text.contains("how to connect an agent"), "{text}");
     assert!(
-        text.contains("antumbra seed"),
-        "the card points the way to seed"
+        text.contains("antumbra tui --demo"),
+        "the demo, by a command that runs:\n{text}"
     );
+    // And at nothing that does not: there is no `antumbra-tui` binary, and
+    // `seed` and `loop` write to the CLI's own store, not the server's.
+    for wrong in ["antumbra-tui", "antumbra seed", "antumbra loop"] {
+        assert!(!text.contains(wrong), "the card names `{wrong}`:\n{text}");
+    }
     // The card belongs to the live view only; an open overlay replaces it.
     app.mode = Mode::Help;
     let over = to_text(&render(&mut app, 100, 30, 1600.0)?);
     assert!(
-        !over.contains("store is empty"),
+        !over.contains("Nothing is here yet"),
         "a modal supersedes the card"
     );
     Ok(())
@@ -83,23 +90,24 @@ fn connect_overlay_guides_agent_wiring() -> anyhow::Result<()> {
     // The read-only line names an operator's token too (it says how to mint
     // one), so the two roles are told apart by what only each one says.
     assert!(
-        text.contains("may act on the substrate") && !text.contains("read-only"),
+        text.contains("an operator's: it may act") && !text.contains("read-only"),
         "an operator's console says it may act"
     );
 
     app.operator = false;
     let text = to_text(&render(&mut app, 100, 32, 1600.0)?);
     assert!(
-        text.contains("read-only") && !text.contains("may act on the substrate"),
+        text.contains("read-only") && !text.contains("it may act"),
         "a plain token's console says it is read-only"
     );
     Ok(())
 }
 
 // The loop runs full-rate while interacting or animating, eases to 60 after
-// an idle spell, and the header marks the eased state.
+// an idle spell, and the connect panel, which says how the console is
+// drawing, marks the eased state.
 #[test]
-fn idle_throttle_eases_the_rate_and_shows_in_header() -> anyhow::Result<()> {
+fn idle_throttle_eases_the_rate_and_the_connect_panel_says_so() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.target_fps = 244;
     app.power_save = true;
@@ -113,12 +121,13 @@ fn idle_throttle_eases_the_rate_and_shows_in_header() -> anyhow::Result<()> {
     // With power-save off (the default), the still view stays at full rate.
     app.power_save = false;
     assert_eq!(app.frame_cap(false), 244, "default never throttles");
-    // The header reflects the eased state.
+    // The connect panel reflects the eased state.
     app.idle = true;
-    let text = to_text(&render(&mut app, 130, 12, 1600.0)?);
+    app.open_connect();
+    let text = to_text(&render(&mut app, 130, 36, 1600.0)?);
     assert!(
-        text.contains("idle"),
-        "header marks the idle throttle:\n{text}"
+        text.contains("fps, idle"),
+        "the panel marks the idle throttle:\n{text}"
     );
     Ok(())
 }
@@ -164,21 +173,13 @@ fn dashboard_layout_shows_every_region_at_once() -> anyhow::Result<()> {
     app.boundaries = vec![actionable_boundary()];
     app.layout = LayoutMode::Dashboard;
     let text = to_text(&render(&mut app, 130, 40, 1600.0)?);
-    assert!(
-        text.contains("umbra · experts"),
-        "umbra panel shown:\n{text}"
-    );
-    assert!(text.contains("penumbra · shadows"), "penumbra panel shown");
-    assert!(
-        text.contains("antumbra · boundaries"),
-        "antumbra panel shown"
-    );
+    assert!(text.contains("Experts · 1"), "umbra panel shown:\n{text}");
+    assert!(text.contains("Candidates · 1"), "candidates panel shown");
+    assert!(text.contains("Boundaries · 1"), "antumbra panel shown");
     // All three regions' content is visible together.
     assert!(text.contains("arith-specialist"), "expert content shown");
     assert!(text.contains("shadow:g3"), "shadow content shown");
     assert!(text.contains("npm install"), "boundary content shown");
-    // The header names the active layout.
-    assert!(text.contains("dashboard"), "header names the layout");
     Ok(())
 }
 
@@ -219,12 +220,9 @@ fn graph_layout_is_full_width() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.layout = LayoutMode::Graph;
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
-    assert!(text.contains("population"), "graph panel still shown");
+    assert!(text.contains("╭ Experts ─"), "graph panel still shown");
     // The expert detail column is gone in graph mode.
-    assert!(
-        !text.contains("learned exemplars"),
-        "no detail column:\n{text}"
-    );
+    assert!(!text.contains("learned from"), "no detail column:\n{text}");
     Ok(())
 }
 
@@ -238,13 +236,13 @@ fn command_palette_filters_to_the_query() -> anyhow::Result<()> {
         app.palette_input(c);
     }
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
-    assert!(text.contains("command"), "palette title shown:\n{text}");
+    assert!(text.contains("Commands"), "palette title shown:\n{text}");
     assert!(
         text.contains("› theme"),
         "the typed query is echoed:\n{text}"
     );
     assert!(
-        text.contains("cycle palette"),
+        text.contains("Theme: change to the next"),
         "the theme command surfaced for the query:\n{text}"
     );
     // The chosen action matches the filtered selection.
@@ -277,7 +275,7 @@ fn filter_narrows_and_jumps_the_selection() -> anyhow::Result<()> {
     // Only g7 matches; it is shown in the filter modal.
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
-        text.contains("find in shadows"),
+        text.contains("find in candidates"),
         "the modal says which list it searches:\n{text}"
     );
     assert!(text.contains("shadow:g7"), "the match is listed");
@@ -332,7 +330,10 @@ fn event_stream_diffs_store_changes() -> anyhow::Result<()> {
     // The overlay renders the stream.
     app.open_events();
     let text = to_text(&render(&mut app, 100, 24, 1600.0)?);
-    assert!(text.contains("events"), "events overlay titled:\n{text}");
+    assert!(
+        text.contains("History · "),
+        "history overlay titled:\n{text}"
+    );
     assert!(text.contains("graduated"), "an event is listed");
     Ok(())
 }
@@ -346,10 +347,13 @@ fn drill_down_shows_full_boundary_detail() -> anyhow::Result<()> {
     app.focus = Focus::Boundaries;
     app.open_detail();
     let text = to_text(&render(&mut app, 110, 36, 1600.0)?);
-    assert!(text.contains("boundary ·"), "detail modal titled:\n{text}");
-    assert!(text.contains("fail context"), "the C context section shown");
+    assert!(text.contains("Boundary ·"), "detail modal titled:\n{text}");
     assert!(
-        text.contains("acceptable context"),
+        text.contains("Wrong in this case"),
+        "the case it was wrong in is shown"
+    );
+    assert!(
+        text.contains("Right in this case"),
         "the C' context section shown"
     );
     // The pretty-printed JSON of the contexts is present.
@@ -382,7 +386,7 @@ fn drill_down_previews_gate_routing() -> anyhow::Result<()> {
     app.open_detail();
     let text = to_text(&render(&mut app, 110, 36, 1600.0)?);
     assert!(
-        text.contains("gate routing"),
+        text.contains("Routing · a task of this kind goes to"),
         "route preview shown:\n{text}"
     );
     assert!(
@@ -404,8 +408,11 @@ fn ask_overlay_shows_routing_distribution() -> anyhow::Result<()> {
     }
     app.set_ask_result(&[(ExpertId::new("expert:arith"), 0.82)]);
     let text = to_text(&render(&mut app, 80, 14, 1600.0)?);
-    assert!(text.contains("ask the gate"), "ask modal titled:\n{text}");
-    assert!(text.contains("ask › arith"), "query echoed");
+    assert!(
+        text.contains("Ask · which expert takes a task?"),
+        "ask modal titled:\n{text}"
+    );
+    assert!(text.contains("task › arith"), "query echoed");
     assert!(
         text.contains("arith-specialist"),
         "routed expert named (id resolved)"
@@ -424,7 +431,14 @@ fn operator_action_stages_a_confirm_prompt() -> anyhow::Result<()> {
     app.request_action();
     assert_eq!(app.mode, Mode::Confirm, "confirm prompt opened");
     let text = to_text(&render(&mut app, 90, 24, 1600.0)?);
-    assert!(text.contains("confirm"), "confirm modal titled:\n{text}");
+    assert!(
+        text.contains("╭ Confirm ─"),
+        "confirm modal titled:\n{text}"
+    );
+    assert!(
+        text.contains("Routing will no longer avoid it"),
+        "the prompt says what going ahead does:\n{text}"
+    );
     assert!(text.contains("Delete boundary"), "the delete prompt shown");
     assert!(text.contains("npm install"), "names the boundary");
     app.cancel_action();
@@ -451,7 +465,7 @@ fn the_knobs_panel_turns_a_knob_behind_a_confirm() -> anyhow::Result<()> {
     app.open_knobs();
     assert_eq!(app.mode, Mode::Knobs);
     let text = to_text(&render(&mut app, 100, 26, 1600.0)?);
-    assert!(text.contains("memory knobs"), "knobs modal titled:\n{text}");
+    assert!(text.contains("Memory knobs"), "knobs modal titled:\n{text}");
     assert!(text.contains("world_half_life_days"), "every knob listed");
 
     app.knob_move(1);
@@ -466,7 +480,7 @@ fn the_knobs_panel_turns_a_knob_behind_a_confirm() -> anyhow::Result<()> {
     assert_eq!(app.mode, Mode::Confirm);
     assert_eq!(
         app.pending_prompt().as_deref(),
-        Some("Apply world_half_life_days 180 → 165 ?")
+        Some("Apply world_half_life_days 180 → 165?")
     );
     app.cancel_action();
 
@@ -674,7 +688,10 @@ fn escalating_ask_renders_the_hint() -> anyhow::Result<()> {
     app.open_ask();
     app.ask_result = Some(Vec::new());
     let text = to_text(&render(&mut app, 80, 12, 1600.0)?);
-    assert!(text.contains("escalates"), "escalate hint shown:\n{text}");
+    assert!(
+        text.contains("No expert takes it: it goes to your agent."),
+        "it says where the task goes:\n{text}"
+    );
     Ok(())
 }
 
@@ -706,26 +723,30 @@ fn shadows_focus_shows_the_penumbra() -> anyhow::Result<()> {
     app.focus = Focus::Shadows;
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
-        text.contains("shadows"),
+        text.contains("Candidates · 1"),
         "shadows list title missing:\n{text}"
     );
-    assert!(text.contains("training"), "training detail panel missing");
+    assert!(
+        text.contains("╭ Candidate ─"),
+        "candidate detail panel missing"
+    );
     assert!(text.contains("shadow:g3"), "the shadow id is shown");
     assert!(text.contains("graduated"), "the shadow status is shown");
     assert!(text.contains("0.93"), "the final reward is shown");
     Ok(())
 }
 
-// The header shows a live FPS readout, and the cap steps through common
-// refresh rates (144 -> 165). What a key changed the cap to is said on the
-// line above the footer, which the key-press tests read.
+// The connect panel shows the live FPS readout and the cap, and the cap steps
+// through common refresh rates (144 -> 165). What a key changed the cap to is
+// said on the line above the footer, which the key-press tests read.
 #[test]
-fn the_header_shows_the_frame_rate_and_the_cap_steps() -> anyhow::Result<()> {
+fn the_connect_panel_shows_the_frame_rate_and_the_cap_steps() -> anyhow::Result<()> {
     let mut app = demo_app();
+    app.open_connect();
     let text = to_text(&render(&mut app, 140, 36, 1600.0)?);
     assert!(
-        text.contains("144 fps"),
-        "header fps readout shown:\n{text}"
+        text.contains("drawn at 144 fps (cap 144, pinned)"),
+        "fps readout shown:\n{text}"
     );
     app.fps_up();
     assert_eq!(app.target_fps, 165, "cap stepped to 165");
@@ -759,7 +780,7 @@ fn a_standing_experts_training_reads_by_its_scope() -> anyhow::Result<()> {
     assert!(text.contains("base"), "the base model's rate is labeled");
     assert!(text.contains("trained"), "the trained rate is labeled");
     assert!(
-        text.contains("pass rate · base → trained"),
+        text.contains("Pass rate · base model → trained"),
         "the chart says what its two points are"
     );
     assert!(
@@ -831,7 +852,10 @@ fn an_open_boundary_shows_the_task_it_missed() -> anyhow::Result<()> {
         text.contains("○ Run the test suite"),
         "the list row leads with the behavior:\n{text}"
     );
-    assert!(text.contains("open · recorded, inert"), "open, so inert");
+    assert!(
+        text.contains("○ recorded · not yet in force"),
+        "recorded, so not in force"
+    );
     assert!(text.contains("private to"), "the owner is shown");
     assert!(text.contains("user:default"), "by name");
     assert!(
@@ -840,7 +864,7 @@ fn an_open_boundary_shows_the_task_it_missed() -> anyhow::Result<()> {
     );
     assert!(text.contains("answer"), "and the answer given");
     assert!(
-        !text.contains("feature    -"),
+        !text.contains("decided by -"),
         "no empty feature row for a boundary that has none:\n{text}"
     );
     Ok(())
@@ -854,8 +878,8 @@ fn the_gate_summary_lists_no_open_boundary() -> anyhow::Result<()> {
     app.boundaries = vec![missed_boundary()];
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
-        text.contains("1 (0 actionable)"),
-        "counted, none actionable:\n{text}"
+        text.contains("1 · 0 in force"),
+        "counted, none in force:\n{text}"
     );
     assert!(
         !text.contains("Run the test suite"),
@@ -877,7 +901,9 @@ fn a_standing_experts_training_is_left_to_its_keeper() -> anyhow::Result<()> {
     app.request_graduate();
     assert!(app.pending.is_none(), "no graduation staged");
     assert!(
-        app.events.iter().any(|e| e.text.contains("keeper")),
+        app.events
+            .iter()
+            .any(|e| e.text.contains("settled by the server")),
         "the reason is on the event line"
     );
     // The loop's own shadows still take both.
@@ -897,15 +923,21 @@ fn boundaries_focus_shows_the_inspector() -> anyhow::Result<()> {
     app.focus = Focus::Boundaries;
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
-        text.contains("boundaries"),
+        text.contains("Boundaries · 1"),
         "boundaries list title missing:\n{text}"
     );
-    assert!(text.contains("scope"), "scope detail panel missing");
+    assert!(
+        text.contains("╭ Boundary ─"),
+        "boundary detail panel missing"
+    );
     assert!(
         text.contains("npm install"),
         "the boundary's behavior is shown"
     );
-    assert!(text.contains("actionable"), "actionable status is shown");
+    assert!(
+        text.contains("● in force · routing avoids it"),
+        "that it is in force is shown"
+    );
     assert!(text.contains("runtime"), "the governing feature is shown");
     Ok(())
 }

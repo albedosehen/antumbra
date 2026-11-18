@@ -1,7 +1,8 @@
-//! The console chrome: the header wordmark/status line, the notice that says
-//! what the console last did, and the footer's keys.
+//! The console chrome: the top bar, the tabs, the sentence that says what the
+//! page is, the notice that says what the console last did, and the footer's
+//! keys.
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Tabs};
@@ -9,37 +10,79 @@ use ratatui::Frame;
 
 use crate::app::{App, Page};
 use crate::keys::{self, Binding};
-use crate::theme::{Theme, Tone};
+use crate::theme::Tone;
+use crate::words;
 
-use super::{clip, gauge_spans, panel, pulse};
+use super::{clip, pulse};
 
-/// The KPI strip: a row of labeled mini-gauges for the substrate's quality
-/// ratios (fitness / frozen / graduated / gating / memory), shown on every page.
-pub(super) fn metrics(f: &mut Frame, app: &App, area: Rect) {
+/// The top bar, in one row as the dashboard's is: the name, then what the
+/// console reads and what its token may do, and at the right whether reads
+/// are succeeding. A person who opens the console sees, before anything else,
+/// which server this is, whether they can act on it, and whether what is
+/// shown is current.
+pub(super) fn header(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
-    // Every gauge fills in the one accent, as the dashboard's meters do: the
-    // label says which is which.
-    let mut spans = Vec::new();
-    for (label, value) in app.dashboard_metrics() {
-        cell(&mut spans, &t, label, value);
+    let dim = Style::default().fg(t.ink2);
+
+    // At the right: live, or not answering. The demo reads nothing.
+    let status: Vec<Span> = if app.demo {
+        Vec::new()
+    } else if app.reads_failing {
+        vec![Span::styled(
+            format!("{} not answering ", Tone::Failed.glyph()),
+            Style::default().fg(t.danger),
+        )]
+    } else {
+        vec![
+            Span::styled(
+                format!("{} ", Tone::Settled.glyph()),
+                Style::default().fg(t.accent),
+            ),
+            Span::styled("live ", dim),
+        ]
+    };
+    let status_width: usize = status.iter().map(|s| s.content.chars().count()).sum();
+
+    // Three pulsing diamonds, the mark, then the name.
+    let mut spans = vec![Span::raw(" ")];
+    for k in 0..3 {
+        let g = 0.5 + 0.5 * pulse(app.clock_ms, 700.0, f64::from(k) * 1.3);
+        spans.push(Span::styled("◆", Style::default().fg(t.glow(g))));
     }
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    spans.push(Span::styled(
+        " Antumbra   ",
+        Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
+    ));
+    if app.demo {
+        // A throwaway store: say so, so nobody takes it for their own.
+        spans.push(Span::styled(" demo ", t.chip()));
+        spans.push(Span::styled(" sample data · nothing here is saved", dim));
+    } else {
+        let room = usize::from(area.width).saturating_sub(status_width + 32);
+        spans.push(Span::styled(clip(&app.source, room.max(12)), dim));
+        spans.push(Span::styled(" · ", Style::default().fg(t.line)));
+        if app.operator {
+            spans.push(Span::styled("operator", dim));
+        } else {
+            // At full strength: it is why the keys that act do nothing.
+            spans.push(Span::styled("read-only", Style::default().fg(t.ink)));
+        }
+    }
+    let left = Rect {
+        width: area
+            .width
+            .saturating_sub(u16::try_from(status_width).unwrap_or(0)),
+        ..area
+    };
+    f.render_widget(Paragraph::new(Line::from(spans)), left);
+    f.render_widget(
+        Paragraph::new(Line::from(status)).alignment(Alignment::Right),
+        area,
+    );
 }
 
-/// One `label ▆▆▆▍ 0.73` gauge cell appended to the strip.
-fn cell(spans: &mut Vec<Span<'static>>, t: &Theme, label: &str, value: f32) {
-    spans.push(Span::styled(
-        format!("  {label} "),
-        Style::default().fg(t.ink2),
-    ));
-    spans.extend(gauge_spans(t, value, 6, t.accent));
-    spans.push(Span::styled(
-        format!(" {value:.2}"),
-        Style::default().fg(t.ink),
-    ));
-}
-
-/// The top-level tab strip: one numbered tab per [`Page`], active one accented.
+/// The top-level tab strip: one numbered tab per [`Page`], the number being
+/// the key that goes to it, and the active one marked.
 pub(super) fn tabs(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let titles: Vec<Line> = Page::ALL
@@ -57,55 +100,25 @@ pub(super) fn tabs(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(tabs, area);
 }
 
-pub(super) fn header(f: &mut Frame, app: &App, area: Rect) {
+/// The sentence under the tabs: what the page, or the list in front, is
+/// ([`words::caption`]). Its first word, the name of the thing, is at full
+/// strength.
+pub(super) fn caption(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
-    // Three pulsing diamonds = the tri-node core, then the wordmark.
-    let mut spans = Vec::new();
-    for k in 0..3 {
-        let g = 0.5 + 0.5 * pulse(app.clock_ms, 700.0, k as f64 * 1.3);
-        spans.push(Span::styled("◆", Style::default().fg(t.glow(g))));
-    }
-    spans.push(Span::styled(
-        "  ANTUMBRA",
-        Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
-    ));
-    // A throwaway `--demo` store gets a badge so the operator knows nothing persists.
-    if app.demo {
-        spans.push(Span::styled("  DEMO ", t.chip_primary(false)));
-    }
-    let gen = app
-        .experts
-        .iter()
-        .map(|e| e.generation.0)
-        .max()
-        .unwrap_or(0);
-    spans.push(Span::styled(
-        format!(
-            "   self-improving substrate · {} umbra · gen {}",
-            app.experts.len(),
-            gen
+    let room = usize::from(area.width).saturating_sub(2);
+    let text = clip(words::caption(app), room);
+    let (name, rest) = match text.split_once(':') {
+        Some((name, rest)) => (format!(" {name}:"), rest.to_string()),
+        None => (String::from(" "), text),
+    };
+    let line = Line::from(vec![
+        Span::styled(
+            name,
+            Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
         ),
-        Style::default().fg(t.ink2),
-    ));
-    // Live frame-rate readout (the cap is set in the footer with `±`; `idle`
-    // marks the eased rate after a still spell) and the active layout (`l`).
-    spans.push(Span::styled(
-        format!(
-            "  ·  {} fps{}  ·  {}",
-            app.shown_fps(),
-            if app.idle { " idle" } else { "" },
-            app.layout.name()
-        ),
-        Style::default().fg(t.ink3),
-    ));
-    // Live event-stream indicator (`e` opens the stream).
-    if !app.events.is_empty() {
-        spans.push(Span::styled(
-            format!("  ·  {} events", app.events.len()),
-            Style::default().fg(t.accent),
-        ));
-    }
-    f.render_widget(Paragraph::new(Line::from(spans)).block(panel(&t, "")), area);
+        Span::styled(rest, Style::default().fg(t.ink2)),
+    ]);
+    f.render_widget(Paragraph::new(line), area);
 }
 
 /// The line above the footer: what the console last did, declined to do, or

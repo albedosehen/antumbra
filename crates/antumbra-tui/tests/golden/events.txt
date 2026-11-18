@@ -1,4 +1,4 @@
-╭ events · 2 ──────────────────────────────────────────────────╮
+╭ History · 2 ─────────────────────────────────────────────────╮
 │▸ · shadow:g4 graduated  1s ago                               │
 │  · string-specialist emerged  1s ago                         │
 │                                                              │

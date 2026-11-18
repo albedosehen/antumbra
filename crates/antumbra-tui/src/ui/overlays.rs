@@ -13,8 +13,9 @@ use crate::keys::{self, Binding, Group};
 use crate::overlay;
 use crate::scroll;
 use crate::theme::{Theme, Tone};
+use crate::words;
 
-use super::{gauge_spans, heading, kv};
+use super::{gauge_spans, heading};
 
 /// The modal box rectangle for the active overlay (the size source the open
 /// animation also targets). `None` in the live view.
@@ -28,7 +29,7 @@ pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
         }
         Mode::Palette => {
             let listed = app.palette_matches().len().max(1) as u16;
-            Some(overlay::centered(frame, 56, listed + 4))
+            Some(overlay::centered(frame, 62, listed + 4))
         }
         Mode::Filter => {
             let listed = (app.filtered().len() as u16 + 4).min(18);
@@ -48,7 +49,8 @@ pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
                 .map_or(1, |r| r.len().clamp(1, 5) as u16);
             Some(overlay::centered(frame, 60, rows + 5))
         }
-        Mode::Confirm => Some(overlay::centered(frame, 58, 6)),
+        // The question, what going ahead does, a gap and the two keys.
+        Mode::Confirm => Some(overlay::centered(frame, 70, 6)),
         Mode::Knobs => Some(overlay::centered(
             frame,
             86,
@@ -58,136 +60,134 @@ pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
     }
 }
 
-/// The first-run hint: a centered card shown over an empty store so a fresh
-/// install explains how to populate itself instead of looking inert. Drawn in
-/// the live view (not a modal), so keys still work underneath.
+/// The first-run card: shown over a workspace that holds nothing yet, so a
+/// fresh install says what will appear and how, in place of empty panels.
+/// Drawn in the live view (not a modal), so keys still work underneath. It
+/// names only what exists: the connect panel, the help, and the demo.
 pub(super) fn first_run_hint(f: &mut Frame, app: &App) {
     let t = app.theme();
-    let area = overlay::centered(f.area(), 64, 11);
-    let inner = overlay::modal(f, &t, area, "antumbra");
+    let stage = super::frame_rows(f.area()).stage();
+    let area = overlay::centered(stage, 68, 13);
+    let inner = overlay::modal(f, &t, area, "Welcome");
     let dim = Style::default().fg(t.ink2);
-    let key = Style::default().fg(t.ink).add_modifier(Modifier::BOLD);
-    let chip = t.chip();
+    let strong = Style::default().fg(t.ink).add_modifier(Modifier::BOLD);
+    let key = |chip: &'static str, does: &'static str| {
+        Line::from(vec![
+            Span::raw("  "),
+            Span::styled(format!(" {chip} "), t.chip()),
+            Span::styled(format!("  {does}"), dim),
+        ])
+    };
     let lines = vec![
-        Line::from(Span::styled(
-            "  The store is empty: no experts, memory, or loop runs yet.",
-            Style::default().fg(t.ink),
-        )),
+        Line::from(Span::styled("  Nothing is here yet.", strong)),
         Line::from(""),
         Line::from(Span::styled(
-            "  Populate it from another terminal, then press r to reload:",
+            "  This console shows what your agents store, and the experts",
             dim,
         )),
-        Line::from(vec![
-            Span::styled("    antumbra seed", key),
-            Span::styled("                 seed demo specialists", dim),
-        ]),
-        Line::from(vec![
-            Span::styled("    antumbra loop --generations 3", key),
-            Span::styled("  grow + boundaries", dim),
-        ]),
+        Line::from(Span::styled(
+            "  trained from it. Once an agent is connected and has worked,",
+            dim,
+        )),
+        Line::from(Span::styled(
+            "  what it stored appears on the Memory page.",
+            dim,
+        )),
+        Line::from(""),
+        key("c", "how to connect an agent"),
+        key("?", "every key, and what each word means"),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  Or relaunch with ", dim),
-            Span::styled("antumbra-tui --demo", key),
-            Span::styled(" for a throwaway population.", dim),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled(" ? ", chip),
-            Span::styled(" keys    ", dim),
-            Span::styled(" : ", chip),
-            Span::styled(" commands    ", dim),
-            Span::styled(" q ", chip),
-            Span::styled(" quit", dim),
+            Span::styled("  To look around first, quit and run ", dim),
+            Span::styled("antumbra tui --demo", strong),
         ]),
     ];
-    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
-/// The "connect your agent" panel (`c`): how to wire an agent to Antumbra,
-/// which server this console reads, and what its token may do, so connecting
-/// is an in-app step instead of a hunt through the README.
+/// The connect panel (`c`): how to connect an agent to Antumbra, which server
+/// this console reads, and what its token may do, so connecting is a step in
+/// the console and not a hunt through the README.
 pub(super) fn connect_overlay(f: &mut Frame, app: &App) {
     let t = app.theme();
     let Some(area) = overlay_area(app, f.area()) else {
         return;
     };
-    let inner = overlay::modal(f, &t, area, "connect · wire your agent");
+    let inner = overlay::modal(f, &t, area, "Connect an agent");
     let dim = Style::default().fg(t.ink2);
     let val = Style::default().fg(t.ink);
-    let cmd = Style::default().fg(t.ink);
     let step = Style::default().fg(t.accent).add_modifier(Modifier::BOLD);
     let role = if app.demo {
-        "the demo acts on its own store".to_string()
+        "This is the demo: sample data held in memory. Nothing here is saved."
     } else if app.operator {
-        "an operator's token: it may act on the substrate".to_string()
+        "Your token is an operator's: it may act here (freeze, prune, halt)."
     } else {
-        "read-only: an operator's token is minted with antumbra-mcp --mint-token --operator"
-            .to_string()
+        "Your token is read-only: it reads your workspace and acts on nothing."
     };
-    let line = |spans: Vec<Span<'static>>| Line::from(spans);
-    let lines = vec![
+    let cap = if app.auto_fps {
+        "following the monitor"
+    } else {
+        "pinned"
+    };
+    let numbered = |n: &'static str, text: &'static str| {
+        Line::from(vec![
+            Span::styled(format!("{n}  "), step),
+            Span::styled(text, dim),
+        ])
+    };
+    let command = |text: &'static str| Line::from(Span::styled(format!("     {text}"), val));
+    let mut lines = vec![
         Line::from(Span::styled(
-            "Plug a coding agent (Claude Code) into Antumbra.",
+            "Connect a coding agent (Claude Code) to Antumbra.",
             val,
         )),
         Line::from(""),
-        line(vec![
-            Span::styled("1  ", step),
-            Span::styled("Set it up in one command:", dim),
-        ]),
-        Line::from(Span::styled(
-            "     antumbra setup local           a server on this machine".to_string(),
-            cmd,
-        )),
-        Line::from(Span::styled(
-            "     antumbra setup hosted <url>    a server you were given".to_string(),
-            cmd,
-        )),
+        numbered("1", "Set it up in one command:"),
+        command("antumbra setup local           a server on this machine"),
+        command("antumbra setup hosted <url>    a server you were given"),
         Line::from(""),
-        line(vec![
-            Span::styled("2  ", step),
-            Span::styled("Check what is in place:", dim),
-        ]),
-        Line::from(Span::styled("     antumbra setup check".to_string(), cmd)),
+        numbered("2", "Check what is in place:"),
+        command("antumbra setup check"),
         Line::from(""),
-        line(vec![
-            Span::styled("3  ", step),
-            Span::styled(
-                "This console reads the same server, with no flags needed:",
-                dim,
-            ),
-        ]),
+        numbered("3", "This console reads the same server, with no flags:"),
         Line::from(Span::styled(format!("     {}", app.source), val)),
-        Line::from(Span::styled(
-            if app.source_from.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "     server from {}, token from {}",
-                    app.source_from, app.token_from
-                )
-            },
+    ];
+    if !app.source_from.is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "     server from {}, token from {}",
+                app.source_from, app.token_from
+            ),
             dim,
-        )),
-        Line::from(Span::styled(format!("     {role}"), dim)),
+        )));
+    }
+    lines.push(Line::from(Span::styled(format!("     {role}"), dim)));
+    if !app.operator && !app.demo {
+        lines.push(Line::from(Span::styled(
+            "     An operator's: antumbra-mcp --mint-token --operator",
+            dim,
+        )));
+    }
+    lines.extend([
         Line::from(""),
         Line::from(Span::styled(
-            "Full walkthrough: docs/agent-setup.md".to_string(),
+            "The full walkthrough is docs/agent-setup.md.",
             dim,
         )),
         Line::from(Span::styled(
             format!(
-                "{} memories, {} experts          q/esc to close",
+                "Showing {} memories and {} experts, drawn at {} fps{} (cap {}, {cap}).",
                 app.memories.len(),
-                app.experts.len()
+                app.experts.len(),
+                app.shown_fps(),
+                if app.idle { ", idle" } else { "" },
+                app.target_fps,
             ),
             dim,
         )),
-    ];
+    ]);
     // Clamp the scroll so paging never runs off the end of the guide.
-    let max = lines.len().saturating_sub(inner.height as usize) as u16;
+    let max = u16::try_from(lines.len().saturating_sub(usize::from(inner.height))).unwrap_or(0);
     let off = app.detail_scroll.min(max);
     f.render_widget(Paragraph::new(lines).scroll((off, 0)), inner);
 }
@@ -199,7 +199,7 @@ pub(super) fn confirm_overlay(f: &mut Frame, app: &App) {
     let Some(area) = overlay_area(app, f.area()) else {
         return;
     };
-    let inner = overlay::modal(f, &t, area, "confirm");
+    let inner = overlay::modal(f, &t, area, "Confirm");
     let prompt = app.pending_prompt().unwrap_or_default();
     // Going ahead with something that removes is the one chip in the danger
     // colour; going ahead with anything else is the accent.
@@ -208,6 +208,11 @@ pub(super) fn confirm_overlay(f: &mut Frame, app: &App) {
         Line::from(Span::styled(
             format!("  {prompt}"),
             Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
+        )),
+        // What going ahead does, under the question.
+        Line::from(Span::styled(
+            format!("  {}", app.pending_effect().unwrap_or_default()),
+            Style::default().fg(t.ink2),
         )),
         Line::from(""),
         Line::from(vec![
@@ -230,21 +235,21 @@ pub(super) fn ask_overlay(f: &mut Frame, app: &App) {
         return;
     };
     let title = if app.real_embedder {
-        "ask the gate".to_string()
+        "Ask · which expert takes a task?".to_string()
     } else {
-        "ask the gate · demo embedder".to_string()
+        "Ask · which expert takes a task? · demo".to_string()
     };
     let inner = overlay::modal(f, &t, area, &title);
     let rows = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(inner);
 
     let mut head = vec![Line::from(vec![
-        Span::styled("ask › ", Style::default().fg(t.accent)),
+        Span::styled("task › ", Style::default().fg(t.accent)),
         Span::styled(app.ask_query.clone(), Style::default().fg(t.ink)),
         Span::styled("▏", Style::default().fg(t.accent)),
     ])];
     if !app.real_embedder {
         head.push(Line::from(Span::styled(
-            "  byte-histogram stand-in · through a server, the server embeds with its model",
+            "  the demo matches by a stand-in; a server matches with its own model",
             Style::default().fg(t.ink2),
         )));
     }
@@ -252,11 +257,11 @@ pub(super) fn ask_overlay(f: &mut Frame, app: &App) {
 
     let lines: Vec<Line> = match &app.ask_result {
         None => vec![Line::from(Span::styled(
-            "  type a task, Enter to route it through the gate",
+            "  Type a task and press Enter to see which expert would take it.",
             Style::default().fg(t.ink3),
         ))],
         Some(r) if r.is_empty() => vec![Line::from(Span::styled(
-            "  escalates · out of distribution",
+            "  No expert takes it: it goes to your agent.",
             Style::default().fg(t.ink2),
         ))],
         Some(r) => r
@@ -304,19 +309,19 @@ pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
     let Some(area) = overlay_area(app, f.area()) else {
         return;
     };
-    let inner = overlay::modal(f, &t, area, "gate · router");
+    let inner = overlay::modal(f, &t, area, "Router");
     let w = inner.width as usize;
 
     let Some(router) = app.router.as_ref() else {
         f.render_widget(
             Paragraph::new(vec![
                 Line::from(Span::styled(
-                    "gate untrained",
+                    "The router is not trained yet.",
                     Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "routing falls back to heuristic KNN; no learned metric yet",
+                    "Until it is, a task goes to the expert nearest to it. An operator's token is needed to read it once trained.",
                     Style::default().fg(t.ink3),
                 )),
             ])
@@ -327,26 +332,34 @@ pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
     };
 
     let mut l = vec![
-        heading(
-            &t,
-            format!("learned gate · {} experts", router.experts.len()),
-        ),
+        heading(&t, format!("Trained on {} experts", router.experts.len())),
         Line::from(vec![
-            Span::styled("temperature ", Style::default().fg(t.ink2)),
+            Span::styled("sharpness  ", Style::default().fg(t.ink2)),
             Span::styled(
                 format!("{:.2}", router.temperature),
                 Style::default().fg(t.ink),
             ),
+            Span::styled(
+                "   lower prefers the best match more strongly",
+                Style::default().fg(t.ink3),
+            ),
         ]),
-        kv(&t, "floor", &format!("{:.2}", router.floor)),
+        Line::from(vec![
+            Span::styled("hands on   ", Style::default().fg(t.ink2)),
+            Span::styled(format!("{:.2}", router.floor), Style::default().fg(t.ink)),
+            Span::styled(
+                "   below this match, no expert takes the task",
+                Style::default().fg(t.ink3),
+            ),
+        ]),
         Line::from(""),
-        section(&t, "metric weights  (learned per-dimension emphasis)"),
+        section(&t, "What it weighs · learned emphasis across the embedding"),
     ];
 
     // The weight profile as a shade strip across the inner width.
     if router.weights.is_empty() {
         l.push(Line::from(Span::styled(
-            "  (uniform, no reweighting)",
+            "  every part alike: nothing learned yet",
             Style::default().fg(t.ink3),
         )));
     } else {
@@ -380,11 +393,11 @@ pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
     l.push(Line::from(""));
     l.push(section(
         &t,
-        "self-routing  (each centroid routed → should pick itself)",
+        "Self-check · each expert's own centre should route back to it",
     ));
     if router.experts.is_empty() {
         l.push(Line::from(Span::styled(
-            "  (no experts in the gate)",
+            "  no experts to route to",
             Style::default().fg(t.ink3),
         )));
     }
@@ -393,7 +406,7 @@ pub(super) fn gate_overlay(f: &mut Frame, app: &App) {
         let (top_id, prob) = routed
             .first()
             .map(|(id, p)| (id.as_str().to_string(), *p))
-            .unwrap_or_else(|| ("n/a".to_string(), 0.0));
+            .unwrap_or_else(|| ("none".to_string(), 0.0));
         let healthy = top_id == e.id.as_str();
         let name =
             e.id.as_str()
@@ -469,11 +482,11 @@ pub(super) fn events_overlay(f: &mut Frame, app: &App) {
     let Some(area) = overlay_area(app, f.area()) else {
         return;
     };
-    let inner = overlay::modal(f, &t, area, &format!("events · {}", app.events.len()));
+    let inner = overlay::modal(f, &t, area, &format!("History · {}", app.events.len()));
     if app.events.is_empty() {
         f.render_widget(
             Paragraph::new(Span::styled(
-                "  (no changes yet; training elsewhere will show here)",
+                "  Nothing has changed since the console opened.",
                 Style::default().fg(t.ink3),
             )),
             inner,
@@ -547,6 +560,22 @@ pub(super) fn help_rows(app: &App) -> Vec<HelpRow> {
         keys: "esc".into(),
         does: "close it; the footer shows its other keys",
     });
+    // Then what the words mean: the same list for every page, so a word met
+    // anywhere is found here.
+    rows.push(HelpRow::Gap);
+    rows.push(HelpRow::Heading("words"));
+    for word in words::GLOSSARY {
+        for (i, line) in word.means.iter().enumerate() {
+            rows.push(HelpRow::Key {
+                keys: if i == 0 {
+                    word.term.to_string()
+                } else {
+                    String::new()
+                },
+                does: line,
+            });
+        }
+    }
     rows
 }
 
@@ -557,7 +586,7 @@ pub(super) fn help_overlay(f: &mut Frame, app: &App) {
     let Some(area) = overlay_area(app, f.area()) else {
         return;
     };
-    let inner = overlay::modal(f, &t, area, &format!("help · {}", app.page.title()));
+    let inner = overlay::modal(f, &t, area, &format!("Help · {}", app.page.title()));
     let lines: Vec<Line> = help_rows(app)
         .into_iter()
         .map(|row| match row {
@@ -590,7 +619,7 @@ pub(super) fn palette_overlay(f: &mut Frame, app: &App) {
     let Some(area) = overlay_area(app, f.area()) else {
         return;
     };
-    let inner = overlay::modal(f, &t, area, "command");
+    let inner = overlay::modal(f, &t, area, "Commands");
     let rows = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(inner);
 
     // Query line with a block cursor.
@@ -607,15 +636,23 @@ pub(super) fn palette_overlay(f: &mut Frame, app: &App) {
     if matches.is_empty() {
         f.render_widget(
             Paragraph::new(Span::styled(
-                "  (no matching command)",
+                "  No command matches.",
                 Style::default().fg(t.ink3),
             )),
             rows[1],
         );
     } else {
+        // Each command with the key that does the same from the main view at
+        // its right, so the palette teaches the keys as it is used.
+        let room = usize::from(rows[1].width).saturating_sub(6);
         let lines: Vec<Line> = matches
             .iter()
-            .map(|c| Line::from(Span::styled(c.label, Style::default().fg(t.ink2))))
+            .map(|c| {
+                Line::from(vec![
+                    Span::styled(format!("{:<room$}", c.label), Style::default().fg(t.ink2)),
+                    Span::styled(c.key, Style::default().fg(t.ink3)),
+                ])
+            })
             .collect();
         scroll::list(
             f,
@@ -650,7 +687,10 @@ pub(super) fn filter_overlay(f: &mut Frame, app: &App) {
     let matches = app.filtered();
     if matches.is_empty() {
         f.render_widget(
-            Paragraph::new(Span::styled("  (no match)", Style::default().fg(t.ink3))),
+            Paragraph::new(Span::styled(
+                "  Nothing matches.",
+                Style::default().fg(t.ink3),
+            )),
             rows[1],
         );
     } else {

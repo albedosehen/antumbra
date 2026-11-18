@@ -1,8 +1,9 @@
-//! Rendering: the living population graph (umbra orbiting the tri-node core of
-//! umbra/penumbra/antumbra, three linked minds), with detail and gate panels.
-//! Orbit, pulse, and link-energy are hand-rolled from the animation clock so the
+//! Rendering: the top bar, the tabs and the page under them, then the notice
+//! and the footer. The population page's graph (the experts orbiting a core
+//! of three linked nodes) is hand-rolled from the animation clock so the
 //! motion is fully under control. Every color tints from the active [`Theme`],
-//! so cycling a theme (`t`) recolors the whole console.
+//! so cycling a theme (`t`) recolors the whole console; every word is from
+//! [`crate::words`] or says what its panel holds in the same plain terms.
 //!
 //! Split across submodules: [`graph`] (the canvas), [`chrome`] (header/footer),
 //! [`panels`] (the region detail panels), and [`overlays`] (help / palette /
@@ -35,16 +36,18 @@ use antumbra_core::{FailureBoundary, Shadow};
 use crate::app::{App, Focus, LayoutMode, Mode, Page};
 use crate::overlay;
 use crate::theme::{Theme, Tone};
+use crate::words;
 
 pub use overlays::overlay_area;
 
-/// The frame's rows, top to bottom: the chrome, the page's body, then the two
-/// rows that are never covered or dimmed, what the console last said and the
-/// keys of the view in front.
+/// The frame's rows, top to bottom: the top bar, the tabs, the sentence that
+/// says what the page is, the page's body, then the two rows that are never
+/// covered or dimmed, what the console last said and the keys of the view in
+/// front.
 pub struct FrameRows {
     pub header: Rect,
     pub tabs: Rect,
-    pub metrics: Rect,
+    pub caption: Rect,
     pub body: Rect,
     pub notice: Rect,
     pub footer: Rect,
@@ -68,7 +71,7 @@ impl FrameRows {
 /// the body is.
 pub fn frame_rows(area: Rect) -> FrameRows {
     let rows = Layout::vertical([
-        Constraint::Length(3),
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(0),
@@ -79,7 +82,7 @@ pub fn frame_rows(area: Rect) -> FrameRows {
     FrameRows {
         header: rows[0],
         tabs: rows[1],
-        metrics: rows[2],
+        caption: rows[2],
         body: rows[3],
         notice: rows[4],
         footer: rows[5],
@@ -101,7 +104,7 @@ pub fn render(f: &mut Frame, app: &App) {
     let rows = frame_rows(f.area());
     chrome::header(f, app, rows.header);
     chrome::tabs(f, app, rows.tabs);
-    chrome::metrics(f, app, rows.metrics);
+    chrome::caption(f, app, rows.caption);
     page_body(f, app, rows.body);
     // A fresh, empty store would otherwise render as inert panels; the first-run
     // hint explains how to populate it. Only in the live view (not over a modal).
@@ -184,6 +187,39 @@ pub(super) fn visible_window(len: usize, selected: usize, rows: usize) -> (usize
     let sel = selected.min(len - 1);
     let offset = sel.saturating_sub(rows / 2).min(len - rows);
     (offset, sel - offset)
+}
+
+/// A panel's title: its name, in the secondary ink, set off from the border.
+fn title<'a>(t: &Theme, name: &str) -> Line<'a> {
+    Line::from(Span::styled(
+        format!(" {name} "),
+        Style::default().fg(t.ink2),
+    ))
+}
+
+/// What an expert's state is, to the eye and in a word: frozen is settled,
+/// sealed for good; one that is not is still open to training.
+fn expert_state(e: &antumbra_core::Expert) -> (Tone, &'static str) {
+    if e.is_frozen() {
+        (Tone::Settled, "frozen")
+    } else {
+        (Tone::Open, "open to training")
+    }
+}
+
+/// What an empty list says. A list the server sends only to an operator is
+/// empty for any other token whatever the server holds, so there it says an
+/// operator's token is needed ([`words::OPERATOR_ONLY`]); else `why` it is
+/// empty and what fills it.
+fn nothing_here<'a>(app: &App, t: &Theme, why: &'a str) -> Vec<Line<'a>> {
+    if app.operator || app.demo {
+        vec![Line::from(Span::styled(why, Style::default().fg(t.ink3)))]
+    } else {
+        vec![Line::from(Span::styled(
+            words::OPERATOR_ONLY,
+            Style::default().fg(t.ink2),
+        ))]
+    }
 }
 
 /// A rounded panel block, its border in the line colour and its title in the
@@ -319,8 +355,8 @@ fn clip(s: &str, max: usize) -> String {
     antumbra_core::text::clipped(s, max).into_owned()
 }
 
-/// A shadow's name: a standing expert's training by the scope it trained,
-/// any other (the generational loop's) by its id and generation. A standing
+/// A candidate's name: a standing expert's training by the scope it trained,
+/// any other (the training loop's) by its id and generation. A standing
 /// expert's trainings are all generation zero, and their ids run to some
 /// sixty characters, the scope near the end where a list cuts it off.
 fn shadow_name(s: &Shadow) -> String {
