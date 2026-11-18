@@ -79,6 +79,14 @@ printf '%s' "$out" | jq -e '.decision == "block" and (.reason | test("store_memo
 check 'the reminder is the block it was' $?
 rm -f "$WORK/run/antumbra-capture-Stop-s8"
 
+echo 'for an agent that shows the reminder to its user'
+out="$(ANTUMBRA_CAPTURE_REMINDER=brief run '{"session_id":"s9","hook_event_name":"Stop"}')"
+reminds "$out"
+check 'the reminder is still one' $?
+printf '%s' "$out" | jq -e '.hookSpecificOutput.additionalContext | (length < 600) and test("store_memory") and test("record_behavior")' > /dev/null
+check 'and says what to do in a few lines' $?
+rm -f "$WORK/run/antumbra-capture-Stop-s9"
+
 echo 'a turn that saved as it went'
 TRANSCRIPT="$WORK/transcript.jsonl"
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__antumbra__store_memory","input":{}}]}}' > "$TRANSCRIPT"

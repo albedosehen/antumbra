@@ -188,6 +188,37 @@ Claude Code is given the server's address and a helper that reads the token from
 
 `ANTUMBRA_URL` (or `--surface`), `ANTUMBRA_TOKEN`, `ANTUMBRA_TOKEN_FILE` (or `--token-file`) and `ANTUMBRA_HOST_ID` win over what setup recorded, as they do in the hooks. `ANTUMBRA_BRIDGE_PATIENCE_SECS` (600) bounds one call. Not carried: what the server sends unasked, which today is a log line when another session changes a memory.
 
+### One command for every agent's hooks
+
+The three touchpoints are scripts written to Claude Code's hook contract: its field names on standard input, its JSON on standard output, the server's address in its settings. Another agent has the same three moments and a contract of its own for each. Its hooks run `antumbra hook <agent> <event>` (`session-start`, `prompt`, `stop`), which hands the agent's input to the same script in the names the script reads, runs it with the address, workspace and machine name setup recorded, and answers in the shape that agent reads. Every agent gets the bootstrap, the recall for each prompt and the reminder to store that Claude Code gets, from one implementation.
+
+It never fails the agent: whatever goes wrong is said on standard error, and nothing is printed. Run this way, the scripts differ from Claude Code's run of them in two things. The sovereign-mode brief is off (`ANTUMBRA_BRIEF=0`), because it is about Claude Code. And the reminder at a turn's end is the short one (`ANTUMBRA_CAPTURE_REMINDER=brief`), because some agents show it to the person as well as to the model.
+
+### Which agents, and what setup writes for each
+
+`antumbra setup` connects Claude Code and every other agent it finds on the machine: one whose program is on the PATH, or whose config directory is there. `--agent` names them instead (`--agent gemini`, `--agent claude,gemini`, `--agent all`), and `--no-claude` leaves Claude Code out. For an agent other than Claude Code, setup writes only files that are Antumbra's own: nothing a person wrote is edited, connecting again replaces them, and `antumbra setup check` reads them back and says when one differs from what the installed build writes.
+
+| Agent | What setup writes | Opens with memory | Recall for each prompt | Reminder to store |
+| --- | --- | --- | --- | --- |
+| Claude Code | hooks and `env` in `settings.json`; the MCP server, with a headers helper | yes | yes | yes |
+| Gemini CLI | an extension, `~/.gemini/extensions/antumbra`: the bridge and three hooks | yes | yes | yes |
+
+**Gemini CLI.** The extension holds a manifest with the bridge as its MCP server and a `hooks/hooks.json` with `SessionStart`, `BeforeAgent` and `AfterAgent`. Gemini CLI lists it (`gemini extensions list`) and `gemini extensions uninstall antumbra` removes it. Two things are Gemini CLI's own to decide, and setup leaves them as they are:
+
+- In a folder you have not trusted, Gemini CLI connects no MCP server, your own included.
+- It asks before an Antumbra tool runs, and run for one prompt (`gemini -p`) it leaves out tools that would need asking. To allow them, add a policy file of your own:
+
+  ```toml
+  # ~/.gemini/policies/antumbra.toml
+  [[rule]]
+  toolName = "*"
+  mcpName = "antumbra"
+  decision = "allow"
+  priority = 500
+  ```
+
+At a turn's end Gemini CLI shows the reminder to you as a warning that the agent was blocked. That is the reminder reaching the agent, which is then asked once more and stops.
+
 ## Leaving work for another of your machines
 
 A session can leave a note for a session on another of your machines: "rerun this on the GPU box", "check the dashboard after the deploy". The agent calls `leave_handoff` with the text (its first line is the title) and `for_host`, the machine's host name, or nothing for whichever of your machines starts a session next. A session that starts there opens with the count and a line for each handoff waiting for it, ahead of recalled memories, and keeps hearing about one until a session calls `complete_handoff`; after that it is no longer announced but `handoffs` with `include_done` still shows it. The machine's name is `ANTUMBRA_HOST_ID`, the same one the bootstrap prints in its first line, so set it on each machine. Each session start also names the machine to the server (`register_device`), so `devices` lists every one of your machines with when it was last seen. That includes a laptop whose agent talks to a hosted server and runs no server of its own. A machine named that way is a memory node: the server cannot see its hardware, and a machine that trains runs `antumbra-mcp` itself, which registers it with what it can do. Handoffs are yours alone: they live in your own `handoff` compartment, and no other user's session sees them. It is a note, not remote control: nothing runs on the other machine until a session there decides to.

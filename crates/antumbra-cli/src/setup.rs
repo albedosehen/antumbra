@@ -38,6 +38,7 @@ use serde_json::{json, Value};
 
 use antumbra_http::{SurfaceClient, DEVICE_HEADER};
 
+use crate::agents::{self, Agent};
 use crate::claude::hooks;
 
 /// Where the store's vectors come from: ollama's default address.
@@ -58,11 +59,12 @@ const STACK_ENV_EXAMPLE: &str = include_str!("../../../docker/.env.example");
 #[derive(Subcommand)]
 pub enum SetupMode {
     /// Run the store and the MCP server on this machine, in Docker, and connect
-    /// Claude Code to them. Inside a clone of the repository the server is
-    /// built from it, and anywhere else the published server image is pulled.
+    /// your coding agents to them. Inside a clone of the repository the server
+    /// is built from it, and anywhere else the published server image is
+    /// pulled.
     Local(LocalArgs),
-    /// Connect Claude Code to a hosted workspace, with the token (or the
-    /// sign-in link) you were given.
+    /// Connect your coding agents to a hosted workspace, with the token (or
+    /// the sign-in link) you were given.
     Hosted(HostedArgs),
     /// Check every piece of the setup, and say what to do about anything that
     /// is not right. Exits non-zero when something is.
@@ -81,6 +83,11 @@ pub struct Common {
     /// Leave Claude Code alone: no hooks, no MCP server, no settings.
     #[arg(long)]
     pub no_claude: bool,
+    /// The agents to connect, by name: claude, gemini, or all. Give it more
+    /// than once, or with commas. Without it: Claude Code, and every other
+    /// agent found on this machine.
+    #[arg(long = "agent", value_delimiter = ',', value_name = "NAME")]
+    pub agents: Vec<String>,
     /// Keep Claude Code's own file memory on. Setup otherwise turns it off when
     /// the settings do not say, so Antumbra is the one store.
     #[arg(long)]
@@ -159,6 +166,21 @@ struct Steps {
     dry_run: bool,
 }
 
+impl agents::Report for Steps {
+    fn dry_run(&self) -> bool {
+        self.dry_run
+    }
+    fn ok(&self, said: &str) {
+        Steps::ok(self, said);
+    }
+    fn would(&self, said: &str) {
+        Steps::would(self, said);
+    }
+    fn info(&self, said: &str) {
+        Steps::info(self, said);
+    }
+}
+
 impl Steps {
     fn ok(&self, said: impl AsRef<str>) {
         println!("  \u{2713} {}", said.as_ref());
@@ -221,6 +243,8 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
     };
     let home = home()?;
     let antumbra = home.join(".antumbra");
+    // A name --agent does not know is said now, not after the stack is up.
+    named_agents(&args.common.agents)?;
     println!("Setting up Antumbra on this machine.\n");
 
     let stack = find_stack(args.repo.as_deref(), args.gpu)?;
@@ -917,6 +941,7 @@ fn hosted(args: &HostedArgs) -> anyhow::Result<()> {
         .trim_end_matches("/mcp")
         .to_string();
     may_carry_the_token(&url, args.allow_http)?;
+    named_agents(&args.common.agents)?;
     println!("Connecting this machine to the hosted workspace at {url}.\n");
 
     let pasted = if let Some(t) = &args.token {
@@ -1056,10 +1081,34 @@ fn finish(
     state: &Value,
     steps: &Steps,
 ) -> anyhow::Result<()> {
-    if common.no_claude {
+    let env = |name: &str| std::env::var(name).ok();
+    let ground = agents::Ground {
+        home,
+        antumbra: agents::Program::this(find_program("antumbra").is_some()),
+        env: &env,
+    };
+    let chosen = chosen(common, &ground)?;
+    let mut connected: Vec<&str> = Vec::new();
+    if chosen.claude {
+        connect_claude(home, antumbra, common, url, workspace, steps)?;
+        connected.push(CLAUDE);
+    } else if common.no_claude {
         steps.info("left Claude Code alone (--no-claude)");
     } else {
-        connect_claude(home, antumbra, common, url, workspace, steps)?;
+        steps.info("left Claude Code alone (--agent does not name it)");
+    }
+    if !chosen.others.is_empty() && !chosen.claude {
+        // Claude Code's hooks are the same scripts; without it, they are
+        // still what `antumbra hook` runs.
+        write_hooks(&antumbra.join("hooks"), &agents::hook::scripts(), steps)?;
+    }
+    for agent in &chosen.others {
+        // One agent's config that cannot be written is that agent's loss,
+        // not the setup's.
+        match agents::connect(*agent, &ground, steps) {
+            Ok(()) => connected.push(agent.name()),
+            Err(e) => steps.warn(format!("{} was not connected: {e}", agent.title())),
+        }
     }
     // After the settings, so the name read is the one the hooks will report.
     let settings: Value = std::fs::read_to_string(
@@ -1075,9 +1124,15 @@ fn finish(
     let token = std::fs::read_to_string(antumbra.join("token.txt"))
         .map(|t| t.trim().to_string())
         .unwrap_or_default();
-    register_machine(url, &token, &session_host(&settings), steps);
+    let host = session_host(&settings);
+    register_machine(url, &token, &host, steps);
     if !steps.dry_run {
         let mut state = state.clone();
+        // What `antumbra hook` and `antumbra mcp bridge` read, for an agent
+        // whose settings carry no `env` of Antumbra's, and what the check
+        // goes by.
+        state["host"] = Value::String(host);
+        state["agents"] = json!(connected);
         state["configured_at"] = Value::String(chrono::Utc::now().to_rfc3339());
         std::fs::create_dir_all(antumbra)?;
         std::fs::write(
@@ -1088,12 +1143,117 @@ fn finish(
     if steps.dry_run {
         println!("\nNothing was changed (--dry-run).");
     } else {
-        println!(
-            "\nAntumbra is set up. Start a new Claude Code session: it opens with what Antumbra"
-        );
-        println!("remembers, and what you work on goes back in.");
+        match titles(&connected) {
+            Some(agents) => {
+                println!(
+                    "\nAntumbra is set up. Start a new session in {agents}: it opens with what"
+                );
+                println!("Antumbra remembers, and what you work on goes back in.");
+            }
+            None => println!("\nAntumbra is set up. No agent was connected to it."),
+        }
         println!("Check it any time with: antumbra setup check");
     }
+    Ok(())
+}
+
+/// Claude Code's name among the agents a setup records.
+const CLAUDE: &str = "claude";
+
+/// The agents one run connects.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Chosen {
+    claude: bool,
+    others: Vec<Agent>,
+}
+
+/// The agents `--agent` names, or nothing when it names none. A name it does
+/// not know is an error that lists the ones it takes.
+fn named_agents(names: &[String]) -> anyhow::Result<Option<Chosen>> {
+    let mut chosen = Chosen {
+        claude: false,
+        others: Vec::new(),
+    };
+    let mut any = false;
+    for name in names {
+        let name = name.trim().to_lowercase();
+        if name.is_empty() {
+            continue;
+        }
+        any = true;
+        match name.as_str() {
+            "all" => {
+                chosen.claude = true;
+                chosen.others = Agent::ALL.to_vec();
+            }
+            CLAUDE => chosen.claude = true,
+            other => match Agent::named(other) {
+                Some(agent) if !chosen.others.contains(&agent) => chosen.others.push(agent),
+                Some(_) => {}
+                None => anyhow::bail!(
+                    "--agent {other}: no such agent. It takes {CLAUDE}, {}, or all.",
+                    Agent::ALL.map(Agent::name).join(", ")
+                ),
+            },
+        }
+    }
+    Ok(any.then_some(chosen))
+}
+
+/// The agents this run connects: the ones `--agent` names, or, when it names
+/// none, Claude Code and every other agent found on this machine.
+/// `--no-claude` leaves Claude Code out either way.
+fn chosen(common: &Common, ground: &agents::Ground<'_>) -> anyhow::Result<Chosen> {
+    let mut chosen = match named_agents(&common.agents)? {
+        Some(named) => named,
+        None => Chosen {
+            claude: true,
+            others: Agent::ALL
+                .into_iter()
+                .filter(|agent| {
+                    agents::present(*agent, ground, |program| find_program(program).is_some())
+                })
+                .collect(),
+        },
+    };
+    if common.no_claude {
+        chosen.claude = false;
+    }
+    Ok(chosen)
+}
+
+/// The agents `names` record, as a person reads them: "Claude Code and
+/// Gemini CLI". Nothing for none.
+fn titles(names: &[&str]) -> Option<String> {
+    let titles: Vec<&str> = names
+        .iter()
+        .filter_map(|name| match *name {
+            CLAUDE => Some("Claude Code"),
+            other => Agent::named(other).map(Agent::title),
+        })
+        .collect();
+    match titles.as_slice() {
+        [] => None,
+        [one] => Some((*one).to_string()),
+        [first @ .., last] => Some(format!("{} and {last}", first.join(", "))),
+    }
+}
+
+/// Write the bundled hook scripts `names` into `dir`, replacing what is there.
+fn write_hooks(dir: &Path, names: &[String], steps: &Steps) -> anyhow::Result<()> {
+    if steps.dry_run {
+        steps.would(format!("write the hooks to {}", dir.display()));
+        return Ok(());
+    }
+    std::fs::create_dir_all(dir)?;
+    for name in names {
+        let text = hooks::bundled(name)
+            .ok_or_else(|| anyhow::anyhow!("{name} is not bundled in this build"))?;
+        let path = dir.join(name);
+        std::fs::write(&path, text)?;
+        make_executable(&path)?;
+    }
+    steps.ok(format!("hooks written to {}", dir.display()));
     Ok(())
 }
 
@@ -1200,22 +1360,13 @@ fn connect_claude(
 ) -> anyhow::Result<()> {
     // The scripts, from this build.
     let dir = antumbra.join("hooks");
-    let mut names: Vec<&str> = platform_hooks().iter().map(|(_, s, _)| *s).collect();
-    names.push(headers_helper_name());
+    let mut names: Vec<String> = platform_hooks()
+        .iter()
+        .map(|(_, s, _)| (*s).to_string())
+        .collect();
+    names.push(headers_helper_name().to_string());
     names.dedup();
-    if steps.dry_run {
-        steps.would(format!("write the hooks to {}", dir.display()));
-    } else {
-        std::fs::create_dir_all(&dir)?;
-        for name in &names {
-            let text = hooks::bundled(name)
-                .ok_or_else(|| anyhow::anyhow!("{name} is not bundled in this build"))?;
-            let path = dir.join(name);
-            std::fs::write(&path, text)?;
-            make_executable(&path)?;
-        }
-        steps.ok(format!("hooks written to {}", dir.display()));
-    }
+    write_hooks(&dir, &names, steps)?;
 
     // The settings.
     let claude = common
@@ -1583,25 +1734,42 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
         .unwrap_or(Value::Null);
-    let scripts = hooks::scripts_in(&settings);
-    for (event, script, _) in platform_hooks() {
-        let stem = script.trim_end_matches(".ps1").trim_end_matches(".sh");
-        let wired = settings
-            .get("hooks")
-            .and_then(|h| h.get(event))
-            .map(|e| e.to_string().contains(stem))
-            .unwrap_or(false);
-        if wired {
-            ok(format!("{event} runs {stem}"));
-        } else {
-            fail(
-                format!("{event} does not run {stem}"),
-                "antumbra setup (local or hosted) wires it".into(),
-            );
-        }
+    // A setup that recorded its agents is checked for those. One from before
+    // setup recorded them connected Claude Code, and is checked for that.
+    let recorded: Option<Vec<String>> = state.get("agents").and_then(Value::as_array).map(|all| {
+        all.iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect()
+    });
+    let claude_connected = recorded
+        .as_ref()
+        .is_none_or(|all| all.iter().any(|name| name == CLAUDE));
+    if !claude_connected {
+        println!(
+            "    Claude Code is not one of this setup's agents, so its settings were not checked"
+        );
     }
-    for hook in hooks::compare(&scripts, &home, |p| std::fs::read_to_string(p).ok()) {
-        match hook.state {
+    if claude_connected {
+        let scripts = hooks::scripts_in(&settings);
+        for (event, script, _) in platform_hooks() {
+            let stem = script.trim_end_matches(".ps1").trim_end_matches(".sh");
+            let wired = settings
+                .get("hooks")
+                .and_then(|h| h.get(event))
+                .map(|e| e.to_string().contains(stem))
+                .unwrap_or(false);
+            if wired {
+                ok(format!("{event} runs {stem}"));
+            } else {
+                fail(
+                    format!("{event} does not run {stem}"),
+                    "antumbra setup (local or hosted) wires it".into(),
+                );
+            }
+        }
+        for hook in hooks::compare(&scripts, &home, |p| std::fs::read_to_string(p).ok()) {
+            match hook.state {
             hooks::HookState::Same => {}
             hooks::HookState::Differs => println!(
                 "  ! {} differs from this build's copy; setup writes this build's to ~/.antumbra/hooks",
@@ -1612,11 +1780,11 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
                 "run setup again to write it".into(),
             ),
         }
-    }
-    // The agent's own connection runs this one, not the settings' hooks, so the
-    // comparison above never sees it.
-    let helper = antumbra.join("hooks").join(headers_helper_name());
-    match helper_state(std::fs::read_to_string(&helper).ok().as_deref()) {
+        }
+        // The agent's own connection runs this one, not the settings' hooks, so the
+        // comparison above never sees it.
+        let helper = antumbra.join("hooks").join(headers_helper_name());
+        match helper_state(std::fs::read_to_string(&helper).ok().as_deref()) {
         Helper::Same => ok(format!(
             "the MCP connection's headers helper names this machine to the server ({DEVICE_HEADER})"
         )),
@@ -1639,19 +1807,20 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
             "run setup again to write it".into(),
         ),
     }
-    match settings
-        .pointer("/env/ANTUMBRA_URL")
-        .and_then(Value::as_str)
-    {
-        Some(set) if set == url => ok(format!("ANTUMBRA_URL is {url}")),
-        Some(set) => fail(
-            format!("ANTUMBRA_URL is {set}, not {url}"),
-            "run setup again".into(),
-        ),
-        None => fail(
-            "ANTUMBRA_URL is not set in the settings".into(),
-            "run setup again".into(),
-        ),
+        match settings
+            .pointer("/env/ANTUMBRA_URL")
+            .and_then(Value::as_str)
+        {
+            Some(set) if set == url => ok(format!("ANTUMBRA_URL is {url}")),
+            Some(set) => fail(
+                format!("ANTUMBRA_URL is {set}, not {url}"),
+                "run setup again".into(),
+            ),
+            None => fail(
+                "ANTUMBRA_URL is not set in the settings".into(),
+                "run setup again".into(),
+            ),
+        }
     }
     // A plain http:// address to another machine carries the token in
     // cleartext; setup refuses it unless told --allow-http, which it records.
@@ -1666,27 +1835,61 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
                 .into(),
         );
     }
-    match find_program("claude") {
-        Some(claude) => {
-            let registered = Command::new(claude)
-                .args(["mcp", "get", "antumbra"])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false);
-            if registered {
-                ok("the MCP server \"antumbra\" is registered with Claude Code".into());
-            } else {
+    if claude_connected {
+        match find_program("claude") {
+            Some(claude) => {
+                let registered = Command::new(claude)
+                    .args(["mcp", "get", "antumbra"])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if registered {
+                    ok("the MCP server \"antumbra\" is registered with Claude Code".into());
+                } else {
+                    fail(
+                        "the MCP server \"antumbra\" is not registered".into(),
+                        "run setup again".into(),
+                    );
+                }
+            }
+            None => println!(
+            "  ! the claude command is not on your PATH, so the MCP registration was not checked"
+        ),
+        }
+    }
+    // The other agents: what setup wrote for each, read back, and the scripts
+    // their hooks run.
+    let others: Vec<Agent> = recorded
+        .iter()
+        .flatten()
+        .filter_map(|name| Agent::named(name))
+        .collect();
+    if !others.is_empty() {
+        for name in agents::hook::scripts() {
+            let path = antumbra.join("hooks").join(&name);
+            if !path.is_file() {
                 fail(
-                    "the MCP server \"antumbra\" is not registered".into(),
-                    "run setup again".into(),
+                    format!("{} is missing, and `antumbra hook` runs it", path.display()),
+                    "run setup again to write it".into(),
                 );
             }
         }
-        None => println!(
-            "  ! the claude command is not on your PATH, so the MCP registration was not checked"
-        ),
+        let env = |name: &str| std::env::var(name).ok();
+        let ground = agents::Ground {
+            home: &home,
+            antumbra: agents::Program::this(find_program("antumbra").is_some()),
+            env: &env,
+        };
+        for agent in others {
+            for finding in agents::check(agent, &ground) {
+                match finding.fix {
+                    None => ok(finding.said),
+                    Some(fix) => fail(finding.said, fix),
+                }
+            }
+        }
     }
     if reachable {
         let host = session_host(&settings).to_lowercase();
@@ -1957,6 +2160,68 @@ fn confirm(question: &str) -> anyhow::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_agents_to_connect_are_the_ones_named() -> anyhow::Result<()> {
+        let names =
+            |given: &[&str]| -> Vec<String> { given.iter().map(|n| n.to_string()).collect() };
+        // None named: setup finds them itself.
+        assert_eq!(named_agents(&[])?, None);
+        assert_eq!(named_agents(&names(&[" "]))?, None);
+        assert_eq!(
+            named_agents(&names(&["Gemini"]))?,
+            Some(Chosen {
+                claude: false,
+                others: vec![Agent::Gemini]
+            })
+        );
+        assert_eq!(
+            named_agents(&names(&["claude", "gemini", "gemini"]))?,
+            Some(Chosen {
+                claude: true,
+                others: vec![Agent::Gemini]
+            })
+        );
+        assert_eq!(
+            named_agents(&names(&["all"]))?,
+            Some(Chosen {
+                claude: true,
+                others: Agent::ALL.to_vec()
+            })
+        );
+        let Err(problem) = named_agents(&names(&["cursor"])) else {
+            anyhow::bail!("an agent setup does not know was taken");
+        };
+        let said = problem.to_string();
+        assert!(said.contains("--agent cursor: no such agent"), "{said}");
+        assert!(said.contains("claude, gemini"), "{said}");
+        Ok(())
+    }
+
+    #[test]
+    fn the_agents_connected_are_named_as_a_person_reads_them() {
+        assert_eq!(titles(&[]), None);
+        assert_eq!(titles(&["claude"]).as_deref(), Some("Claude Code"));
+        assert_eq!(
+            titles(&["claude", "gemini"]).as_deref(),
+            Some("Claude Code and Gemini CLI")
+        );
+        // A name from a newer setup that this build does not know is left out.
+        assert_eq!(
+            titles(&["gemini", "someday"]).as_deref(),
+            Some("Gemini CLI")
+        );
+    }
+
+    #[test]
+    fn the_scripts_another_agents_hooks_run_are_the_ones_claude_code_runs() {
+        // Setup writes them once, for Claude Code, and `antumbra hook` finds
+        // them there.
+        let claude: Vec<&str> = platform_hooks().iter().map(|(_, s, _)| *s).collect();
+        for script in agents::hook::scripts() {
+            assert!(claude.contains(&script.as_str()), "{script}");
+        }
+    }
 
     #[test]
     fn every_hook_setup_writes_is_bundled() -> anyhow::Result<()> {
