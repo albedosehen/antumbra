@@ -357,15 +357,26 @@ fn an_empty_list_says_why_and_what_fills_it() -> anyhow::Result<()> {
     Ok(())
 }
 
+// A frame asked for by the console's own words is of what they name: the
+// list in front is the one `--focus` gave, by the name its title draws.
 #[test]
-fn a_page_is_found_by_its_name_or_the_name_it_had() -> anyhow::Result<()> {
-    for page in Page::ALL {
-        assert_eq!(Page::from_name(page.title()), page);
-        assert_eq!(Page::from_name(&page.title().to_lowercase()), page);
+fn a_list_asked_for_by_the_word_the_console_draws_is_the_one_in_front() -> anyhow::Result<()> {
+    let headings = ["EXPERT", "CANDIDATE", "BOUNDARY"];
+    for ((_, name, _), heading) in crate::named::LISTS.iter().zip(headings) {
+        let mut app = full_app();
+        app.set_focus(crate::named::list(name)?);
+        let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
+        // The title draws the name, with a capital, and the table under it
+        // is that list's.
+        let mut drawn = name.to_string();
+        if let Some(first) = drawn.get_mut(..1) {
+            first.make_ascii_uppercase();
+        }
+        assert!(text.contains(&format!(" {drawn} ")), "{name}:\n{text}");
+        assert!(text.contains(&format!("│  {heading} ")), "{name}:\n{text}");
+        for other in headings.iter().filter(|other| **other != heading) {
+            assert!(!text.contains(&format!("│  {other} ")), "{name}:\n{text}");
+        }
     }
-    assert_eq!(Page::from_name("loop"), Page::Loop);
-    assert_eq!(Page::from_name("evals"), Page::Evals);
-    assert_eq!(Page::from_name("sovereign"), Page::Sovereign);
-    assert_eq!(Page::from_name("nowhere"), Page::Population);
     Ok(())
 }
