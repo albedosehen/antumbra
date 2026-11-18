@@ -121,9 +121,27 @@
           <input id="dir-dependents" type="radio" name="direction" value="dependents" checked><label for="dir-dependents">Depends on it</label>
           <input id="dir-dependencies" type="radio" name="direction" value="dependencies"><label for="dir-dependencies">It depends on</label>
         </fieldset>
+        <fieldset class="segmented">
+          <legend class="visually-hidden">How far</legend>
+          <input id="hops-1" type="radio" name="depth" value="1"><label for="hops-1">1 hop</label>
+          <input id="hops-3" type="radio" name="depth" value="3" checked><label for="hops-3">3 hops</label>
+          <input id="hops-6" type="radio" name="depth" value="6"><label for="hops-6">6 hops</label>
+        </fieldset>
         <button type="submit">Blast radius</button>
         <button id="all-pairs" type="button" class="quiet" hidden>Every pair</button>
       </form>
+      <figure id="dep-graph" class="graph" hidden>
+        <div class="graph-scroll">
+          <svg id="dep-svg" role="group" aria-label="The dependency graph: a service is drawn before what it depends on"></svg>
+        </div>
+        <figcaption class="graph-key small muted">
+          <span class="key declared">declared</span>
+          <span class="key observed">observed</span>
+          <span class="key claimed">learned or claimed</span>
+          <span>An arrow points from a service to what it depends on. Pick a service for its blast radius.</span>
+          <span id="dep-graph-note"></span>
+        </figcaption>
+      </figure>
       <div id="dependencies" class="panel"></div>
       <button id="pairs-more" type="button" class="link more" hidden></button>
     </section>

@@ -632,6 +632,131 @@ td .id {
   color: var(--ink-2);
 }
 
+/* The dependency graph: services in columns, a service before what it
+   depends on. A line's stroke is the source of the claim; the service a walk
+   starts from is filled, and what it reaches is outlined, with the lines it
+   took. Drawn with attributes and classes only: the page's policy allows no
+   inline style. */
+.graph {
+  margin: 0 0 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.graph-scroll {
+  overflow-x: auto;
+}
+
+.graph svg {
+  display: block;
+  width: 100%;
+  min-width: 640px;
+  height: auto;
+}
+
+.dep-edge {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1.5;
+}
+
+.dep-edge[data-src="observed"] {
+  stroke-dasharray: 5 4;
+}
+
+.dep-edge[data-src="learned"],
+.dep-edge[data-src="claimed"] {
+  stroke-dasharray: 1 4;
+  stroke-linecap: round;
+}
+
+.dep-edge.weak {
+  opacity: 0.5;
+}
+
+.dep-edge.lit {
+  stroke: var(--accent);
+}
+
+.dep-arrowhead {
+  fill: var(--ink-3);
+}
+
+.dep-arrowhead.lit {
+  fill: var(--accent);
+}
+
+.dep-node {
+  cursor: pointer;
+}
+
+.dep-node rect {
+  fill: var(--raised);
+  stroke: var(--line-strong);
+}
+
+.dep-node text {
+  fill: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.dep-node:hover rect,
+.dep-node:focus-visible rect {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.dep-node:focus-visible {
+  outline: none;
+}
+
+.dep-node.reached rect {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+}
+
+.dep-node.reached text {
+  fill: var(--ink);
+}
+
+.dep-node.origin rect {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.dep-node.origin text {
+  fill: var(--accent-ink);
+  font-weight: 600;
+}
+
+.graph-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.graph-key .key::before {
+  content: "";
+  display: inline-block;
+  width: 22px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-top: 2px solid var(--ink-3);
+}
+
+.graph-key .observed::before {
+  border-top-style: dashed;
+}
+
+.graph-key .claimed::before {
+  border-top-style: dotted;
+}
+
 .memories {
   display: grid;
   gap: 12px;
