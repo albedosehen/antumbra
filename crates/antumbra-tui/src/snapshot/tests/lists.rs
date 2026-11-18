@@ -294,6 +294,95 @@ fn a_narrow_terminal_drops_a_lesser_column_before_it_cuts_a_name() -> anyhow::Re
     Ok(())
 }
 
+/// What the console holds, as a read of the server would hand it back.
+fn as_read(app: &App) -> crate::app::Snapshot {
+    crate::app::Snapshot {
+        experts: app.experts.clone(),
+        memories: app.memories.clone(),
+        edges: app.edges.clone(),
+        boundaries: app.boundaries.clone(),
+        shadows: app.shadows.clone(),
+        loop_heads: app.loop_heads.clone(),
+        evals: app.evals.clone(),
+        operator: true,
+        ..crate::app::Snapshot::default()
+    }
+}
+
+#[test]
+fn a_read_that_reorders_the_lists_leaves_each_selection_on_its_item() -> anyhow::Result<()> {
+    let mut app = listed_app();
+    app.memories = memories(5);
+    app.edges.clear();
+    // The second row of every list.
+    app.selected = 1;
+    app.selected_shadow = 1;
+    app.selected_boundary = 1;
+    app.selected_eval = 1;
+    app.set_page(Page::Memory);
+    app.select_first();
+    app.select_next();
+    let expert = app.experts[app.selected].id.clone();
+    let candidate = app.shadows[app.selected_shadow].id.clone();
+    let boundary = app.boundaries[app.selected_boundary].id.clone();
+    let memory = app.memories[app.selected_memory].id.clone();
+    let eval = app.evals[app.selected_eval].run_id.clone();
+
+    // The same rows, each list the other way round.
+    let mut read = as_read(&app);
+    read.experts.reverse();
+    read.shadows.reverse();
+    read.boundaries.reverse();
+    read.memories.reverse();
+    read.evals.reverse();
+    app.apply_snapshot(read);
+
+    assert_eq!(app.experts[app.selected].id.as_str(), expert.as_str());
+    assert_eq!(
+        app.shadows[app.selected_shadow].id.as_str(),
+        candidate.as_str()
+    );
+    assert_eq!(
+        app.boundaries[app.selected_boundary].id.as_str(),
+        boundary.as_str()
+    );
+    assert_eq!(
+        app.memories[app.selected_memory].id.as_str(),
+        memory.as_str()
+    );
+    assert_eq!(app.evals[app.selected_eval].run_id.as_str(), eval.as_str());
+    // The experts are shown sorted whatever order they arrive in, so the
+    // mark is on the same row of the screen too.
+    assert_eq!(app.selected, 1, "the expert's row did not move");
+    // The memory page is in front: its mark is on the memory that was chosen.
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
+    let says = app.memories[app.selected_memory].content.clone();
+    assert_eq!(marked(&text).len(), 1, "one row is marked:\n{text}");
+    assert!(marked(&text)[0].contains(&says), "`{says}`:\n{text}");
+    Ok(())
+}
+
+#[test]
+fn a_selection_whose_item_is_gone_keeps_its_row_within_the_list() -> anyhow::Result<()> {
+    let mut app = listed_app();
+    app.selected_boundary = 1;
+    let gone = app.boundaries[1].id.clone();
+    let mut read = as_read(&app);
+    read.boundaries.retain(|b| b.id.as_str() != gone.as_str());
+    read.shadows.clear();
+    app.selected_shadow = 1;
+    app.apply_snapshot(read);
+    assert_eq!(app.boundaries.len(), 1);
+    assert_eq!(app.selected_boundary, 0, "brought within the list");
+    assert_eq!(app.selected_shadow, 0, "an emptied list selects nothing");
+    // And nothing breaks drawing either list.
+    for focus in [Focus::Shadows, Focus::Boundaries] {
+        app.set_focus(focus);
+        render(&mut app, 120, 36, 1600.0)?;
+    }
+    Ok(())
+}
+
 /// A store the size of a real one: `count` memories, each a few lines long,
 /// one of them, deep in the list and deep in its own text, saying `needle`.
 fn large_store(count: usize, at: usize, needle: &str) -> Vec<Memory> {

@@ -233,6 +233,78 @@ async fn tab_on_the_memory_page_lists_the_next_kind_and_keeps_the_keys_within_it
     Ok(())
 }
 
+/// The console reads the server again every few seconds. What is selected
+/// stays selected through it, on every list: the demo's store hands its rows
+/// back in an order of its own, which is not the order they are shown in.
+#[tokio::test]
+async fn a_read_of_the_server_leaves_the_selection_where_it_is() -> anyhow::Result<()> {
+    let (_store, backend, mut app) = console().await?;
+    // The second expert, the second candidate and the second boundary.
+    keys_pressed(&mut app, &backend, &[Key::Down]).await;
+    let expert = app.selected_expert().context("an expert")?.id.clone();
+    keys_pressed(&mut app, &backend, &[Key::Tab, Key::Down]).await;
+    let candidate = app.selected_shadow().context("a candidate")?.id.clone();
+    keys_pressed(&mut app, &backend, &[Key::Tab, Key::Down]).await;
+    let boundary = app.selected_boundary().context("a boundary")?.id.clone();
+    // The third memory, and the second evaluation.
+    keys_pressed(&mut app, &backend, &[Key::Char('2'), Key::Down, Key::Down]).await;
+    let memory = app.selected_memory().context("a memory")?.id.clone();
+    keys_pressed(&mut app, &backend, &[Key::Char('4'), Key::Down]).await;
+    let (eval, eval_subject) = {
+        let run = app.evals.get(app.selected_eval).context("an evaluation")?;
+        (run.run_id.clone(), run.subject_id.clone())
+    };
+
+    let rows = (
+        app.selected,
+        app.selected_shadow,
+        app.selected_boundary,
+        app.selected_memory,
+        app.selected_eval,
+    );
+    for read in 0..6 {
+        app.refresh(&backend).await;
+        assert_eq!(
+            app.selected_expert().map(|e| e.id.as_str()),
+            Some(expert.as_str()),
+            "the expert, after read {read}"
+        );
+        assert_eq!(
+            app.selected_shadow().map(|s| s.id.as_str()),
+            Some(candidate.as_str()),
+            "the candidate, after read {read}"
+        );
+        assert_eq!(
+            app.selected_boundary().map(|b| b.id.as_str()),
+            Some(boundary.as_str()),
+            "the boundary, after read {read}"
+        );
+        assert_eq!(
+            app.selected_memory().map(|m| m.id.as_str()),
+            Some(memory.as_str()),
+            "the memory, after read {read}"
+        );
+        let run = app.evals.get(app.selected_eval).context("an evaluation")?;
+        assert_eq!(
+            (run.run_id.as_str(), run.subject_id.as_str()),
+            (eval.as_str(), eval_subject.as_str()),
+            "the evaluation, after read {read}"
+        );
+    }
+    // Nothing changed in the store, so nothing moved on screen either.
+    assert_eq!(
+        rows,
+        (
+            app.selected,
+            app.selected_shadow,
+            app.selected_boundary,
+            app.selected_memory,
+            app.selected_eval,
+        )
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn l_swaps_the_memory_list_for_the_graph_and_back() -> anyhow::Result<()> {
     let (_store, backend, mut app) = console().await?;

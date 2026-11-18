@@ -440,15 +440,15 @@ impl App {
             .filter(|head| snap.halt_pending(&head.run_id))
             .map(|head| head.run_id.as_str().to_string())
             .collect();
+        // What is selected, by what it is: the lists are about to be
+        // replaced, and need not come back in the order they were in.
+        let kept = self.kept();
         self.experts = snap.experts;
         self.sort_experts();
         self.boundaries = snap.boundaries;
         self.shadows = snap.shadows;
         self.memories = snap.memories;
         self.sovereign = crate::sovereign::View::from_memories(&self.memories);
-        self.selected_skill = self
-            .selected_skill
-            .min(self.sovereign.skills.len().saturating_sub(1));
         self.edges = snap.edges;
         self.usage = snap
             .usage
@@ -465,24 +465,9 @@ impl App {
         self.evals = snap.evals;
         self.router = snap.router;
         self.operator = snap.operator;
-        if !self.experts.is_empty() && self.selected >= self.experts.len() {
-            self.selected = self.experts.len() - 1;
-        }
-        if !self.boundaries.is_empty() && self.selected_boundary >= self.boundaries.len() {
-            self.selected_boundary = self.boundaries.len() - 1;
-        }
-        if !self.shadows.is_empty() && self.selected_shadow >= self.shadows.len() {
-            self.selected_shadow = self.shadows.len() - 1;
-        }
-        if !self.memories.is_empty() && self.selected_memory >= self.memories.len() {
-            self.selected_memory = self.memories.len() - 1;
-        }
-        if !self.evals.is_empty() && self.selected_eval >= self.evals.len() {
-            self.selected_eval = self.evals.len() - 1;
-        }
-        if !self.loop_heads.is_empty() && self.selected_loop >= self.loop_heads.len() {
-            self.selected_loop = self.loop_heads.len() - 1;
-        }
+        // Each selection back on what it was on; one whose item is gone
+        // keeps its row, within the list.
+        self.keep(kept);
         // A list that changed under an open filter is searched again, so a
         // match never points at a row that has moved.
         if self.mode == Mode::Filter {
@@ -839,6 +824,7 @@ impl App {
 
 mod acting;
 mod knobs;
+mod selection;
 #[cfg(test)]
 mod tests;
 mod view;
