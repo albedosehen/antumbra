@@ -813,3 +813,43 @@ fn a_training_is_seeded_from_what_it_teaches_not_where_it_is_stored() -> anyhow:
     assert_ne!(seed(&two), seed(&here));
     Ok(())
 }
+
+// A proposed behavior the server may accept for its user: one that can be
+// taught, left untouched for as long as the workspace sets.
+#[test]
+fn a_proposed_behavior_is_due_for_acceptance_once_it_has_waited() -> anyhow::Result<()> {
+    let now = chrono::Utc::now();
+    let day = chrono::Duration::hours(24);
+    let mut waited = recorded("memory:waited", Status::Proposed, EVERYWHERE);
+    waited.updated_at = now - chrono::Duration::hours(25);
+    assert!(due_for_acceptance(&waited, day, now));
+    // Not yet: it was recorded, or recorded again, an hour ago.
+    let mut fresh = waited.clone();
+    fresh.updated_at = now - chrono::Duration::hours(1);
+    assert!(!due_for_acceptance(&fresh, day, now));
+    // A wait of nothing leaves accepting to the user.
+    assert!(!due_for_acceptance(&waited, chrono::Duration::zero(), now));
+    // What is accepted, trained or retired is not the server's to accept.
+    for status in [Status::Accepted, Status::Trained, Status::Retired] {
+        let mut settled = recorded("memory:settled", status, EVERYWHERE);
+        settled.updated_at = waited.updated_at;
+        assert!(!due_for_acceptance(&settled, day, now), "{status:?}");
+    }
+    // One that could not be taught is left for its user to mend.
+    let mut lacking = waited.clone();
+    let mut spec = ssh();
+    spec.examples.truncate(1);
+    lacking.content = content(&spec);
+    assert!(!due_for_acceptance(&lacking, day, now));
+    // And a memory that is no behavior is nobody's to accept.
+    let plain = Memory::new(
+        "memory:plain",
+        TenantId::new("ws:a"),
+        crate::MemoryNetwork::World,
+        "a fact",
+        1.0,
+        waited.updated_at,
+    );
+    assert!(!due_for_acceptance(&plain, day, now));
+    Ok(())
+}

@@ -1297,3 +1297,56 @@ async fn an_archived_adapter_s_card_names_the_copal_file_beside_its_seal() -> an
     );
     Ok(())
 }
+
+// Every training is kept as an evaluation of the scope's expert, admitted or
+// refused, so the record of how an expert has done fills by itself.
+#[tokio::test]
+async fn a_training_is_kept_as_an_evaluation_whether_admitted_or_refused() -> anyhow::Result<()> {
+    use antumbra_core::{EvalStatus, SubjectKind};
+    use antumbra_store::repo::evaluation;
+    let store = mem_store().await?;
+    let plan = owner_plan("ws:a");
+    let (id, _) = minted(
+        mint(
+            &store,
+            &plan,
+            admitted(&["memory:rule"], "adapters/a.safetensors"),
+            "rig",
+        )
+        .await?,
+    )?;
+    let runs = evaluation::recent_unscoped(&store).await?;
+    assert_eq!(runs.len(), 1);
+    let run = &runs[0];
+    assert_eq!(run.subject_kind, SubjectKind::Expert);
+    assert_eq!(run.subject_id, id.as_str());
+    assert_eq!(run.corpus_task_id, "training:everywhere");
+    assert_eq!(run.status, EvalStatus::Success);
+    let Some(metrics) = &run.metrics else {
+        anyhow::bail!("the evaluation keeps no readings");
+    };
+    assert_eq!(metrics["kind"], "training");
+    assert_eq!(metrics["base"], 0.0);
+    assert_eq!(metrics["expert"], 1.0);
+    assert_eq!(metrics["learned"], 1);
+    assert_eq!(metrics["missed"], 0);
+
+    // A set the admission refuses is kept as a failure, with why.
+    let mut refused = admitted(&["memory:rule"], "adapters/b.safetensors");
+    refused.verdict.admitted = false;
+    refused.verdict.reasons = vec!["the controls fell".into()];
+    refused.fitness = 0.2;
+    mint(&store, &plan, refused, "rig").await?;
+    let runs = evaluation::recent_unscoped(&store).await?;
+    assert_eq!(runs.len(), 2);
+    let failed = runs
+        .iter()
+        .find(|run| run.status == EvalStatus::Failure)
+        .and_then(|run| run.metrics.as_ref());
+    let Some(metrics) = failed else {
+        anyhow::bail!("the refused training was not kept: {runs:?}");
+    };
+    assert_eq!(metrics["admitted"], false);
+    assert_eq!(metrics["reasons"][0], "the controls fell");
+    Ok(())
+}

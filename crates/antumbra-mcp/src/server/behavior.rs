@@ -170,6 +170,11 @@ pub(super) struct BehaviorView {
     /// check; one that does something else points at the examples.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) missed: Option<MissedView>,
+    /// Whether the server accepted it for you, after it had waited proposed
+    /// for as long as the workspace sets (`accept_after_hours`, a day unless
+    /// changed, 0 for never). False for one you accepted yourself, and for
+    /// one that is not accepted. Retire it if it should not be taught.
+    pub(super) accepted_by_server: bool,
 }
 
 /// A held-out task a behavior was missed on, and the expert's answer.
@@ -292,7 +297,7 @@ impl McpServer {
 
     /// The user's behaviors.
     #[tool(
-        description = "List your behaviors, newest first: each rule with its scope, status (proposed, accepted, trained, retired), check patterns, how many examples and violations back it, and `problems` when something keeps it from being taught. One its last training did not learn says, under `missed`, a held-out task and what the expert answered instead. Filter by `status` or `scope`."
+        description = "List your behaviors, newest first: each rule with its scope, status (proposed, accepted, trained, retired), check patterns, how many examples and violations back it, and `problems` when something keeps it from being taught. A proposed one that can be taught is accepted by the server once it has waited as long as the workspace sets (a day unless changed), and says so under `accepted_by_server`. One its last training did not learn says, under `missed`, a held-out task and what the expert answered instead. Filter by `status` or `scope`."
     )]
     pub(super) async fn list_behaviors(
         &self,
@@ -329,6 +334,7 @@ impl McpServer {
                 problems: spec.problems(),
                 last_training: behavior::training(&m.evidence).map(|t| t.describe()),
                 last_audit: behavior::audits(&m.evidence).last().map(|a| a.describe()),
+                accepted_by_server: m.evidence.iter().any(|e| e == behavior::ACCEPTED_BY_SERVER),
                 missed: behavior::missed::of(&m.evidence).map(|x| MissedView {
                     task: x.task,
                     answer: x.answer,

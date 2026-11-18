@@ -47,6 +47,9 @@ function behaviorItem(b) {
   const sources = b.sources ?? [];
   const meta = [
     h("span", { class: "tag" }, b.status),
+    // Accepted for the user after it had waited, not by them: said, so a
+    // behavior they never looked at is not taken for one they chose.
+    b.accepted_by_server ? h("span", { class: "tag" }, "accepted after waiting") : null,
     h("span", {}, b.scope),
     h("span", {}, `${plural(b.examples, "example", "examples")} · ${plural(b.violations, "violation", "violations")}`),
     sources.length ? h("span", {}, `from ${plural(sources.length, "memory", "memories")}`) : null,
