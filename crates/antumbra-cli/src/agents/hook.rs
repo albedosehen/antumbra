@@ -196,9 +196,20 @@ pub fn answer(agent: Agent, event: Event, what: &Said) -> Option<String> {
         (Agent::Gemini, Event::Stop, Said::Reminder(text)) => {
             json!({ "decision": "deny", "reason": text })
         }
+        // Codex: Claude Code's own shapes. A turn's end is blocked with the
+        // reminder, which Codex sends the agent as a new prompt.
+        (Agent::Codex, Event::SessionStart, Said::Context(text)) => json!({
+            "hookSpecificOutput": { "hookEventName": "SessionStart", "additionalContext": text }
+        }),
+        (Agent::Codex, Event::Prompt, Said::Context(text)) => json!({
+            "hookSpecificOutput": { "hookEventName": "UserPromptSubmit", "additionalContext": text }
+        }),
+        (Agent::Codex, Event::Stop, Said::Reminder(text)) => {
+            json!({ "decision": "block", "reason": text })
+        }
         // A reminder where a turn is not ending, or context where one is,
         // has no place to go.
-        (Agent::Gemini, _, _) => return None,
+        (Agent::Gemini | Agent::Codex, _, _) => return None,
     };
     Some(out.to_string())
 }
@@ -296,6 +307,17 @@ fn run_script(
     Ok(String::from_utf8_lossy(&text).into_owned())
 }
 
+/// The most characters of context `agent` takes from a hook, where that is
+/// less than the scripts allow for Claude Code. Codex moves a hook's context
+/// to a file past some 2,500 tokens, and a bootstrap the agent has to go and
+/// open is one it may not read.
+fn context_limit(agent: Agent) -> Option<u32> {
+    match agent {
+        Agent::Codex => Some(7_000),
+        Agent::Gemini => None,
+    }
+}
+
 /// What the script is told beyond its input: where the server is, as Claude
 /// Code's settings tell it, and that it is not Claude Code it runs for.
 fn script_env(reach: &Reach, agent: Agent) -> Vec<(String, String)> {
@@ -313,6 +335,9 @@ fn script_env(reach: &Reach, agent: Agent) -> Vec<(String, String)> {
         ("ANTUMBRA_CAPTURE_REMINDER".to_string(), "brief".to_string()),
         ("ANTUMBRA_AGENT".to_string(), agent.name().to_string()),
     ];
+    if let Some(limit) = context_limit(agent) {
+        env.push(("ANTUMBRA_CONTEXT_LIMIT".to_string(), limit.to_string()));
+    }
     if let Some(workspace) = &reach.workspace {
         env.push(("ANTUMBRA_WORKSPACE_ID".to_string(), workspace.clone()));
     }

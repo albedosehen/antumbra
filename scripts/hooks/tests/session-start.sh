@@ -89,6 +89,12 @@ brief_at=$(grep -n 'Sovereign mode' <<<"$ctx" | head -1 | cut -d: -f1)
 memory_at=$(grep -n 'M1:x' <<<"$ctx" | head -1 | cut -d: -f1)
 check "says what is different about the session before any memory" test "${brief_at:-999}" -lt "${memory_at:-0}"
 
+echo "for an agent that takes less"
+ctx=$(run "$work/large.json" ANTUMBRA_CONTEXT_LIMIT=4000 | context)
+check "stays under the limit it was given (${#ctx})" test "${#ctx}" -le 4000
+check "keeps the best memory" grep -q 'M1:x' <<<"$ctx"
+check "says it left some out" grep -q 'more recalled but left out' <<<"$ctx"
+
 echo "a small recall"
 ctx=$(run "$work/small.json" | context)
 check "keeps everything" grep -q 'second small' <<<"$ctx"

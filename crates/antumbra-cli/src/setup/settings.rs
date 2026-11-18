@@ -87,6 +87,20 @@ pub struct Wiring {
     pub env_default: Vec<(String, String)>,
     /// Turn Claude Code's own file memory off, when the file does not say.
     pub auto_memory_off: bool,
+    /// The file's name, for what is said when it cannot be edited:
+    /// `settings.json` when this is empty.
+    pub file: &'static str,
+}
+
+impl Wiring {
+    /// The name the file goes by in an error.
+    fn file(&self) -> &'static str {
+        if self.file.is_empty() {
+            "settings.json"
+        } else {
+            self.file
+        }
+    }
 }
 
 /// What [`wire`] did.
@@ -301,7 +315,7 @@ fn root_open(text: &str) -> anyhow::Result<usize> {
     let at = skip_ws(text.as_bytes(), 0);
     match text.as_bytes().get(at) {
         Some(b'{') => Ok(at),
-        _ => anyhow::bail!("settings.json does not hold a JSON object"),
+        _ => anyhow::bail!("the file does not hold a JSON object"),
     }
 }
 
@@ -352,14 +366,15 @@ fn stem(name: &str) -> &str {
 
 /// `text` (a settings file, or empty for none) with `wiring` applied.
 pub fn wire(text: &str, wiring: &Wiring) -> anyhow::Result<Wired> {
+    let file = wiring.file();
     let original_text = if text.trim().is_empty() { "{}\n" } else { text };
     let original: Value = serde_json::from_str(original_text).map_err(|e| {
         anyhow::anyhow!(
-            "settings.json is not valid JSON ({e}); fix it or move it aside, then run setup again"
+            "{file} is not valid JSON ({e}); fix it or move it aside, then run setup again"
         )
     })?;
     if !original.is_object() {
-        anyhow::bail!("settings.json does not hold a JSON object");
+        anyhow::bail!("{file} does not hold a JSON object");
     }
     let mut text = original_text.to_string();
     let mut wired = Wired::default();
@@ -407,7 +422,7 @@ pub fn wire(text: &str, wiring: &Wiring) -> anyhow::Result<Wired> {
                     }
                 }
             }
-            Some(_) => anyhow::bail!("settings.json has an \"env\" that is not an object"),
+            Some(_) => anyhow::bail!("{file} has an \"env\" that is not an object"),
             None => {
                 let first = first_at(&found);
                 let entry = format!(
@@ -455,7 +470,7 @@ pub fn wire(text: &str, wiring: &Wiring) -> anyhow::Result<Wired> {
                             &matcher_text(hook, &indent),
                         );
                     }
-                    Some(_) => anyhow::bail!("settings.json's hooks.{} is not a list", hook.event),
+                    Some(_) => anyhow::bail!("{file}'s hooks.{} is not a list", hook.event),
                     None => {
                         let first = first_at(&events);
                         let indent = entry_indent(&text, hooks_open, first);
@@ -464,7 +479,7 @@ pub fn wire(text: &str, wiring: &Wiring) -> anyhow::Result<Wired> {
                     }
                 }
             }
-            Some(_) => anyhow::bail!("settings.json has a \"hooks\" that is not an object"),
+            Some(_) => anyhow::bail!("{file} has a \"hooks\" that is not an object"),
             None => {
                 let first = first_at(&found);
                 let indent = entry_indent(&text, open, first);
@@ -588,6 +603,7 @@ mod tests {
             ],
             env_default: vec![("ANTUMBRA_HOST_ID".into(), "laptop".into())],
             auto_memory_off: true,
+            file: "",
         }
     }
 

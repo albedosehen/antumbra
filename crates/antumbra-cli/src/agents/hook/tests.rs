@@ -241,3 +241,72 @@ fn a_script_that_is_not_there_is_an_error_and_not_a_panic() -> anyhow::Result<()
     assert!(!path.exists());
     Ok(())
 }
+
+/// What Codex 0.170 hands its `Stop` hook, as it was recorded from one.
+fn codex_stop() -> Value {
+    json!({
+        "session_id": "01a1ef66-b699-7f61-9cbf-d6dc80999ae6",
+        "turn_id": "01a1ef66-b703-77c3-80e2-a8131f700837",
+        "transcript_path": null,
+        "cwd": "/home/me/work",
+        "hook_event_name": "Stop",
+        "model": "gpt-5.5",
+        "permission_mode": "default",
+        "stop_hook_active": false,
+        "last_assistant_message": "It builds with bun.",
+    })
+}
+
+#[test]
+fn codex_is_heard_and_answered_as_claude_code_is() -> anyhow::Result<()> {
+    let heard = heard(Agent::Codex, Event::Stop, &codex_stop());
+    assert_eq!(heard["hook_event_name"], "Stop");
+    assert_eq!(heard["last_assistant_message"], "It builds with bun.");
+    // Its turn is the id the server judges a turn's recalls by.
+    assert_eq!(heard["prompt_id"], "01a1ef66-b703-77c3-80e2-a8131f700837");
+    // A transcript it does not have is not handed on as one.
+    assert!(heard.get("transcript_path").is_none());
+
+    let parsed = |text: Option<String>| -> anyhow::Result<Value> {
+        let text = text.ok_or_else(|| anyhow::anyhow!("nothing was answered"))?;
+        Ok(serde_json::from_str(&text)?)
+    };
+    let context = Said::Context("what is remembered".into());
+    assert_eq!(
+        parsed(answer(Agent::Codex, Event::SessionStart, &context))?,
+        json!({ "hookSpecificOutput": { "hookEventName": "SessionStart", "additionalContext": "what is remembered" } })
+    );
+    assert_eq!(
+        parsed(answer(Agent::Codex, Event::Prompt, &context))?,
+        json!({ "hookSpecificOutput": { "hookEventName": "UserPromptSubmit", "additionalContext": "what is remembered" } })
+    );
+    assert_eq!(
+        parsed(answer(
+            Agent::Codex,
+            Event::Stop,
+            &Said::Reminder("store what was learned".into())
+        ))?,
+        json!({ "decision": "block", "reason": "store what was learned" })
+    );
+    assert_eq!(answer(Agent::Codex, Event::Stop, &context), None);
+    Ok(())
+}
+
+#[test]
+fn codex_is_given_a_smaller_bootstrap_and_gemini_the_whole_one() {
+    let reach = Reach {
+        url: "https://memory.example".into(),
+        workspace: None,
+        token_file: PathBuf::from("token.txt"),
+        token_given: None,
+        host: None,
+    };
+    let limit = |agent| {
+        script_env(&reach, agent)
+            .into_iter()
+            .find(|(name, _)| name == "ANTUMBRA_CONTEXT_LIMIT")
+            .map(|(_, value)| value)
+    };
+    assert_eq!(limit(Agent::Codex).as_deref(), Some("7000"));
+    assert_eq!(limit(Agent::Gemini), None);
+}

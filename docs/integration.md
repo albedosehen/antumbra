@@ -196,12 +196,15 @@ It never fails the agent: whatever goes wrong is said on standard error, and not
 
 ### Which agents, and what setup writes for each
 
-`antumbra setup` connects Claude Code and every other agent it finds on the machine: one whose program is on the PATH, or whose config directory is there. `--agent` names them instead (`--agent gemini`, `--agent claude,gemini`, `--agent all`), and `--no-claude` leaves Claude Code out. For an agent other than Claude Code, setup writes only files that are Antumbra's own: nothing a person wrote is edited, connecting again replaces them, and `antumbra setup check` reads them back and says when one differs from what the installed build writes.
+`antumbra setup` connects Claude Code and every other agent it finds on the machine: one whose program is on the PATH, or whose config directory is there. `--agent` names them instead (`--agent gemini`, `--agent claude,codex`, `--agent all`), and `--no-claude` leaves Claude Code out.
+
+Setup touches as little of a person's own files as each agent allows. Where an agent reads a directory of Antumbra's own, that is all setup writes: nothing the person wrote is edited, and connecting again replaces it (Gemini CLI). Where an agent reads only its user's files, setup adds to them as it does for Claude Code: with the agent's own command, or as text, adding only, with a backup, and never twice (Codex). Either way `antumbra setup check` reads back what was written.
 
 | Agent | What setup writes | Opens with memory | Recall for each prompt | Reminder to store |
 | --- | --- | --- | --- | --- |
 | Claude Code | hooks and `env` in `settings.json`; the MCP server, with a headers helper | yes | yes | yes |
 | Gemini CLI | an extension, `~/.gemini/extensions/antumbra`: the bridge and three hooks | yes | yes | yes |
+| Codex | the bridge, with `codex mcp add`; three hooks added to `~/.codex/hooks.json` | yes, once you approve the hooks | yes, once you approve the hooks | yes, once you approve the hooks |
 
 **Gemini CLI.** The extension holds a manifest with the bridge as its MCP server and a `hooks/hooks.json` with `SessionStart`, `BeforeAgent` and `AfterAgent`. Gemini CLI lists it (`gemini extensions list`) and `gemini extensions uninstall antumbra` removes it. Two things are Gemini CLI's own to decide, and setup leaves them as they are:
 
@@ -218,6 +221,12 @@ It never fails the agent: whatever goes wrong is said on standard error, and not
   ```
 
 At a turn's end Gemini CLI shows the reminder to you as a warning that the agent was blocked. That is the reminder reaching the agent, which is then asked once more and stops.
+
+**Codex.** The bridge is registered with Codex's own `codex mcp add antumbra -- antumbra mcp bridge --agent codex`, which writes `[mcp_servers.antumbra]` into `~/.codex/config.toml` (or where `CODEX_HOME` says). The hooks, on `SessionStart`, `UserPromptSubmit` and `Stop`, go into `hooks.json` beside any of your own. One thing is Codex's own to decide, and setup does not go around it:
+
+- **Codex skips a hook until you approve it.** Start Codex, type `/hooks`, and approve Antumbra's three. Until then a session has Antumbra's tools and the bridge's instructions, and none of the three touchpoints; setup says so when it adds them, and Codex says nothing when it skips them. Approval is asked again when a hook's command changes, which it does when `antumbra` moves on or off the PATH.
+
+Codex moves a hook's context to a file past some 2,500 tokens, so its bootstrap is kept to 7,000 characters (`ANTUMBRA_CONTEXT_LIMIT`) and says how many memories it left out. At a turn's end Codex shows the stop hook as blocked: that is the reminder reaching the agent, which is asked once more and stops.
 
 ## Leaving work for another of your machines
 
