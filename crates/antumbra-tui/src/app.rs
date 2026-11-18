@@ -244,6 +244,9 @@ pub struct App {
     /// Why the last ask was routed to no expert, in the server's words, when
     /// it was routed to none and the server said.
     pub ask_reason: Option<String>,
+    /// What the last ask's task is near, of the user's own: their standing
+    /// experts and what they have taught.
+    pub ask_near: crate::backend::Near,
     /// Whether a server answers the ask, embedding the task with its own
     /// model. When false, the ask uses the demo's stand-in embedder and says
     /// so.
@@ -347,6 +350,7 @@ impl App {
             ask_query: String::new(),
             ask_result: None,
             ask_reason: None,
+            ask_near: crate::backend::Near::default(),
             real_embedder: false,
             ev_experts: HashMap::new(),
             ev_shadows: HashMap::new(),
@@ -642,22 +646,26 @@ impl App {
     pub fn open_ask(&mut self) {
         self.mode = Mode::Ask;
         self.ask_query.clear();
-        self.ask_result = None;
-        self.ask_reason = None;
+        self.forget_ask();
     }
 
     /// Append a character to the ask query (invalidates the stale result).
     pub fn ask_input(&mut self, c: char) {
         self.ask_query.push(c);
-        self.ask_result = None;
-        self.ask_reason = None;
+        self.forget_ask();
     }
 
     /// Delete the last character of the ask query (invalidates the result).
     pub fn ask_backspace(&mut self) {
         self.ask_query.pop();
+        self.forget_ask();
+    }
+
+    /// Drop what the last ask came to: it answered another task.
+    fn forget_ask(&mut self) {
         self.ask_result = None;
         self.ask_reason = None;
+        self.ask_near = crate::backend::Near::default();
     }
 
     /// Keep what routing the task came to: each expert by the name the
@@ -672,6 +680,7 @@ impl App {
                 .collect(),
         );
         self.ask_reason = routed.reason.clone();
+        self.ask_near = routed.near.clone();
     }
 
     /// The name the console shows an expert under ([`crate::words::expert_name`]),

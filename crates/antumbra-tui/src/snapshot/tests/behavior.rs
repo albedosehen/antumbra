@@ -409,6 +409,7 @@ fn ask_overlay_shows_routing_distribution() -> anyhow::Result<()> {
     app.set_ask_result(&crate::backend::Routed {
         routes: vec![(ExpertId::new("expert:arith"), 0.82)],
         reason: None,
+        ..Default::default()
     });
     let text = to_text(&render(&mut app, 80, 14, 1600.0)?);
     assert!(
@@ -604,6 +605,7 @@ fn ask_input_invalidates_the_stale_result() -> anyhow::Result<()> {
     app.set_ask_result(&crate::backend::Routed {
         routes: vec![(ExpertId::new("expert:arith"), 1.0)],
         reason: Some("a reason of some other task's".into()),
+        ..Default::default()
     });
     assert!(app.ask_result.is_some());
     app.ask_input('x');

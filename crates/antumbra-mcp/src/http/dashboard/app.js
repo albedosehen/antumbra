@@ -372,14 +372,91 @@ function routedNote(text) {
   return h("p", { class: "note small" }, text);
 }
 
+/** A scope as a name: a repository's by its last part, any other as it is. */
+function scopeName(scope) {
+  const parts = String(scope).split("/");
+  return parts[parts.length - 1] || String(scope);
+}
+
+/** What a standing expert's reading for a task comes to. */
+function standingSays(s) {
+  if (s.answers) return "answers it";
+  return s.in_scope ? "in scope, too far to answer alone" : "for its repository only";
+}
+
+/** Where a behavior near a task stands. */
+function taughtSays(t) {
+  if (t.learned === true) return "learned";
+  if (t.learned === false) return "not learned at its last training";
+  return t.status === "proposed" ? "proposed, waiting to be accepted" : "not trained yet";
+}
+
+/** One row of a reading: a name over its detail, and a tag beside a meter. */
+function nearRow(name, detail, tag, similarity) {
+  return h(
+    "li",
+    {},
+    h("div", {}, h("span", { class: "name" }, name), h("span", { class: "id" }, detail)),
+    h("span", { class: "nowrap" }, h("span", { class: "tag" }, tag), " ", weightCell(similarity)),
+  );
+}
+
+/**
+ * What a task is near, of the user's own: their standing experts, which are
+ * never routed to, and the nearest of what they have taught. A workspace of
+ * standing experts is routed to none of them for any task, so this is the
+ * half of the answer it has. A server from before it read them sends neither.
+ */
+function nearPanels(out) {
+  const panels = [];
+  const standing = out.standing || [];
+  if (standing.length) {
+    panels.push(
+      routedNote("Standing experts, the closest to this task first:"),
+      h(
+        "div",
+        { class: "panel" },
+        h(
+          "ul",
+          { class: "list" },
+          ...standing.map((s) => nearRow(scopeName(s.scope), s.scope, standingSays(s), s.similarity)),
+        ),
+      ),
+    );
+  }
+  const taught = out.taught || [];
+  if (taught.length) {
+    panels.push(
+      routedNote("The nearest of what you have taught:"),
+      h(
+        "div",
+        { class: "panel" },
+        h(
+          "ul",
+          { class: "list" },
+          ...taught.map((t) => nearRow(t.rule, `${t.scope} · ${t.status}`, taughtSays(t), t.similarity)),
+        ),
+      ),
+    );
+  }
+  return panels;
+}
+
 async function runRoute(task) {
   const ticket = ++state.route;
   const out = await call("route", { task, top_k: 5 });
   if (ticket !== state.route) return;
   const target = byId("routed");
   if (out.escalate) {
+    // With none routed, a standing expert answers a task in its scope that is
+    // like what it was taught; failing one, the agent.
+    const answers = (out.standing || []).find((s) => s.answers);
+    const lead = answers
+      ? `No expert is routed to it; your standing expert ${scopeName(answers.scope)} answers it.`
+      : "No expert takes it; it goes to your agent.";
     target.replaceChildren(
-      routedNote(`No expert takes it; it goes to your agent. Why: ${out.reason || "nothing covers it"}.`),
+      routedNote(`${lead} Why: ${out.reason || "nothing covers it"}.`),
+      ...nearPanels(out),
     );
     return;
   }
@@ -411,6 +488,7 @@ async function runRoute(task) {
         ),
       ),
     ),
+    ...nearPanels(out),
   );
 }
 

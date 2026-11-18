@@ -8,6 +8,7 @@ use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::{App, Focus, Mode, Page};
+use crate::backend::{StandingHit, TaughtHit};
 use crate::events::EventKind;
 use crate::keys::{self, Binding, Group};
 use crate::overlay;
@@ -261,10 +262,23 @@ fn ask_lines<'a>(app: &App, t: &Theme) -> Vec<Line<'a>> {
             Style::default().fg(t.ink3),
         ))),
         Some(routes) if routes.is_empty() => {
-            lines.push(Line::from(Span::styled(
-                "  No expert is routed to it: it goes to your agent.",
-                Style::default().fg(t.ink),
-            )));
+            // With none routed, a standing expert answers a task that is in
+            // its scope and like what it was taught; failing one, the agent.
+            let answers = app
+                .ask_near
+                .standing
+                .iter()
+                .flatten()
+                .find(|hit| hit.answers)
+                .map(|hit| app.expert_called(&hit.expert));
+            let says = match answers {
+                Some(name) => format!(
+                    "  No expert is routed to it: your standing expert {} answers it.",
+                    super::clip(&name, 20)
+                ),
+                None => "  No expert is routed to it: it goes to your agent.".to_string(),
+            };
+            lines.push(Line::from(Span::styled(says, Style::default().fg(t.ink))));
             if let Some(reason) = &app.ask_reason {
                 for (i, part) in wrapped(reason, ASK_ROOM - 7).into_iter().enumerate() {
                     let lead = if i == 0 { "  Why: " } else { "       " };
@@ -288,6 +302,110 @@ fn ask_lines<'a>(app: &App, t: &Theme) -> Vec<Line<'a>> {
         }
     }
 
+    // With a task asked, the server's reading of the standing experts for
+    // it; before one is, or from a server that reads none, the ones that
+    // shape every answer here.
+    match (&app.ask_result, &app.ask_near.standing) {
+        (Some(_), Some(hits)) => standing_read(app, t, hits, &mut lines),
+        _ => standing_here(app, t, &mut lines),
+    }
+    taught_read(t, &app.ask_near.taught, &mut lines);
+    lines
+}
+
+/// How many standing experts, and how many columns of a name, the ask lists
+/// for a task.
+const ASK_STANDING: usize = 3;
+const ASK_NAME: usize = 22;
+
+/// The server's reading of the standing experts for the task asked: the
+/// closest first, each with how close the task is to what it was taught and
+/// what that comes to. One answers a task alone when the task is in its scope
+/// and close enough; one in scope and further off is still in every answer
+/// here when an expert is routed; one for another repository is neither.
+fn standing_read<'a>(app: &App, t: &Theme, hits: &[StandingHit], lines: &mut Vec<Line<'a>>) {
+    if hits.is_empty() {
+        return;
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Standing experts, the closest to this task first:",
+        Style::default().fg(t.ink2),
+    )));
+    for hit in hits.iter().take(ASK_STANDING) {
+        let (tone, ink, says) = if hit.answers {
+            (Tone::Settled, t.ink, "answers it")
+        } else if hit.in_scope {
+            (Tone::Open, t.ink2, "in scope, too far to answer alone")
+        } else {
+            (Tone::Open, t.ink3, "for another repository")
+        };
+        let name = super::clip(&app.expert_called(&hit.expert), ASK_NAME - 1);
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {} ", tone.glyph()),
+                Style::default().fg(t.tone(tone)),
+            ),
+            Span::styled(format!("{name:<ASK_NAME$}"), Style::default().fg(ink)),
+            Span::styled(
+                format!("{:>5.2}  ", hit.similarity),
+                Style::default().fg(t.ink2),
+            ),
+            Span::styled(says, Style::default().fg(ink)),
+        ]));
+    }
+    if hits.len() > ASK_STANDING {
+        lines.push(Line::from(Span::styled(
+            format!("  and {} more, further from it", hits.len() - ASK_STANDING),
+            Style::default().fg(t.ink3),
+        )));
+    }
+}
+
+/// The nearest of what the user has taught: each rule in at most two rows,
+/// then its scope and where it stands. A rule that bears on the task and was
+/// not learned is why no expert takes it, and one still proposed is waiting
+/// on the user, so the state is said in words.
+fn taught_read<'a>(t: &Theme, taught: &[TaughtHit], lines: &mut Vec<Line<'a>>) {
+    if taught.is_empty() {
+        return;
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  The nearest of what you have taught:",
+        Style::default().fg(t.ink2),
+    )));
+    let room = ASK_ROOM - 4;
+    for hit in taught {
+        let mut rows = wrapped(&hit.rule, room);
+        if rows.len() > 2 {
+            let rest = rows.split_off(1).join(" ");
+            rows.push(super::clip(&rest, room));
+        }
+        for row in rows {
+            lines.push(Line::from(Span::styled(
+                format!("  {row}"),
+                Style::default().fg(t.ink),
+            )));
+        }
+        let state = match (hit.status.as_str(), hit.learned) {
+            (_, Some(true)) => "learned",
+            (_, Some(false)) => "not learned at its last training",
+            ("proposed", None) => "proposed, waiting to be accepted",
+            _ => "not trained yet",
+        };
+        lines.push(Line::from(Span::styled(
+            format!("    {} · {state}", words::scope_name(&hit.scope)),
+            Style::default().fg(t.ink3),
+        )));
+    }
+}
+
+/// The standing experts that shape every answer where the console was
+/// started, whatever the task: what the ask shows of them before a task is
+/// asked, and when the server reads none for a task.
+fn standing_here<'a>(app: &App, t: &Theme, lines: &mut Vec<Line<'a>>) {
+    let dim = Style::default().fg(t.ink2);
     let standing = app.standing_count();
     if standing > 0 {
         let here = app.standing_here();
@@ -337,7 +455,6 @@ fn ask_lines<'a>(app: &App, t: &Theme) -> Vec<Line<'a>> {
             )));
         }
     }
-    lines
 }
 
 /// The ask (`a`): a task, routed as the server routes one, with what it came

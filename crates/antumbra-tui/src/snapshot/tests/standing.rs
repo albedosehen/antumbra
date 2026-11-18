@@ -222,6 +222,7 @@ fn ask_with_no_standing_expert_says_nothing_of_them() -> anyhow::Result<()> {
     app.set_ask_result(&Routed {
         routes: Vec::new(),
         reason: Some("outside what the shared population covers".into()),
+        ..Default::default()
     });
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
@@ -269,4 +270,170 @@ fn golden_ask_standing() -> anyhow::Result<()> {
     }
     app.set_ask_result(&Routed::read(&no_router()));
     golden_overlay("ask_standing", &mut app, 120, 36)
+}
+
+/// The server's answer to the same kind of task from a server that also
+/// reads the user's standing experts and behaviors for it.
+fn read_for_the_task() -> serde_json::Value {
+    let id = |scope: &str| format!("expert:ws:default:user:default:behavior:{scope}");
+    let mut out = no_router();
+    out["standing"] = serde_json::json!([
+        { "expert_id": id("everywhere"), "scope": "everywhere",
+          "similarity": 0.41, "in_scope": true, "answers": true },
+        { "expert_id": id("github.com/acme/billing"), "scope": "github.com/acme/billing",
+          "similarity": 0.36, "in_scope": false, "answers": false },
+        { "expert_id": id("github.com/acme/orders"), "scope": "github.com/acme/orders",
+          "similarity": 0.12, "in_scope": true, "answers": false },
+        { "expert_id": id("github.com/other/warehouse-stock-reconciler"),
+          "scope": "github.com/other/warehouse-stock-reconciler",
+          "similarity": 0.02, "in_scope": false, "answers": false },
+    ]);
+    out["taught"] = serde_json::json!([
+        { "behavior_id": "memory:1", "scope": "everywhere", "status": "accepted",
+          "similarity": 0.17, "learned": false,
+          "rule": "Draw a game character for a side-scrolling or platformer game in a \
+                   three-quarter or side view facing its direction of travel, with both \
+                   hands visible, so the rig can be mirrored for the other direction." },
+        { "behavior_id": "memory:2", "scope": "github.com/acme/orders", "status": "trained",
+          "similarity": 0.11, "learned": true,
+          "rule": "Name a branch for an issue feat/{issue}-{slug}." },
+        { "behavior_id": "memory:3", "scope": "everywhere", "status": "proposed",
+          "similarity": 0.09,
+          "rule": "Write a commit subject in the imperative." },
+    ]);
+    out
+}
+
+#[test]
+fn the_servers_reading_of_standing_experts_and_behaviors_is_read() -> anyhow::Result<()> {
+    let routed = Routed::read(&read_for_the_task());
+    let Some(standing) = &routed.near.standing else {
+        anyhow::bail!("the standing experts the server sent were not read");
+    };
+    assert_eq!(standing.len(), 4);
+    assert!(standing[0].answers && standing[0].in_scope);
+    assert_eq!(standing[1].scope, "github.com/acme/billing");
+    assert!((standing[1].similarity - 0.36).abs() < 1e-6);
+    let learned: Vec<Option<bool>> = routed.near.taught.iter().map(|t| t.learned).collect();
+    assert_eq!(learned, vec![Some(false), Some(true), None]);
+    // An older server says nothing of them, which is not the same as a user
+    // who has none: the console then lists the ones for this place itself.
+    assert_eq!(Routed::read(&no_router()).near.standing, None);
+    let mut none = no_router();
+    none["standing"] = serde_json::json!([]);
+    assert_eq!(Routed::read(&none).near.standing, Some(Vec::new()));
+    Ok(())
+}
+
+// Asked about a task, the console says which standing expert would answer it
+// and which are only near it, then the nearest of what was taught with where
+// each stands: the rule that bears on the task and was not learned is the
+// answer to why no expert takes it.
+#[test]
+fn ask_says_which_standing_expert_answers_and_what_was_taught_about_the_task() -> anyhow::Result<()>
+{
+    let mut app = standing_app();
+    app.open_ask();
+    for c in "draw a game character".chars() {
+        app.ask_input(c);
+    }
+    app.set_ask_result(&Routed::read(&read_for_the_task()));
+    let text = to_text(&render(&mut app, 120, 44, 1600.0)?);
+    let row = |parts: &[&str]| {
+        text.lines()
+            .any(|row| parts.iter().all(|part| row.contains(part)))
+    };
+    assert!(
+        text.contains("Standing experts, the closest to this task first:"),
+        "{text}"
+    );
+    assert!(
+        text.contains("No expert is routed to it: your standing expert everywhere answers it."),
+        "{text}"
+    );
+    assert!(row(&["● everywhere", "0.41", "answers it"]), "{text}");
+    assert!(
+        row(&["○ billing", "0.36", "for another repository"]),
+        "{text}"
+    );
+    assert!(
+        row(&["○ orders", "0.12", "in scope, too far to answer alone"]),
+        "{text}"
+    );
+    assert!(text.contains("and 1 more, further from it"), "{text}");
+    // The list for this place gives way to the server's reading.
+    assert!(!text.contains("in every answer here"), "{text}");
+
+    assert!(
+        text.contains("The nearest of what you have taught:"),
+        "{text}"
+    );
+    // A long rule is two rows, cut with an ellipsis, and none is left out.
+    assert!(
+        text.contains("Draw a game character for a side-scrolling"),
+        "{text}"
+    );
+    assert!(
+        row(&["everywhere · not learned at its last training"]),
+        "{text}"
+    );
+    assert!(
+        text.contains("Name a branch for an issue feat/{issue}-{slug}."),
+        "{text}"
+    );
+    assert!(row(&["orders · learned"]), "{text}");
+    assert!(
+        row(&["everywhere · proposed, waiting to be accepted"]),
+        "{text}"
+    );
+
+    // Typing again drops the reading with the result it came with.
+    app.ask_input('s');
+    assert_eq!(app.ask_near, crate::backend::Near::default());
+    let text = to_text(&render(&mut app, 120, 44, 1600.0)?);
+    assert!(text.contains("in every answer here (orders)"), "{text}");
+    assert!(
+        !text.contains("The nearest of what you have taught"),
+        "{text}"
+    );
+    Ok(())
+}
+
+// A server that reads the standing experts and finds the user has none says
+// nothing of them, and a task some expert is routed to still gets the reading.
+#[test]
+fn ask_with_a_route_still_reads_the_standing_experts() -> anyhow::Result<()> {
+    let mut app = standing_app();
+    app.open_ask();
+    let mut out = read_for_the_task();
+    out["covered"] = true.into();
+    out["escalate"] = false.into();
+    out["reason"] = serde_json::Value::Null;
+    out["routes"] = serde_json::json!([
+        { "expert_id": "expert:ws:default:user:default:behavior:everywhere",
+          "probability": 0.8, "private": true }
+    ]);
+    app.set_ask_result(&Routed::read(&out));
+    let text = to_text(&render(&mut app, 120, 44, 1600.0)?);
+    assert!(text.contains("80%"), "{text}");
+    assert!(text.contains("answers it"), "{text}");
+
+    let mut none = no_router();
+    none["standing"] = serde_json::json!([]);
+    app.set_ask_result(&Routed::read(&none));
+    let text = to_text(&render(&mut app, 120, 44, 1600.0)?);
+    assert!(!text.contains("Standing experts"), "{text}");
+    Ok(())
+}
+
+// Golden the ask with the server's reading for the task.
+#[test]
+fn golden_ask_reading() -> anyhow::Result<()> {
+    let mut app = standing_app();
+    app.open_ask();
+    for c in "draw a game character".chars() {
+        app.ask_input(c);
+    }
+    app.set_ask_result(&Routed::read(&read_for_the_task()));
+    golden_overlay("ask_reading", &mut app, 120, 44)
 }

@@ -471,6 +471,7 @@ async fn route_escalates_without_router_then_routes_with_one() -> anyhow::Result
         .route(Parameters(RouteParams {
             task: "add two numbers".into(),
             top_k: None,
+            repo: None,
         }))
         .await?;
     assert!(r.0.escalate && !r.0.covered && r.0.routes.is_empty());
@@ -498,6 +499,7 @@ async fn route_escalates_without_router_then_routes_with_one() -> anyhow::Result
         .route(Parameters(RouteParams {
             task: "add two numbers".into(),
             top_k: Some(3),
+            repo: None,
         }))
         .await?;
     assert!(r.0.covered && !r.0.escalate);
@@ -533,6 +535,7 @@ async fn route_escalates_without_router_then_routes_with_one() -> anyhow::Result
         .route(Parameters(RouteParams {
             task: "my private skill".into(),
             top_k: Some(5),
+            repo: None,
         }))
         .await?;
     assert!(
@@ -567,6 +570,7 @@ async fn route_escalates_when_a_boundary_inhibits_the_task() -> anyhow::Result<(
         .route(Parameters(RouteParams {
             task: "add two numbers".into(),
             top_k: Some(3),
+            repo: None,
         }))
         .await?;
     assert!(r.0.covered && !r.0.escalate);
@@ -602,6 +606,7 @@ async fn route_escalates_when_a_boundary_inhibits_the_task() -> anyhow::Result<(
         .route(Parameters(RouteParams {
             task: "add two numbers".into(),
             top_k: Some(3),
+            repo: None,
         }))
         .await?;
     assert!(

@@ -184,6 +184,7 @@ fn demo_app() -> App {
         ask_query: String::new(),
         ask_result: None,
         ask_reason: None,
+        ask_near: crate::backend::Near::default(),
         real_embedder: false,
         ev_experts: std::collections::HashMap::new(),
         ev_shadows: std::collections::HashMap::new(),
