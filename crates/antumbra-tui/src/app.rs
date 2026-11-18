@@ -251,6 +251,10 @@ pub struct App {
     /// What the last ask's task is near, of the user's own: their standing
     /// experts and what they have taught.
     pub ask_near: crate::backend::Near,
+    /// What the server is teaching: each scope a user has behaviors or a
+    /// standing expert in, and where its training stands. Worked out from
+    /// the behaviors and experts read, when they are read.
+    pub standing: Vec<crate::standing::Scope>,
     /// The services the workspace's dependency claims name, read from the
     /// memories that hold them.
     pub services: crate::services::Services,
@@ -366,6 +370,7 @@ impl App {
             ask_result: None,
             ask_reason: None,
             ask_near: crate::backend::Near::default(),
+            standing: Vec::new(),
             services: crate::services::Services::default(),
             selected_service: 0,
             service_hops: 3,
@@ -482,6 +487,13 @@ impl App {
         self.evals = snap.evals;
         self.router = snap.router;
         self.operator = snap.operator;
+        self.standing = crate::standing::read(
+            &self.memories,
+            &self.experts,
+            &self.shadows,
+            self.policy.accept_after_hours,
+            chrono::Utc::now(),
+        );
         // Each selection back on what it was on; one whose item is gone
         // keeps its row, within the list.
         self.keep(kept);

@@ -23,6 +23,7 @@ mod services;
 mod settings;
 mod snapshot;
 mod sovereign;
+mod standing;
 mod theme;
 mod transition;
 mod ui;

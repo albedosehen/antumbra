@@ -5,17 +5,20 @@
 //! in its self-improvement cycle. When more than one run is live, the runs are a
 //! selectable list (j/k) and `enter` opens the run's drill-down.
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::{Cell, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
 
 use antumbra_core::generational::LoopState;
 
 use crate::app::App;
+use crate::standing::{Scope, Standing};
+use crate::theme::Tone;
+use crate::words;
 
-use super::{nothing_here, panel};
+use super::{nothing_here, panel, since};
 
 /// The forward cycle, in order (Paused is a rest state, shown separately).
 pub(super) const STAGES: [LoopState; 5] = [
@@ -55,7 +58,147 @@ pub(super) fn stage_blurb(s: LoopState) -> &'static str {
     }
 }
 
+/// The Training page: what the server teaches without being asked, over the
+/// loop a person runs. A workspace with no behaviors has only the second.
 pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
+    if app.standing.is_empty() {
+        training_loop(f, app, area);
+        return;
+    }
+    // Its rows, a heading, a note and the border; never more than it leaves
+    // the loop room beside.
+    let wanted = u16::try_from(app.standing.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(4);
+    let parts = Layout::vertical([
+        Constraint::Length(wanted.min(area.height.saturating_sub(6))),
+        Constraint::Min(0),
+    ])
+    .split(area);
+    standing(f, app, parts[0]);
+    training_loop(f, app, parts[1]);
+}
+
+/// A wait as its coarsest unit: `5h`, `40m`.
+fn wait(left: chrono::Duration) -> String {
+    if left.num_hours() > 0 {
+        format!("{}h", left.num_hours())
+    } else {
+        format!("{}m", left.num_minutes().max(1))
+    }
+}
+
+/// Where a scope's training stands, as a shape and a sentence.
+fn stands(app: &App, s: &Scope) -> (Tone, String) {
+    match s.state {
+        Standing::UpToDate => (Tone::Settled, "up to date".into()),
+        Standing::Waiting => (Tone::Open, "trained at the server's next pass".into()),
+        Standing::Refused => (
+            Tone::Failed,
+            "not admitted: it waits for a behavior to change".into(),
+        ),
+        Standing::Dropping => (
+            Tone::Ended,
+            "nothing left to teach: dropped at the next pass".into(),
+        ),
+        Standing::Proposed => (
+            Tone::Open,
+            match s.accepts_in {
+                Some(left) if left <= chrono::Duration::zero() => {
+                    "accepted at the server's next pass".into()
+                }
+                Some(left) => format!("its first is accepted in {}", wait(left)),
+                None if app.policy.accept_after_hours > 0.0 => {
+                    "none can be taught yet: the dashboard says why".into()
+                }
+                None => "waits for you to accept it".into(),
+            },
+        ),
+    }
+}
+
+/// The standing experts: each scope, how many of its behaviors are taught,
+/// wait and are proposed, when it was last trained, and where it stands.
+/// The server works through these by itself, so the panel says what it will
+/// do next and not what to type.
+fn standing(f: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme();
+    let name = format!(
+        " Standing experts {} · taught by the server ",
+        app.standing.len()
+    );
+    let block = panel(&t, Span::styled(name, Style::default().fg(t.ink2)));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let parts = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(inner);
+
+    let count = |n: usize| {
+        let ink = if n == 0 { t.ink3 } else { t.ink };
+        Cell::from(Span::styled(n.to_string(), Style::default().fg(ink)))
+    };
+    let rows = app.standing.iter().map(|s| {
+        let (tone, says) = stands(app, s);
+        Row::new(vec![
+            Cell::from(Span::styled(
+                words::scope_name(&s.scope).to_string(),
+                Style::default().fg(t.ink),
+            )),
+            count(s.trained),
+            count(s.accepted),
+            count(s.proposed),
+            Cell::from(Span::styled(
+                s.last_trained.map_or_else(|| "-".to_string(), since),
+                Style::default().fg(t.ink2),
+            )),
+            Cell::from(Line::from(vec![
+                Span::styled(
+                    format!("{} ", tone.glyph()),
+                    Style::default().fg(t.tone(tone)),
+                ),
+                Span::styled(says, Style::default().fg(t.tone(tone))),
+            ])),
+        ])
+    });
+    let header = Row::new(
+        [
+            "EXPERT",
+            "TRAINED",
+            "ACCEPTED",
+            "PROPOSED",
+            "LAST TRAINED",
+            "STATE",
+        ]
+        .into_iter()
+        .map(Cell::from),
+    )
+    .style(Style::default().fg(t.ink2).add_modifier(Modifier::BOLD));
+    let widths = [
+        Constraint::Min(14),
+        Constraint::Length(6),
+        Constraint::Length(7),
+        Constraint::Length(8),
+        Constraint::Length(12),
+        Constraint::Min(34),
+    ];
+    f.render_widget(Table::new(rows, widths).header(header), parts[0]);
+
+    let hours = app.policy.accept_after_hours;
+    let note = if hours > 0.0 {
+        format!(
+            "A proposed behavior that can be taught is accepted after {hours:.0} hours. K changes the wait."
+        )
+    } else {
+        "Proposed behaviors wait for you to accept them. K sets a wait after which the server does."
+            .to_string()
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(note, Style::default().fg(t.ink3))),
+        parts[1],
+    );
+}
+
+/// The generational loop: the run under the cursor as a pipeline.
+fn training_loop(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let block = panel(
         &t,
@@ -65,7 +208,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(block, area);
 
     let Some(head) = app.selected_loop_head() else {
-        let why = "No training loop has run yet: `antumbra loop` or `antumbra train` runs one.";
+        let why = "No training loop has run yet: `antumbra train` runs one over a corpus, by hand. A standing expert needs none: the server trains it when a behavior of yours is accepted, and lists it here.";
         f.render_widget(
             Paragraph::new(nothing_here(app, &t, why)).wrap(Wrap { trim: true }),
             inner,

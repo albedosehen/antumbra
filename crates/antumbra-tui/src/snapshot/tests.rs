@@ -185,6 +185,7 @@ fn demo_app() -> App {
         ask_result: None,
         ask_reason: None,
         ask_near: crate::backend::Near::default(),
+        standing: Vec::new(),
         services: crate::services::Services::default(),
         selected_service: 0,
         service_hops: 3,
@@ -701,4 +702,5 @@ mod look;
 mod runs;
 mod services;
 mod standing;
+mod training;
 mod wording;

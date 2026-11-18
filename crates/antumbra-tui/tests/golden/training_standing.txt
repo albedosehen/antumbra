@@ -1,0 +1,30 @@
+ ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                           ● live
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent  ·  6 Services
+ Training: what the server is teaching your experts, and the loop that grows new ones when it is run.
+╭ Standing experts 2 · taught by the server ─────────────────────────────────────────────────────────────────────────────────────╮
+│EXPERT                                        TRAINE ACCEPTE PROPOSED LAST TRAINED STATE                                        │
+│everywhere                                    1      0       0        3d ago       ● up to date                                 │
+│orders                                        0      1       0        -            ○ trained at the server's next pass          │
+│A proposed behavior that can be taught is accepted after 24 hours. K changes the wait.                                          │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭ Training loop ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│No training loop has run yet: `antumbra train` runs one over a corpus, by hand. A standing expert needs none: the server trains │
+│it when a behavior of yours is accepted, and lists it here.                                                                     │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+│                                                                                                                                │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ ↑↓  move   enter  details   /  find   x  halt   1-6  pages   a  ask   :  commands   ?  help   q  quit

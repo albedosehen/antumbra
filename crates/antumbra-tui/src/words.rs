@@ -123,7 +123,7 @@ pub fn caption(app: &App) -> &'static str {
             "Memory: what your agents stored. World is facts, bank is experiences, opinion is judgments."
         }
         Page::Loop => {
-            "Training: the loop that finds weak spots, trains candidates, checks them and admits the winners."
+            "Training: what the server is teaching your experts, and the loop that grows new ones when it is run."
         }
         Page::Evals => {
             "Evaluations: each check of an expert or a candidate against a task. A frozen expert must keep passing."
