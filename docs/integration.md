@@ -170,6 +170,93 @@ PDF takes a browser engine, so the server hands the page to a [Gotenberg](https:
 
 ---
 
+## Agents other than Claude Code
+
+### The MCP bridge
+
+Claude Code is given the server's address and a helper that reads the token from its file for each connection. An agent without such a helper would need the token in its own config file, or in the environment of every shell it is started from. `antumbra mcp bridge` is the server's MCP endpoint as a command instead: the agent runs it and talks over its pipes, and the bridge carries each message to the server set up on this machine (`~/.antumbra/setup.json`), with the token read from `~/.antumbra/token.txt` for that request.
+
+```json
+{ "command": "antumbra", "args": ["mcp", "bridge", "--agent", "<name>"] }
+```
+
+- **No token in the agent's config.** A token replaced on disk is the one the next call presents, with the agent still running.
+- **A plain `http://` address works.** Whether the token may travel to an address was setup's decision (`--allow-http`), and it is not made again by each agent.
+- **A server that restarted costs the agent nothing.** When the server no longer knows the session, the bridge opens another with the handshake the agent first sent, and asks again.
+- **Instructions.** When the server's handshake gives none, the bridge adds a paragraph on when to recall and what to store, which an agent places in its system prompt. It is what keeps an agent recalling and storing where its hooks do not run.
+- It names this machine to the server (`X-Antumbra-Host`), so what the agent writes is stamped as written from here.
+- **Both ways of speaking MCP are carried.** An agent that opens a session (`initialize`) is given one. An agent on the 2026-07-28 revision opens none: it asks `server/discover`, and each request says which revision it speaks. Over HTTP that revision wants the same said in headers (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`), which the bridge writes from the request. goose speaks this one.
+
+`ANTUMBRA_URL` (or `--surface`), `ANTUMBRA_TOKEN`, `ANTUMBRA_TOKEN_FILE` (or `--token-file`) and `ANTUMBRA_HOST_ID` win over what setup recorded, as they do in the hooks. `ANTUMBRA_BRIDGE_PATIENCE_SECS` (600) bounds one call. Not carried: what the server sends unasked, which today is a log line when another session changes a memory; and `Mcp-Param-*` headers, which a tool asks for in its schema and none of the server's do.
+
+### One command for every agent's hooks
+
+The three touchpoints are scripts written to Claude Code's hook contract: its field names on standard input, its JSON on standard output, the server's address in its settings. Another agent has the same three moments and a contract of its own for each. Its hooks run `antumbra hook <agent> <event>` (`session-start`, `prompt`, `stop`), which hands the agent's input to the same script in the names the script reads, runs it with the address, workspace and machine name setup recorded, and answers in the shape that agent reads. Every agent gets the bootstrap, the recall for each prompt and the reminder to store that Claude Code gets, from one implementation.
+
+It never fails the agent: whatever goes wrong is said on standard error, and nothing is printed. Run this way, the scripts differ from Claude Code's run of them in two things. The sovereign-mode brief is off (`ANTUMBRA_BRIEF=0`), because it is about Claude Code. And the reminder at a turn's end is the short one (`ANTUMBRA_CAPTURE_REMINDER=brief`), because some agents show it to the person as well as to the model.
+
+### Which agents, and what setup writes for each
+
+`antumbra setup` connects Claude Code and every other agent it finds on the machine: one whose program is on the PATH, or whose config directory is there. `--agent` names them instead (`--agent gemini`, `--agent claude,codex`, `--agent opencode`, `--agent all`; the names are `claude`, `gemini`, `codex`, `copilot`, `goose` and `opencode`), and `--no-claude` leaves Claude Code out.
+
+Setup touches as little of a person's own files as each agent allows. Where an agent reads a directory of Antumbra's own, that is all setup writes: nothing the person wrote is edited, and connecting again replaces it (Gemini CLI, goose's plugin, and OpenCode's). Where an agent reads only its user's files, setup adds to them as it does for Claude Code: with the agent's own command, or as text, adding only, with a backup, and never twice (Codex, Copilot CLI's list of MCP servers, and one line of goose's config). Either way `antumbra setup check` reads back what was written.
+
+| Agent | What setup writes | Opens with memory | Recall for each prompt | Reminder to store |
+| --- | --- | --- | --- | --- |
+| Claude Code | hooks and `env` in `settings.json`; the MCP server, with a headers helper | yes | yes | yes |
+| Gemini CLI | an extension, `~/.gemini/extensions/antumbra`: the bridge and three hooks | yes | yes | yes |
+| Codex | the bridge, with `codex mcp add`; three hooks added to `~/.codex/hooks.json` | yes, once you approve the hooks | yes, once you approve the hooks | yes, once you approve the hooks |
+| Copilot CLI | a hooks file, `~/.copilot/hooks/antumbra.json`; the bridge added to `~/.copilot/mcp-config.json` | yes | yes | yes |
+| goose | a plugin, `~/.agents/plugins/antumbra`: the bridge and three hooks; one line in goose's `config.yaml` | yes, through the file goose keeps in mind | yes, the same way | yes |
+| OpenCode (1.x and 2.x) | one plugin file, `~/.config/opencode/plugins/antumbra.js` | yes | yes | yes, while the session stays open |
+
+**Gemini CLI.** The extension holds a manifest with the bridge as its MCP server and a `hooks/hooks.json` with `SessionStart`, `BeforeAgent` and `AfterAgent`. Gemini CLI lists it (`gemini extensions list`) and `gemini extensions uninstall antumbra` removes it. Two things are Gemini CLI's own to decide, and setup leaves them as they are:
+
+- In a folder you have not trusted, Gemini CLI connects no MCP server, your own included.
+- It asks before an Antumbra tool runs, and run for one prompt (`gemini -p`) it leaves out tools that would need asking. To allow them, add a policy file of your own:
+
+  ```toml
+  # ~/.gemini/policies/antumbra.toml
+  [[rule]]
+  toolName = "*"
+  mcpName = "antumbra"
+  decision = "allow"
+  priority = 500
+  ```
+
+At a turn's end Gemini CLI shows the reminder to you as a warning that the agent was blocked. That is the reminder reaching the agent, which is then asked once more and stops.
+
+**Codex.** The bridge is registered with Codex's own `codex mcp add antumbra -- antumbra mcp bridge --agent codex`, which writes `[mcp_servers.antumbra]` into `~/.codex/config.toml` (or where `CODEX_HOME` says). The hooks, on `SessionStart`, `UserPromptSubmit` and `Stop`, go into `hooks.json` beside any of your own. One thing is Codex's own to decide, and setup does not go around it:
+
+- **Codex skips a hook until you approve it.** Start Codex, type `/hooks`, and approve Antumbra's three. Until then a session has Antumbra's tools and the bridge's instructions, and none of the three touchpoints; setup says so when it adds them, and Codex says nothing when it skips them. Approval is asked again when a hook's command changes, which it does when `antumbra` moves on or off the PATH.
+
+Codex moves a hook's context to a file past some 2,500 tokens, so its bootstrap is kept to 7,000 characters (`ANTUMBRA_CONTEXT_LIMIT`) and says how many memories it left out. At a turn's end Codex shows the stop hook as blocked: that is the reminder reaching the agent, which is asked once more and stops.
+
+**Copilot CLI.** The hooks are a file of Antumbra's own in `~/.copilot/hooks` (or under `COPILOT_HOME`), with `sessionStart`, `userPromptSubmitted` and `agentStop`; Copilot CLI runs a user's own hooks without asking. The bridge is one entry, `mcpServers.antumbra`, added to `mcp-config.json` as text, with the rest of the file left byte for byte and a backup beside it. Setup edits that file itself where it uses Codex's own command for Codex's, because the `copilot` on a PATH is not always Copilot CLI: VS Code puts a launcher of that name there.
+
+- Copilot CLI hands its turn's-end hook the path of the session's event log and not the answer, so the answer the server judges a turn's recalls against is read from the end of that log. The log's shape is Copilot CLI's own; when it does not read as expected the turn goes unjudged and nothing else changes.
+- It puts an MCP server's instructions in its system prompt only for servers on a list of its own, so the bridge's are not read there (`--allow-all-mcp-server-instructions` reads them for one run). The hooks carry what a session needs.
+- It asks before an Antumbra tool runs unless you allow it: `--allow-tool antumbra` for a run, or its permission settings.
+- Copilot in VS Code reads the same `~/.copilot` hooks and MCP servers, by VS Code's own account. That was not run here.
+
+**goose.** Antumbra is a plugin, `~/.agents/plugins/antumbra`, with the bridge as its MCP server (`.mcp.json`; goose lists it as `antumbra:antumbra`) and hooks on `SessionStart`, `UserPromptSubmit` and `Stop`. goose's hooks differ from the others' in one thing that shapes the rest: what a hook prints never reaches the model. A prompt hook's output is dropped, and a session-start hook can only show you a line.
+
+What goose does read on every turn is a file its config names, `GOOSE_MOIM_MESSAGE_FILE`, which it puts in front of the model as what is on its mind. So the hooks write that file (`~/.antumbra/goose/top-of-mind.md`): the session's bootstrap, kept to 4,000 characters because goose hands it over again with each turn, and under it what was recalled for the prompt in front of the model. Setup names the file in goose's `config.yaml` by adding one line, with a backup, and only when the config names none.
+
+- **If you already keep a file of your own in mind there, setup leaves it yours** and says so: goose then has Antumbra's tools, the bridge's instructions and the reminder, and nothing recalled is put in its context. Remove your line and run setup again to change that.
+- **The file is one for the machine.** Two goose sessions at once each write it, so a turn may read what the other session's prompt recalled. It is your own memory either way, and the next prompt rewrites it.
+- **On Windows goose runs its hooks with `sh`**, as it does everywhere, so its hooks need one on the PATH (Git for Windows has one). Setup and `setup check` say when there is none. The tools work either way.
+- At a turn's end goose shows "Stop hook `antumbra` blocked ending this turn": that is the reminder reaching the agent, which is asked once more and stops.
+- goose's config is `~/.config/goose/config.yaml`, on Windows `%APPDATA%\Block\goose\config\config.yaml`; `GOOSE_PATH_ROOT` moves both it and the plugins.
+
+**OpenCode.** OpenCode has no hooks that run a command. It has plugins, and two release lines, 1.x and 2.x, that share a config directory and a binary name and whose plugins are written differently. Antumbra is one file, `plugins/antumbra.js` in `~/.config/opencode` (on Windows too; `OPENCODE_CONFIG_DIR` and `XDG_CONFIG_HOME` move it), whose default export is both: `server` for 1.x and `setup` for 2.x. Each line takes the half it knows.
+
+- The plugin runs `antumbra hook opencode <event>` at a session's first prompt, at every prompt, and when a turn ends, and puts what the hook answers in that session's system prompt, where the model reads it with every call.
+- It registers the bridge as an MCP server from inside the plugin, which both lines allow, so nothing is added to `opencode.json`. A server you already have under the name `antumbra` is left yours.
+- The reminder at a turn's end is sent to the session as a prompt, so it needs the session still there: in the terminal interface and against `opencode serve` it is. `opencode run` on 1.x exits as the turn ends, before it can be sent; the turn is still reported.
+- 2.x offers MCP tools to the model through its Code Mode by default, so the model calls Antumbra's as `tools.antumbra.recall_memories(...)` inside `execute`. That is OpenCode's own setting (`codemode`), and the tools are the same.
+- The plugin also runs for the short request OpenCode makes to title a session, which is told what the session is told.
+
 ## Leaving work for another of your machines
 
 A session can leave a note for a session on another of your machines: "rerun this on the GPU box", "check the dashboard after the deploy". The agent calls `leave_handoff` with the text (its first line is the title) and `for_host`, the machine's host name, or nothing for whichever of your machines starts a session next. A session that starts there opens with the count and a line for each handoff waiting for it, ahead of recalled memories, and keeps hearing about one until a session calls `complete_handoff`; after that it is no longer announced but `handoffs` with `include_done` still shows it. The machine's name is `ANTUMBRA_HOST_ID`, the same one the bootstrap prints in its first line, so set it on each machine. Each session start also names the machine to the server (`register_device`), so `devices` lists every one of your machines with when it was last seen. That includes a laptop whose agent talks to a hosted server and runs no server of its own. A machine named that way is a memory node: the server cannot see its hardware, and a machine that trains runs `antumbra-mcp` itself, which registers it with what it can do. Handoffs are yours alone: they live in your own `handoff` compartment, and no other user's session sees them. It is a note, not remote control: nothing runs on the other machine until a session there decides to.

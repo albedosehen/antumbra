@@ -25,19 +25,18 @@ Two design commitments are the heart of Antumbra:
 
 Antumbra has a CLI you run directly, but current-state is BYOA, for monitoring the loop and inspecting the population, gate, and memory. Its everyday role, though, is as the brain an agent plugs into over MCP.
 
-Currently supported coding-agents tested:
+Coding agents `antumbra setup` connects, each one run against the real tool:
 
-- **Claude Code** (via `settings.json` hooks)
+- **Claude Code** (hooks in its `settings.json`, and the MCP server)
+- **Gemini CLI** (an extension: the MCP bridge and three hooks)
+- **Codex** (the MCP bridge with `codex mcp add`, and three hooks you approve in Codex)
+- **GitHub Copilot CLI** (a hooks file, and the MCP bridge in its `mcp-config.json`)
+- **goose** (a plugin: the MCP bridge and three hooks, and the file goose keeps in mind)
+- **OpenCode**, 1.x and 2.x (one plugin file)
 
-Planned:
+Setup connects every one of these it finds on the machine; `--agent` names them instead. What it writes for each, and what each agent leaves to you, is in **[Using Antumbra](docs/integration.md#agents-other-than-claude-code)**. Any other MCP client can reach the tools through `antumbra mcp bridge`.
 
-- **Goose.ai** (via `settings.json` hooks)
-- **Gemini CLI** (via `settings.json` hooks)
-- **OpenCode** (via `settings.json` hooks)
-- **Codex** (via `settings.json` hooks)
-- **Copilot** (via `settings.json` hooks)
-
-Lifecycle hooks for `claude` which is supported for **bootstrapping** your agent.
+The lifecycle is the same for each of them:
 
 1. **Bootstrap on session start.** A hook pulls standing conventions and the memory relevant to this project into the agent's opening context. There is no cold start; it already knows "this repo uses `deno`."
 2. **Route or answer.** The agent calls the `answer`/`route` tools: a task goes to the frozen expert most likely to cover it, or escalates when out of scope.
@@ -106,16 +105,16 @@ Every milestone is a falsifiable experiment with a kill criterion.
 
 ## Install
 
-New here? Install the CLI from a release (the command names a tag rather than `latest`, so what it runs is a published, unchanging asset, and the installer checks the archive against the sha256 built into it), then, with Docker and ollama running, one command sets everything up and connects Claude Code:
+New here? Install the CLI from a release (the command names a tag rather than `latest`, so what it runs is a published, unchanging asset, and the installer checks the archive against the sha256 built into it), then, with Docker and ollama running, one command sets everything up and connects your coding agents:
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.0/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.1/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.4.0/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.4.1/antumbra-cli-installer.ps1 | iex
 ```
 
 ```bash
@@ -133,12 +132,12 @@ Each binary ships a one-line installer that pulls the right prebuilt build for y
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.0/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.1/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.4.0/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.4.1/antumbra-cli-installer.ps1 | iex
 ```
 
 The MCP server (`antumbra-mcp`) installs the same way, with `antumbra-mcp` in place of `antumbra-cli` in the URL; `antumbra setup local` runs it in Docker instead, so most people never install it by hand. Windows `.msi` packages, per-OS archives, and a `.sha256` beside each are attached to every [release](https://github.com/albedosehen/antumbra/releases); [docs/getting-started.md](docs/getting-started.md) shows the download-verify-unpack form for a machine that should check the archive itself before anything runs.

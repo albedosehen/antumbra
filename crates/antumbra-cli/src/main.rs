@@ -16,6 +16,7 @@ use antumbra_store::{schema, Store, EMBED_DIM};
 use chrono::Utc;
 use clap::Parser;
 
+mod agents;
 mod behave;
 mod capture_args;
 mod claude;
@@ -166,6 +167,17 @@ async fn run() -> anyhow::Result<()> {
         Command::Claude { action } => {
             // Blocking work (files, git, an HTTP surface): keep it off the runtime.
             tokio::task::spawn_blocking(move || claude::run::run(action)).await??;
+        }
+        Command::Hook(args) => {
+            // A script, run and waited for.
+            tokio::task::spawn_blocking(move || agents::hook::run(&args)).await?;
+        }
+        Command::Mcp { action } => {
+            // Pipes and blocking HTTP for as long as the agent runs.
+            tokio::task::spawn_blocking(move || match action {
+                cli::McpAction::Bridge(args) => agents::bridge::run(&args),
+            })
+            .await??;
         }
         Command::Tui(args) => antumbra_tui::run(args).await?,
         Command::Verifier { action } => verifiers::run(&cli.url, action).await?,

@@ -109,6 +109,15 @@ foreach ($script:runner in $runners) {
     Check 'the reminder is the block it was' (($answer.decision -eq 'block') -and ([string]$answer.reason -match 'store_memory') -and -not ($answer.PSObject.Properties.Name -contains 'hookSpecificOutput'))
     Remove-Item (Join-Path $run "antumbra-capture-Stop-$session-b") -ErrorAction SilentlyContinue
 
+    Write-Output 'for an agent that shows the reminder to its user'
+    $env:ANTUMBRA_CAPTURE_REMINDER = 'brief'
+    $out = Invoke-Hook @{ session_id = "$session-c"; hook_event_name = 'Stop' }
+    Remove-Item Env:ANTUMBRA_CAPTURE_REMINDER
+    Check 'the reminder is still one' (Reminds $out)
+    $said = [string]($out | ConvertFrom-Json).hookSpecificOutput.additionalContext
+    Check 'and says what to do in a few lines' (($said.Length -lt 600) -and ($said -match 'store_memory') -and ($said -match 'record_behavior'))
+    Remove-Item (Join-Path $run "antumbra-capture-Stop-$session-c") -ErrorAction SilentlyContinue
+
     Write-Output 'a turn that saved as it went'
     $transcript = Join-Path $work "transcript-$session.jsonl"
     Set-Content -LiteralPath $transcript -Value '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"mcp__antumbra__store_memory","input":{}}]}}'

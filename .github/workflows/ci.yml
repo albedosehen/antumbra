@@ -108,6 +108,8 @@ jobs:
         run: bash scripts/hooks/tests/mcp-headers.sh
       - name: mcp-headers sends the bearer and names this machine (.ps1)
         run: pwsh -NoProfile -File scripts/hooks/tests/mcp-headers.ps1
+      - name: the OpenCode plugin does the three touchpoints, as 1.x and as 2.x call it
+        run: node --test scripts/hooks/tests/opencode-plugin.test.mjs
 
   audit:
     name: cargo audit (advisories)

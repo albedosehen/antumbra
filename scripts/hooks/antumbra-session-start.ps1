@@ -182,9 +182,11 @@ if ($repo -and $env:ANTUMBRA_REANCHOR -ne '0' -and $binPath) {
 # features gated on them, and nothing tells it. `antumbra claude brief`
 # prints a few lines when that is so and nothing when it is not. No antumbra on
 # the path, any failure, or no answer inside the budget: no lines. It runs while
-# the calls above are in flight, and its output is read as UTF-8.
+# the calls above are in flight, and its output is read as UTF-8. Off with
+# ANTUMBRA_BRIEF=0, which is how the hook is run for an agent the brief is not
+# about (`antumbra hook`).
 $brief = ''
-if ($binPath) {
+if ($binPath -and $env:ANTUMBRA_BRIEF -ne '0') {
     try {
         $start = New-Object System.Diagnostics.ProcessStartInfo
         $start.FileName = $binPath
@@ -341,7 +343,10 @@ if ($commit) {
 # oversized bootstrap is a truncated one that says nothing about it. What must
 # survive goes first; memories follow, best first, while they fit, and the rest
 # are counted so the agent knows to recall them.
+# ANTUMBRA_CONTEXT_LIMIT sets it lower, for an agent that takes less: Codex
+# moves a hook's context to a file well before 10,000 characters.
 $limit = 9500
+if ($env:ANTUMBRA_CONTEXT_LIMIT -match '^\d+$') { $limit = [Math]::Max(1000, [int]$env:ANTUMBRA_CONTEXT_LIMIT) }
 $sep   = "`n`n---`n`n"
 $head  = "# Antumbra session bootstrap (host=$hostId)`n`n"
 $head += $handoffs
@@ -358,7 +363,7 @@ foreach ($entry in $entries) {
 }
 $memText = if ($entries.Count -eq 0) { '[Antumbra bootstrap empty / unreachable -- starting cold.]' } else { $kept -join $sep }
 if ($omitted -gt 0) {
-    $memText += "${sep}[$omitted more recalled but left out to stay under the 10,000-character limit on hook context; use recall_memories for them.]"
+    $memText += "${sep}[$omitted more recalled but left out to stay under the limit on hook context; use recall_memories for them.]"
 }
 
 $additionalContext = "$head$memText"

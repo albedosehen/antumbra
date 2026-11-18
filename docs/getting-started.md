@@ -12,18 +12,18 @@ With [Docker](https://docs.docker.com/get-docker/) and [ollama](https://ollama.c
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.0/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.1/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.4.0/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.4.1/antumbra-cli-installer.ps1 | iex
 ```
 
 To check the archive yourself before anything runs, download it and the `.sha256` the release carries beside it, compare, and unpack the binary onto your PATH (the installer does the same comparison, against the sums built into the pinned script):
 
 ```bash
-v=v0.4.0; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
+v=v0.4.1; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
 curl --proto '=https' --tlsv1.2 -LsSfO "https://github.com/albedosehen/antumbra/releases/download/$v/antumbra-cli-$t.tar.xz"{,.sha256}
 shasum -a 256 -c "antumbra-cli-$t.tar.xz.sha256" && tar -xJf "antumbra-cli-$t.tar.xz"
 ```
@@ -158,7 +158,7 @@ In the console, press `?` for the keymap and `c` for the "connect your agent" pa
 
 ### 7. Connect your coding agent
 
-This is the point of Antumbra: your agent (Claude Code, Cursor, any MCP client) reads and writes Antumbra over its lifecycle. Set these in the agent's environment:
+This is the point of Antumbra: your agent reads and writes Antumbra over its lifecycle. `antumbra setup` does this step for Claude Code, Gemini CLI, Codex, GitHub Copilot CLI, goose and OpenCode, each in its own way; [Using Antumbra](integration.md#agents-other-than-claude-code) says what it writes for each. By hand, for Claude Code, set these in the agent's environment:
 
 ```
 ANTUMBRA_URL=http://127.0.0.1:8081

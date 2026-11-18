@@ -33,6 +33,9 @@ ANTUMBRA_RECALL_BUDGET_SEC=10          # the per-prompt recall's whole wall-cloc
 ANTUMBRA_SESSION_BUDGET_SEC=8          # the session bootstrap's whole wall-clock budget; keep it under the hook's timeout
 ANTUMBRA_CAPTURE_EVERY_SECS=600        # the least time between two capture nudges at a turn's end; 0 nudges every turn
 ANTUMBRA_CAPTURE_NUDGE=block           # answer a due nudge with a block, for an agent that does not read Stop feedback (Claude Code before 2.1.163); the agent shows a block to its user as a hook problem
+ANTUMBRA_CAPTURE_REMINDER=brief        # the nudge in a few lines, for an agent that shows it to its user as well as to its model; `antumbra hook` sets it
+ANTUMBRA_CONTEXT_LIMIT=9500            # the most characters the bootstrap is; `antumbra hook` sets it lower for an agent that takes less than Claude Code (Codex: 7000)
+ANTUMBRA_BRIEF=0                       # the bootstrap leaves out the sovereign-mode block, and keeps none of its rules; `antumbra hook` sets it, since the block is about Claude Code
 ```
 
 The networked surface authenticates each call with a JWT whose `(tenant, user)` claims become the engine's `$auth`. On the offline / self-hosted tier, mint the long-lived `ANTUMBRA_TOKEN` for a hook with the engine itself:
@@ -45,6 +48,10 @@ antumbra-mcp --mint-token --tenant <workspace> --user <user> \
 It prints a bearer JWT signed with the same HS256 secret the server verifies with (an RS256 deployment mints via its own auth service's private key instead). The token _is_ the identity (it grants exactly `(tenant, user)`) and carries a finite `exp`, so it is long-lived, never an eternal standing key. For a purely **offline**, single identity you can instead run the **stdio** server and have your agent connect directly; then the capture/bootstrap tools are called in-band and the `SessionStart` script is optional.
 
 The `.sh` hooks hand the token to `curl` as a config line on its stdin (`--config -`), never as a command-line argument, so it is not in the machine's process list while a request runs; the `.ps1` hooks set the header on the client in-process.
+
+For an agent other than Claude Code, these scripts are run by `antumbra hook <agent> <event>`, which hands them that agent's hook input in the names they read, sets the first four of these from what `antumbra setup` recorded, and answers in the agent's own shape. See "Agents other than Claude Code" in `docs/integration.md`.
+
+`antumbra-opencode.js` is not a hook script: it is the plugin `antumbra setup` writes for OpenCode, which has no hooks that run a command. It runs `antumbra hook opencode <event>` at the same three moments. Its tests are `tests/opencode-plugin.test.mjs` (`node --test`).
 
 ### The MCP connection, with the token in a file
 

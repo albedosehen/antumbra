@@ -133,8 +133,10 @@ fi
 # features gated on them, and nothing tells it. `antumbra claude brief`
 # prints a few lines when that is so and nothing when it is not. No antumbra on
 # the path, or any failure: no lines. It runs while the calls are in flight.
+# Off with ANTUMBRA_BRIEF=0, which is how the hook is run for an agent the
+# brief is not about (`antumbra hook`).
 brief=""
-if command -v "$BIN" >/dev/null 2>&1; then
+if [ "${ANTUMBRA_BRIEF:-1}" != "0" ] && command -v "$BIN" >/dev/null 2>&1; then
   brief=$("$BIN" claude brief 2>/dev/null || true)
 fi
 
@@ -252,7 +254,11 @@ fi
 # oversized bootstrap is a truncated one that says nothing about it. What must
 # survive goes first; memories follow, best first, while they fit, and the rest
 # are counted so the agent knows to recall them.
-LIMIT=9500
+# ANTUMBRA_CONTEXT_LIMIT sets it lower, for an agent that takes less: Codex
+# moves a hook's context to a file well before 10,000 characters.
+LIMIT="${ANTUMBRA_CONTEXT_LIMIT:-9500}"
+case "$LIMIT" in ''|*[!0-9]*) LIMIT=9500 ;; esac
+[ "$LIMIT" -lt 1000 ] && LIMIT=1000
 context=$(jq -nc --argjson entries "$entries" --arg host "$HOST_ID" --arg git "$git_line" \
   --arg brief "$brief" --arg handoffs "$handoffs" --argjson limit "$LIMIT" '
   ( "# Antumbra session bootstrap (host=" + $host + ")\n\n"
@@ -272,7 +278,7 @@ context=$(jq -nc --argjson entries "$entries" --arg host "$HOST_ID" --arg git "$
         else ($fit.kept | join($sep)) end )
     + ( if $fit.omitted > 0
         then $sep + "[" + ($fit.omitted | tostring)
-             + " more recalled but left out to stay under the 10,000-character limit on hook context; use recall_memories for them.]"
+             + " more recalled but left out to stay under the limit on hook context; use recall_memories for them.]"
         else "" end )
 ' 2>/dev/null) || context='"[Antumbra hook serialization error]"'
 

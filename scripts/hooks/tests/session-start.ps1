@@ -164,6 +164,14 @@ Check 'leaves some out' ($omitted -gt 0)
 $briefAt = $ctx.IndexOf('Sovereign mode')
 Check 'says what is different about the session before any memory' (($briefAt -ge 0) -and ($briefAt -lt $ctx.IndexOf('M1:x')))
 
+Write-Output 'for an agent that takes less'
+$env:ANTUMBRA_CONTEXT_LIMIT = '4000'
+$ctx = Get-Context $large $stub
+Remove-Item Env:ANTUMBRA_CONTEXT_LIMIT
+Check "stays under the limit it was given ($($ctx.Length))" ($ctx.Length -le 4000)
+Check 'keeps the best memory' $ctx.Contains('M1:x')
+Check 'says it left some out' $ctx.Contains('more recalled but left out')
+
 Write-Output 'a small recall'
 $ctx = Get-Context $small $stub
 Check 'keeps everything' $ctx.Contains('second small')
@@ -234,6 +242,16 @@ Start-Sleep -Seconds 2
 Check 'keeps no rules' (-not (Test-Path $remembered))
 Check 'still answers' $ctx.Contains('first small')
 Remove-Item Env:ANTUMBRA_REMEMBER
+
+Write-Output 'the brief, turned off'
+Remove-Item -Force $remembered -ErrorAction SilentlyContinue
+$env:ANTUMBRA_BRIEF = '0'
+$ctx = Get-Context $small $stub $clone
+Start-Sleep -Seconds 2
+Check 'says nothing of the session''s mode' (-not $ctx.Contains('Sovereign mode'))
+Check 'keeps no rules' (-not (Test-Path $remembered))
+Check 'still answers' $ctx.Contains('first small')
+Remove-Item Env:ANTUMBRA_BRIEF
 
 Write-Output 'in a clone, turned off'
 Remove-Item -Force $marker -ErrorAction SilentlyContinue
