@@ -40,13 +40,35 @@ pub struct Snapshot {
     /// Newest first.
     pub shadows: Vec<Shadow>,
     pub loop_heads: Vec<GenerationHead>,
-    /// The first loop has a halt requested that it has not yet reached.
+    /// The first loop has a halt requested that it has not yet reached. Kept
+    /// for a console older than [`Self::halts_pending`], which says it of
+    /// every loop.
     pub loop_halt_pending: bool,
+    /// Every loop with a halt requested that it has not yet reached. Empty
+    /// from a server that predates it, which says it of the first loop alone.
+    #[serde(default)]
+    pub halts_pending: Vec<RunId>,
     pub evals: Vec<EvaluationRun>,
     pub router: Option<LearnedRouter>,
     /// The token that read it may take [`Action`]s, and the substrate's part
     /// is filled.
     pub operator: bool,
+}
+
+impl Snapshot {
+    /// Whether `run` has a halt requested that it has not yet reached: listed
+    /// in [`Self::halts_pending`], or, from a server that predates the list,
+    /// the first loop when it has one.
+    pub fn halt_pending(&self, run: &RunId) -> bool {
+        self.halts_pending
+            .iter()
+            .any(|r| r.as_str() == run.as_str())
+            || (self.loop_halt_pending
+                && self
+                    .loop_heads
+                    .first()
+                    .is_some_and(|first| first.run_id.as_str() == run.as_str()))
+    }
 }
 
 /// An operator's action on the substrate, from the console.
@@ -129,6 +151,30 @@ mod tests {
         }))?;
         assert!(back.usage.is_empty());
         assert_eq!(back.policy, MemoryPolicy::default());
+        assert!(back.halts_pending.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn an_older_servers_pending_halt_is_read_as_the_first_loops() -> anyhow::Result<()> {
+        let now = chrono::Utc::now();
+        let (first, second) = (RunId::new("run:a"), RunId::new("run:b"));
+        let mut snapshot = Snapshot {
+            loop_heads: vec![
+                GenerationHead::new(first.clone(), now),
+                GenerationHead::new(second.clone(), now),
+            ],
+            loop_halt_pending: true,
+            ..Snapshot::default()
+        };
+        // An older server lists none, and means the first.
+        assert!(snapshot.halt_pending(&first));
+        assert!(!snapshot.halt_pending(&second));
+        // A newer one lists each, the first's flag aside.
+        snapshot.loop_halt_pending = false;
+        snapshot.halts_pending = vec![second.clone()];
+        assert!(!snapshot.halt_pending(&first));
+        assert!(snapshot.halt_pending(&second));
         Ok(())
     }
 

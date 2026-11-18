@@ -277,8 +277,8 @@ fn filter_narrows_and_jumps_the_selection() -> anyhow::Result<()> {
     // Only g7 matches; it is shown in the filter modal.
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
-        text.contains("filter penumbra"),
-        "filter modal titled:\n{text}"
+        text.contains("find in shadows"),
+        "the modal says which list it searches:\n{text}"
     );
     assert!(text.contains("shadow:g7"), "the match is listed");
     assert_eq!(app.filtered().len(), 1, "g7 is the only match");
@@ -685,12 +685,15 @@ fn help_overlay_lists_the_keybindings() -> anyhow::Result<()> {
     app.mode = Mode::Help;
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(text.contains("help"), "help modal title shown:\n{text}");
-    assert!(text.contains("cycle theme"), "theme keybind documented");
+    assert!(text.contains("change the theme"), "theme key documented");
     assert!(
-        text.contains("follow the active monitor"),
-        "fps follow keybind documented"
+        text.contains("0 follows the monitor"),
+        "the key that follows the monitor is documented"
     );
-    assert!(text.contains("switch focus"), "focus keybind documented");
+    assert!(
+        text.contains("move to the next list"),
+        "the key that changes list is documented"
+    );
     Ok(())
 }
 
@@ -713,55 +716,30 @@ fn shadows_focus_shows_the_penumbra() -> anyhow::Result<()> {
     Ok(())
 }
 
-// The footer shows the active theme, and `t` cycles to the next palette,
-// which the footer reflects (night -> mist).
+// The header shows a live FPS readout, and the cap steps through common
+// refresh rates (144 -> 165). What a key changed the cap to is said on the
+// line above the footer, which the key-press tests read.
 #[test]
-fn cycling_theme_updates_the_footer() -> anyhow::Result<()> {
-    let mut app = demo_app();
-    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
-    assert!(text.contains("theme:night"), "default theme shown:\n{text}");
-    app.cycle_theme();
-    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
-    assert!(text.contains("theme:mist"), "cycled theme shown:\n{text}");
-    Ok(())
-}
-
-// The header shows a live FPS readout and the footer the adjustable cap; the
-// cap steps through common refresh rates (144 -> 165).
-#[test]
-fn header_and_footer_show_the_frame_rate() -> anyhow::Result<()> {
+fn the_header_shows_the_frame_rate_and_the_cap_steps() -> anyhow::Result<()> {
     let mut app = demo_app();
     let text = to_text(&render(&mut app, 140, 36, 1600.0)?);
     assert!(
         text.contains("144 fps"),
         "header fps readout shown:\n{text}"
     );
-    assert!(text.contains("cap:144"), "footer fps cap shown:\n{text}");
     app.fps_up();
-    let text = to_text(&render(&mut app, 140, 36, 1600.0)?);
-    assert!(text.contains("cap:165"), "cap stepped to 165:\n{text}");
+    assert_eq!(app.target_fps, 165, "cap stepped to 165");
     Ok(())
 }
 
-// Following the active monitor tags the cap "auto"; a manual `+`/`-` pins it
-// and drops the tag. (The flag is set directly to keep the test off real
-// monitor detection.)
+// Following the active monitor holds until a manual `+`/`-` pins the cap.
+// (The flag is set directly to keep the test off real monitor detection.)
 #[test]
-fn auto_follow_tags_the_cap_until_pinned() -> anyhow::Result<()> {
+fn a_manual_adjust_pins_the_cap() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.auto_fps = true;
-    let text = to_text(&render(&mut app, 140, 36, 1600.0)?);
-    assert!(
-        text.contains("auto"),
-        "auto-follow tagged on the cap:\n{text}"
-    );
     app.fps_up();
     assert!(!app.auto_fps, "a manual adjust pins the cap");
-    let text = to_text(&render(&mut app, 140, 36, 1600.0)?);
-    assert!(
-        !text.contains("cap:165 auto"),
-        "a pinned cap shows no auto tag:\n{text}"
-    );
     Ok(())
 }
 

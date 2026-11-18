@@ -13,8 +13,52 @@ impl App {
         self.focus = focus;
     }
 
-    /// The label every item of the focused list filters/jumps by.
+    /// What the filter searches, in a word: the list the keys drive on this
+    /// page.
+    pub fn filter_subject(&self) -> &'static str {
+        match self.page {
+            Page::Memory => "memories",
+            Page::Evals => "evaluations",
+            Page::Sovereign => "skills",
+            Page::Loop => "loop runs",
+            Page::Population => match self.focus {
+                Focus::Experts => "experts",
+                Focus::Shadows => "shadows",
+                Focus::Boundaries => "boundaries",
+            },
+        }
+    }
+
+    /// The label every item of the focused list filters/jumps by: the list
+    /// the navigation keys drive on this page, in the same order, so a match's
+    /// index is that item's place in it.
     fn focused_labels(&self) -> Vec<String> {
+        match self.page {
+            Page::Memory => return self.memories.iter().map(|m| m.content.clone()).collect(),
+            Page::Evals => {
+                return self
+                    .evals
+                    .iter()
+                    .map(|e| format!("{} · {}", e.subject_id, e.corpus_task_id))
+                    .collect()
+            }
+            Page::Sovereign => {
+                return self
+                    .sovereign
+                    .skills
+                    .iter()
+                    .map(|s| s.skill.clone())
+                    .collect()
+            }
+            Page::Loop => {
+                return self
+                    .loop_heads
+                    .iter()
+                    .map(|h| h.run_id.as_str().to_string())
+                    .collect()
+            }
+            Page::Population => {}
+        }
         match self.focus {
             Focus::Experts => self.experts.iter().map(|e| e.name.clone()).collect(),
             Focus::Shadows => self
@@ -127,8 +171,9 @@ impl App {
     /// Set the body layout (the palette's layout commands).
     pub fn set_layout(&mut self, layout: LayoutMode) {
         self.layout = layout;
-        // The table is the expert data-grid; point navigation at the population.
-        if layout == LayoutMode::Table {
+        // The table and the graph draw the experts alone, so the keys drive
+        // the experts there: a list that is not drawn is not navigated.
+        if matches!(layout, LayoutMode::Table | LayoutMode::Graph) {
             self.focus = Focus::Experts;
         }
     }
@@ -143,13 +188,6 @@ impl App {
         let n = Page::ALL.len() as i32;
         let i = (self.page.index() as i32 + delta).rem_euclid(n);
         self.page = Page::ALL[i as usize];
-    }
-
-    /// Jump to a page by tab index (the `1`-`4` keys); ignored if out of range.
-    pub fn goto_page(&mut self, idx: usize) {
-        if let Some(&page) = Page::ALL.get(idx) {
-            self.page = page;
-        }
     }
 
     /// Cycle which region the keys drive and detail: umbra -> penumbra -> antumbra.

@@ -8,8 +8,11 @@
 mod app;
 mod backend;
 mod command;
+mod demo;
+mod drive;
 mod events;
 mod here;
+mod keys;
 mod overlay;
 mod pacing;
 mod render;
@@ -29,16 +32,11 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use clap::Subcommand;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use tachyonfx::{Duration as FxDuration, EffectRenderer};
 
-use antumbra_core::ports::Embedder;
-use antumbra_core::testing::FixedEmbedder;
-use antumbra_store::{Store, EMBED_DIM};
-
-use crate::app::{App, Mode};
+use crate::app::App;
 use crate::backend::{Backend, Server};
-use crate::command::Action;
 
 /// `antumbra tui`'s options.
 #[derive(clap::Args)]
@@ -56,7 +54,7 @@ pub struct Args {
     #[arg(long, global = true)]
     token: Option<String>,
     /// Pin the frame-rate cap (Hz) to a fixed value. Omit to follow the active
-    /// monitor's refresh rate automatically; adjust live with `+`/`-`, `a` to
+    /// monitor's refresh rate automatically; adjust live with `+`/`-`, `0` to
     /// resume following.
     #[arg(long)]
     fps: Option<u32>,
@@ -116,14 +114,14 @@ enum Command {
         /// Top-level page to render: population, memory, loop, evals, or sovereign.
         #[arg(long, default_value = "population")]
         page: String,
-        /// Body layout to render: focused, dashboard, or graph.
+        /// Body layout to render: focused, dashboard, graph, or table.
         #[arg(long, default_value = "focused")]
         layout: String,
         /// Focused region: experts, shadows, or boundaries.
         #[arg(long, default_value = "experts")]
         focus: String,
-        /// Overlay to render on top: none, help, palette, events, detail, ask,
-        /// or confirm.
+        /// Overlay to render on top: none, help, palette, events, detail, gate,
+        /// connect, knobs, ask, or confirm.
         #[arg(long, default_value = "none")]
         overlay: String,
         /// Render the seeded demo population instead of reading the server.
@@ -142,7 +140,7 @@ enum Command {
 /// ([`settings`]).
 async fn backend(args: &Args, demo: bool) -> Result<Backend> {
     Ok(if demo {
-        Backend::demo(seed_demo().await?)
+        Backend::demo(demo::seed().await?)
     } else {
         let places = settings::Places::here();
         Backend::Server(Arc::new(Server::new(
@@ -196,6 +194,7 @@ pub async fn run(args: Args) -> Result<()> {
                 "events" => app.open_events(),
                 "gate" => app.open_gate(),
                 "connect" => app.open_connect(),
+                "knobs" => app.open_knobs(),
                 "detail" => app.open_detail(),
                 "confirm" => {
                     app.set_focus(app::Focus::Boundaries);
@@ -206,7 +205,7 @@ pub async fn run(args: Args) -> Result<()> {
                     for c in "string handling".chars() {
                         app.ask_input(c);
                     }
-                    ask_route(&mut app, &backend).await;
+                    drive::ask_route(&mut app, &backend).await;
                 }
                 _ => {}
             }
@@ -280,433 +279,6 @@ fn print_monitors() {
     }
 }
 
-/// A seeded in-memory population so the headless snapshot (and its e2e test) has
-/// content without a live store.
-async fn seed_demo() -> Result<Store> {
-    use antumbra_core::generational::{GenerationHead, LoopState};
-    use antumbra_core::router::{LearnedRouter, RouterExpert};
-    use antumbra_core::{
-        BoundaryId, EdgeType, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary,
-        Generation, Grain, Memory, MemoryEdge, MemoryNetwork, RunId, Shadow, ShadowId,
-        ShadowStatus, SubjectKind,
-    };
-    use antumbra_store::repo::{
-        boundary, edge, evaluation, expert, generation, memory, router, shadow,
-    };
-    use chrono::Utc;
-
-    let store = Store::connect_memory(EMBED_DIM).await?;
-    let demo = [
-        ("arith-specialist", 0.92f32, true),
-        ("string-specialist", 0.81, true),
-        ("datetime-specialist", 0.74, true),
-        ("json-shaper", 0.55, false),
-        ("regex-smith", 0.63, true),
-    ];
-    let now = Utc::now();
-    // Embed each expert's name for its capability vector and router centroid, so
-    // the route-ask (which embeds the query the same way) routes coherently and
-    // the drill-down's route preview shows a real distribution.
-    let embedder = FixedEmbedder::new(EMBED_DIM);
-    let mut probe = std::collections::HashMap::new();
-    for (name, _, _) in &demo {
-        probe.insert(*name, embedder.embed(name).await?);
-    }
-    for (name, fitness, frozen) in demo.iter().copied() {
-        expert::insert(
-            &store,
-            &Expert {
-                id: ExpertId::new(format!("expert:{name}")),
-                name: name.into(),
-                base_model: "Qwen/Qwen2.5-Coder-1.5B".into(),
-                artifact_uri: format!("mem://{name}"),
-                capability_card: serde_json::json!({
-                    "description": format!("demo specialist for {name}"),
-                    "exemplars": ["ex-1", "ex-2", "ex-3"],
-                }),
-                capability_vec: Some(probe[name].clone()),
-                fitness,
-                frozen_at: frozen.then_some(now),
-                generation: Generation::ZERO,
-                owner: None,
-                compartment: None,
-                // A `mem://` artifact is on nobody's disk: placed nowhere,
-                // servable anywhere, which is what a demo wants.
-                placed_on: None,
-                created_at: now,
-            },
-        )
-        .await?;
-    }
-    router::save(
-        &store,
-        &LearnedRouter {
-            weights: vec![1.0; EMBED_DIM],
-            experts: demo
-                .iter()
-                .map(|(n, _, _)| RouterExpert {
-                    id: ExpertId::new(format!("expert:{n}")),
-                    centroid: probe[*n].clone(),
-                })
-                .collect(),
-            temperature: 0.2,
-            floor: 0.1,
-        },
-    )
-    .await?;
-    // A couple of boundaries (the antumbra) so the inspector has content: one
-    // actionable (a recovered C/C' contrast that gates routing) and one open
-    // (recorded from a collapse, not yet scoped).
-    let scopes = [
-        (
-            "run `npm install`",
-            "runtime",
-            serde_json::json!({ "runtime": "deno" }),
-            Some(serde_json::json!({ "runtime": "node" })),
-            true,
-        ),
-        (
-            "approach of shadow:g3",
-            "",
-            serde_json::json!({ "generation": 3 }),
-            None,
-            false,
-        ),
-    ];
-    for (i, (behavior, feature, fail, near_ok, actionable)) in scopes.into_iter().enumerate() {
-        boundary::upsert(
-            &store,
-            &FailureBoundary {
-                id: BoundaryId::new(format!("boundary:demo-{i}")),
-                behavior: behavior.into(),
-                fail_context: fail,
-                near_ok_context: near_ok,
-                governing_features: if feature.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![feature.into()]
-                },
-                grain: actionable.then_some(Grain::Project),
-                context_vec: None,
-                ok_context_vec: None,
-                confidence: if actionable { 0.8 } else { 0.3 },
-                generation: Generation::ZERO,
-                owner: None,
-                created_at: now,
-            },
-        )
-        .await?;
-    }
-    // A few shadows (the penumbra) across the lifecycle, so the training view has
-    // content: one still exploring, one graduated (rising reward), one collapsed.
-    let shadows = [
-        ("shadow:g4", ShadowStatus::Exploring, vec![0.10, 0.32, 0.55]),
-        (
-            "shadow:g3",
-            ShadowStatus::Graduated,
-            vec![0.20, 0.60, 0.85, 0.93],
-        ),
-        ("shadow:g2", ShadowStatus::Pruned, vec![0.05, 0.04, 0.06]),
-    ];
-    for (i, (id, status, reward_curve)) in shadows.into_iter().enumerate() {
-        shadow::upsert(
-            &store,
-            &Shadow {
-                id: ShadowId::new(id),
-                parent_expert: None,
-                adapter_uri: Some(format!("mem://{id}")),
-                status,
-                generation: Generation(4 - i as u32),
-                reward_curve,
-                created_at: now,
-            },
-        )
-        .await?;
-    }
-    // And a standing expert's training, as the keeper records one on a node
-    // that trains: its shadow, from the base model's held-out pass rate to the
-    // trained expert's, and an open boundary, private to its user, for the
-    // behavior it missed, with the task it was not followed on.
-    let user = antumbra_core::UserId::new("user:demo");
-    let standing = ExpertId::new(format!(
-        "expert:{DEMO_TENANT}:{}:behavior:code",
-        user.as_str()
-    ));
-    shadow::upsert(
-        &store,
-        &Shadow {
-            id: antumbra_core::behavior::shadow_id(
-                &antumbra_core::TenantId::new(DEMO_TENANT),
-                &user,
-                "code",
-                "5c0ffee1d2e3f4a5",
-            ),
-            parent_expert: None,
-            adapter_uri: Some("mem://standing-code".into()),
-            status: ShadowStatus::Graduated,
-            generation: Generation::ZERO,
-            reward_curve: vec![0.42, 0.91],
-            created_at: now,
-        },
-    )
-    .await?;
-    boundary::upsert(
-        &store,
-        &FailureBoundary {
-            id: BoundaryId::new(format!("boundary:{}:memory:tests-first", standing.as_str())),
-            behavior: "Run the test suite before calling a change done.".into(),
-            fail_context: serde_json::json!({
-                "scope": "code",
-                "task": "Rename the config loader's environment variable and tell me when it is finished.",
-                "answer": "Done: ANTUMBRA_CFG is now ANTUMBRA_CONFIG everywhere.",
-            }),
-            near_ok_context: None,
-            governing_features: Vec::new(),
-            grain: None,
-            context_vec: None,
-            ok_context_vec: None,
-            confidence: 0.33,
-            generation: Generation::ZERO,
-            owner: Some(user),
-            created_at: now,
-        },
-    )
-    .await?;
-    // Penumbra memory traces (the Memory page) across the three networks, with one
-    // consolidated into an expert, plus edges including a contradiction and a
-    // supersession; the native consolidation→retire signal.
-    let tenant = DEMO_TENANT;
-    let mems = [
-        (
-            "memory:deno",
-            MemoryNetwork::World,
-            "prefer deno over node for new scripts",
-            0.86,
-            4u32,
-            false,
-            false,
-        ),
-        (
-            "memory:surql",
-            MemoryNetwork::World,
-            "use surql-rs builders, never raw SurrealQL",
-            0.93,
-            7,
-            false,
-            true,
-        ),
-        (
-            "memory:node-incident",
-            MemoryNetwork::Bank,
-            "npm install failed under the deno runtime",
-            0.70,
-            2,
-            true,
-            false,
-        ),
-        (
-            "memory:retry",
-            MemoryNetwork::Bank,
-            "retrying the flaky step fixed the test",
-            0.58,
-            1,
-            true,
-            false,
-        ),
-        (
-            "memory:terse",
-            MemoryNetwork::Opinion,
-            "keep operator docs terse, no emojis",
-            0.80,
-            3,
-            false,
-            false,
-        ),
-        (
-            "memory:canvas",
-            MemoryNetwork::Opinion,
-            "canvas-first rendering beats raster over SSH",
-            0.75,
-            2,
-            false,
-            false,
-        ),
-    ];
-    for (id, network, content, confidence, reinforcement, volatile, consolidated) in mems {
-        let mut m = Memory::new(id, tenant, network, content, confidence, now)
-            .by("user:operator", "windows")
-            .volatile(volatile)
-            .with_evidence(vec!["session-log".into()]);
-        m.reinforcement = reinforcement;
-        if consolidated {
-            m.mark_consolidated(ExpertId::new("expert:json-shaper"), now);
-        }
-        memory::upsert(&store, &m).await?;
-    }
-    let edges = [
-        (
-            "memory:node-incident",
-            "memory:deno",
-            EdgeType::Contradicts,
-            0.8,
-        ),
-        ("memory:deno", "memory:node-incident", EdgeType::Caused, 0.6),
-        (
-            "memory:retry",
-            "memory:node-incident",
-            EdgeType::Follows,
-            0.5,
-        ),
-        ("memory:surql", "memory:deno", EdgeType::References, 0.4),
-        ("memory:terse", "memory:canvas", EdgeType::Supersedes, 0.5),
-    ];
-    for (from, to, edge_type, weight) in edges {
-        edge::relate(
-            &store,
-            &MemoryEdge::new(tenant, from, to, edge_type, weight, now),
-        )
-        .await?;
-    }
-    // The generational loop head (mid-cycle) for the Loop page.
-    let mut head = GenerationHead::new(RunId::new("run:demo"), now);
-    head.generation = Generation(4);
-    head.state = LoopState::Score;
-    generation::save_head(&store, &head).await?;
-    // A few evaluation runs across subjects/statuses for the Evals page (one
-    // failure = the regression tripwire firing).
-    let runs = [
-        (
-            "run:e1",
-            SubjectKind::Expert,
-            "expert:arith-specialist",
-            EvalStatus::Success,
-            Some("a1b2c3d4"),
-        ),
-        (
-            "run:e2",
-            SubjectKind::Expert,
-            "expert:json-shaper",
-            EvalStatus::Success,
-            Some("9f8e7d6c"),
-        ),
-        (
-            "run:e3",
-            SubjectKind::Shadow,
-            "shadow:g3",
-            EvalStatus::Failure,
-            None,
-        ),
-        (
-            "run:e4",
-            SubjectKind::Router,
-            "router",
-            EvalStatus::Running,
-            None,
-        ),
-    ];
-    for (id, kind, subject, status, fp) in runs {
-        evaluation::insert(
-            &store,
-            &EvaluationRun {
-                run_id: RunId::new(id),
-                subject_kind: kind,
-                subject_id: subject.into(),
-                corpus_task_id: "task:arith".into(),
-                status,
-                metrics: None,
-                regression_fingerprint: fp.map(str::to_string),
-                created_at: now,
-            },
-        )
-        .await?;
-    }
-    Ok(store)
-}
-
-/// Run a palette-chosen [`Action`], queuing any view transition it implies. The
-/// single place actions take effect, shared by the palette (keybindings call the
-/// same app methods directly).
-async fn apply_action(
-    app: &mut App,
-    backend: &Backend,
-    transition: &mut Option<transition::Pending>,
-    action: Action,
-) -> Result<()> {
-    match action {
-        Action::Reload => app.refresh(backend).await,
-        Action::CycleTheme => {
-            app.cycle_theme();
-            *transition = Some(transition::theme_wash(&app.theme()));
-        }
-        Action::Page(page) => {
-            app.set_page(page);
-            *transition = Some(transition::layout_switch());
-        }
-        Action::CycleSort => app.cycle_sort(),
-        Action::CancelHalt => app.cancel_halt(backend).await,
-        Action::Focus(target) => {
-            app.set_focus(target);
-            *transition = Some(transition::focus_switch());
-        }
-        Action::Layout(mode) => {
-            app.set_layout(mode);
-            *transition = Some(transition::layout_switch());
-        }
-        Action::FpsUp => app.fps_up(),
-        Action::FpsDown => app.fps_down(),
-        Action::FollowMonitor => app.follow_monitor(),
-        Action::Ask => {
-            app.open_ask();
-            *transition = Some(transition::overlay_open());
-        }
-        Action::Events => {
-            app.open_events();
-            *transition = Some(transition::overlay_open());
-        }
-        Action::Gate => {
-            app.open_gate();
-            *transition = Some(transition::overlay_open());
-        }
-        Action::Connect => {
-            app.open_connect();
-            *transition = Some(transition::overlay_open());
-        }
-        Action::GraduateShadow => {
-            app.request_graduate();
-            if app.mode == Mode::Confirm {
-                *transition = Some(transition::overlay_open());
-            }
-        }
-        Action::FreezeExpert => {
-            app.request_freeze();
-            if app.mode == Mode::Confirm {
-                *transition = Some(transition::overlay_open());
-            }
-        }
-        Action::Help => {
-            app.toggle_help();
-            if app.mode == Mode::Help {
-                *transition = Some(transition::overlay_open());
-            }
-        }
-        Action::Quit => app.should_quit = true,
-    }
-    Ok(())
-}
-
-/// Route the ask query through the gate, storing the distribution on the app.
-/// A failure is said in the event stream and yields an empty (escalate) result.
-async fn ask_route(app: &mut App, backend: &Backend) {
-    let routed = match backend.route(&app.ask_query, app.router.as_ref()).await {
-        Ok(routed) => routed,
-        Err(e) => {
-            app.operator_event(format!("ask failed · {e:#}"));
-            Vec::new()
-        }
-    };
-    app.set_ask_result(&routed);
-}
-
 async fn run_loop(
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut App,
@@ -717,11 +289,10 @@ async fn run_loop(
     // The periodic refresh runs OFF the render thread: a snapshot of thousands
     // of memories takes long enough to read that awaiting it inline stutters
     // input. At most one read is in flight; its result is applied (cheaply)
-    // when ready. A run of failed reads is said once, when it starts.
+    // when ready.
     let mut reload_inflight: Option<
         tokio::task::JoinHandle<anyhow::Result<Option<app::Snapshot>>>,
     > = None;
-    let mut reads_failing = false;
     let mut last = Instant::now();
     // The active view-switch effect (and the scope it animates), processed
     // against the frame buffer and cleared when it finishes.
@@ -770,193 +341,11 @@ async fn run_loop(
             if remaining.is_zero() || !event::poll(remaining)? {
                 break;
             }
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
+            if let Event::Key(event) = event::read()? {
+                if event.kind == KeyEventKind::Press {
                     app.note_input();
-                    match app.mode {
-                        Mode::Help => match key.code {
-                            KeyCode::Char('?') | KeyCode::Esc | KeyCode::Char('q') => {
-                                app.close_overlay()
-                            }
-                            _ => {}
-                        },
-                        Mode::Palette => match key.code {
-                            KeyCode::Esc => app.close_overlay(),
-                            KeyCode::Enter => {
-                                let action = app.palette_action();
-                                app.close_overlay();
-                                if let Some(action) = action {
-                                    apply_action(app, backend, &mut transition, action).await?;
-                                }
-                            }
-                            KeyCode::Backspace => app.palette_backspace(),
-                            KeyCode::Up => app.palette_move(-1),
-                            KeyCode::Down => app.palette_move(1),
-                            KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                match c {
-                                    'n' => app.palette_move(1),
-                                    'p' => app.palette_move(-1),
-                                    _ => {}
-                                }
-                            }
-                            KeyCode::Char(c) => app.palette_input(c),
-                            _ => {}
-                        },
-                        Mode::Filter => match key.code {
-                            KeyCode::Esc => app.close_overlay(),
-                            KeyCode::Enter => app.filter_apply(),
-                            KeyCode::Backspace => app.filter_backspace(),
-                            KeyCode::Up => app.filter_move(-1),
-                            KeyCode::Down => app.filter_move(1),
-                            KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                match c {
-                                    'n' => app.filter_move(1),
-                                    'p' => app.filter_move(-1),
-                                    _ => {}
-                                }
-                            }
-                            KeyCode::Char(c) => app.filter_input(c),
-                            _ => {}
-                        },
-                        Mode::Events => match key.code {
-                            KeyCode::Char('e') | KeyCode::Char('q') | KeyCode::Esc => {
-                                app.close_overlay()
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => app.events_move(1),
-                            KeyCode::Up | KeyCode::Char('k') => app.events_move(-1),
-                            _ => {}
-                        },
-                        Mode::Detail => match key.code {
-                            KeyCode::Enter | KeyCode::Char('q') | KeyCode::Esc => {
-                                app.close_overlay()
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => app.detail_move(1),
-                            KeyCode::Up | KeyCode::Char('k') => app.detail_move(-1),
-                            KeyCode::PageDown => app.detail_move(10),
-                            KeyCode::PageUp => app.detail_move(-10),
-                            _ => {}
-                        },
-                        Mode::Gate => match key.code {
-                            KeyCode::Enter | KeyCode::Char('q') | KeyCode::Esc => {
-                                app.close_overlay()
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => app.detail_move(1),
-                            KeyCode::Up | KeyCode::Char('k') => app.detail_move(-1),
-                            KeyCode::PageDown => app.detail_move(10),
-                            KeyCode::PageUp => app.detail_move(-10),
-                            _ => {}
-                        },
-                        Mode::Connect => match key.code {
-                            KeyCode::Enter | KeyCode::Char('q') | KeyCode::Esc => {
-                                app.close_overlay()
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => app.detail_move(1),
-                            KeyCode::Up | KeyCode::Char('k') => app.detail_move(-1),
-                            KeyCode::PageDown => app.detail_move(10),
-                            KeyCode::PageUp => app.detail_move(-10),
-                            _ => {}
-                        },
-                        Mode::Ask => match key.code {
-                            KeyCode::Esc => app.close_overlay(),
-                            KeyCode::Backspace => app.ask_backspace(),
-                            KeyCode::Enter => ask_route(app, backend).await,
-                            KeyCode::Char(c) => app.ask_input(c),
-                            _ => {}
-                        },
-                        Mode::Confirm => match key.code {
-                            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                                app.apply_pending(backend).await
-                            }
-                            _ => app.cancel_action(),
-                        },
-                        Mode::Knobs => match key.code {
-                            KeyCode::Char('K') | KeyCode::Char('q') | KeyCode::Esc => {
-                                app.close_knobs()
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => app.knob_move(1),
-                            KeyCode::Up | KeyCode::Char('k') => app.knob_move(-1),
-                            KeyCode::Right | KeyCode::Char('l') => app.knob_turn(1),
-                            KeyCode::Left | KeyCode::Char('h') => app.knob_turn(-1),
-                            KeyCode::Enter => app.request_knobs(),
-                            _ => {}
-                        },
-                        Mode::Normal => match key.code {
-                            KeyCode::Char('q') | KeyCode::Esc => app.should_quit = true,
-                            KeyCode::Down | KeyCode::Char('j') => app.select_next(),
-                            KeyCode::Up | KeyCode::Char('k') => app.select_prev(),
-                            KeyCode::Enter => {
-                                app.open_detail();
-                                transition = Some(transition::overlay_open());
-                            }
-                            KeyCode::Home | KeyCode::Char('g') => app.select_first(),
-                            KeyCode::End | KeyCode::Char('G') => app.select_last(),
-                            KeyCode::PageDown => app.select_page(1),
-                            KeyCode::PageUp => app.select_page(-1),
-                            KeyCode::Char(':') => {
-                                app.open_palette();
-                                transition = Some(transition::overlay_open());
-                            }
-                            KeyCode::Char('/') => {
-                                app.open_filter();
-                                transition = Some(transition::overlay_open());
-                            }
-                            KeyCode::Char('e') => {
-                                app.open_events();
-                                transition = Some(transition::overlay_open());
-                            }
-                            KeyCode::Char('c') => {
-                                app.open_connect();
-                                transition = Some(transition::overlay_open());
-                            }
-                            KeyCode::Char('K') => {
-                                app.open_knobs();
-                                transition = Some(transition::overlay_open());
-                            }
-                            KeyCode::Char('x') => {
-                                app.request_action();
-                                if app.mode == Mode::Confirm {
-                                    transition = Some(transition::overlay_open());
-                                }
-                            }
-                            KeyCode::Tab => {
-                                app.toggle_focus();
-                                transition = Some(transition::focus_switch());
-                            }
-                            KeyCode::Char(']') => {
-                                app.cycle_page(1);
-                                transition = Some(transition::layout_switch());
-                            }
-                            KeyCode::Char('[') => {
-                                app.cycle_page(-1);
-                                transition = Some(transition::layout_switch());
-                            }
-                            KeyCode::Char(c) if app::Page::index_for_key(c).is_some() => {
-                                if let Some(index) = app::Page::index_for_key(c) {
-                                    app.goto_page(index);
-                                }
-                                transition = Some(transition::layout_switch());
-                            }
-                            KeyCode::Char('l') | KeyCode::Char('L') => {
-                                app.cycle_layout();
-                                transition = Some(transition::layout_switch());
-                            }
-                            KeyCode::Char('s') => app.cycle_sort(),
-                            KeyCode::Char('t') => {
-                                app.cycle_theme();
-                                transition = Some(transition::theme_wash(&app.theme()));
-                            }
-                            KeyCode::Char('+') | KeyCode::Char('=') => app.fps_up(),
-                            KeyCode::Char('-') | KeyCode::Char('_') => app.fps_down(),
-                            KeyCode::Char('a') => app.follow_monitor(),
-                            KeyCode::Char('r') => app.refresh(backend).await,
-                            KeyCode::Char('?') => {
-                                app.toggle_help();
-                                if app.mode == Mode::Help {
-                                    transition = Some(transition::overlay_open());
-                                }
-                            }
-                            _ => {}
-                        },
+                    if let Some(key) = keys::Key::from_event(event) {
+                        drive::press(app, backend, &mut transition, key).await;
                     }
                 }
             }
@@ -966,21 +355,9 @@ async fn run_loop(
         // explicit `r` / operator-action reloads stay inline.
         if reload_inflight.as_ref().is_some_and(|h| h.is_finished()) {
             if let Some(handle) = reload_inflight.take() {
-                match handle.await {
-                    Ok(Ok(read)) => {
-                        if reads_failing {
-                            reads_failing = false;
-                            app.operator_event(format!("reading {} again", backend.describe()));
-                        }
-                        if let Some(snap) = read {
-                            app.apply_snapshot(snap);
-                        }
-                    }
-                    Ok(Err(e)) if !reads_failing => {
-                        reads_failing = true;
-                        app.operator_event(format!("reload failed · {e:#}"));
-                    }
-                    _ => {}
+                // A read whose task was cancelled has nothing to apply.
+                if let Ok(read) = handle.await {
+                    app.read_finished(read);
                 }
             }
         }

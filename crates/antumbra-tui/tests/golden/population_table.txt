@@ -31,6 +31,6 @@
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
-│                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- q  quit   ↑↓  select   tab  focus:umbra   []  page:population   t  theme:night   ±  cap:144   r  reload   ?  help   :
+
+ ↑↓  move   enter  details   /  find   x  thaw   1-5  pages   l  layout   a  ask   :  commands   ?  help   q  quit

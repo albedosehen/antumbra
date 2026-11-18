@@ -157,7 +157,7 @@ fn demo_app() -> App {
         selected_skill: 0,
         loop_heads: demo_loop_heads(now),
         selected_loop: 0,
-        loop_halt_pending: false,
+        halts: std::collections::HashSet::new(),
         evals: demo_evals(now),
         selected_eval: 0,
         router: None,
@@ -176,6 +176,8 @@ fn demo_app() -> App {
         events_scroll: 0,
         detail_scroll: 0,
         pending: None,
+        notice: None,
+        reads_failing: false,
         ask_query: String::new(),
         ask_result: None,
         real_embedder: false,
@@ -474,17 +476,10 @@ fn golden_reward_heatmap() -> anyhow::Result<()> {
     ];
     app.set_layout(LayoutMode::Dashboard);
     let buf = render(&mut app, 120, 36, 1600.0)?;
-    // Recompute the heatmap strip: the body is the 4th chrome row, then the
-    // dashboard puts the heatmap in the bottom Length(9) slice.
-    let chrome = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .split(buf.area);
-    let strip = Layout::vertical([Constraint::Min(0), Constraint::Length(9)]).split(chrome[3])[1];
+    // The heatmap strip: the dashboard puts it in the bottom Length(9) slice
+    // of the frame's body.
+    let body = crate::ui::frame_rows(buf.area).body;
+    let strip = Layout::vertical([Constraint::Min(0), Constraint::Length(9)]).split(body)[1];
     assert_golden("reward_heatmap", &to_text_in(&buf, strip))?;
     Ok(())
 }
@@ -505,7 +500,7 @@ fn golden_loop_page() -> anyhow::Result<()> {
 fn golden_loop_halted() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.set_page(crate::app::Page::Loop);
-    app.loop_halt_pending = true;
+    app.halts.insert("run:demo".into());
     let buf = render(&mut app, 120, 36, 1600.0)?;
     assert_golden("loop_halted", &to_text(&buf))?;
     Ok(())
@@ -681,4 +676,5 @@ fn golden_focused_boundaries_panel() -> anyhow::Result<()> {
 }
 
 mod behavior;
+mod keys;
 mod look;
