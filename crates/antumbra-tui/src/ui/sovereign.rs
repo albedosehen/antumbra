@@ -10,29 +10,40 @@ use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::theme::Theme;
+use crate::theme::{Theme, Tone};
 
-use super::panel;
+use super::{panel, state_line};
 
 /// A skill not used for this long is called out.
 const STALE_DAYS: i64 = 30;
 
 fn header<'a>(t: &Theme, names: &[&'a str]) -> Row<'a> {
     Row::new(names.iter().map(|name| Cell::from(*name)))
-        .style(Style::default().fg(t.dim).add_modifier(Modifier::BOLD))
+        .style(Style::default().fg(t.ink2).add_modifier(Modifier::BOLD))
 }
 
 fn rules(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let view = &app.sovereign;
-    let title = format!(" rules · {} ", view.rules.len());
-    let block = panel(&t, Span::styled(title, Style::default().fg(t.ink)));
+    let title = format!(" Rules · {} ", view.rules.len());
+    let block = panel(&t, Span::styled(title, Style::default().fg(t.ink2)));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let note = view.checked.as_deref().unwrap_or(
-        "no rules kept yet: `antumbra claude remember` writes them to a claude-code compartment",
-    );
+    // With none kept, a sentence that says who keeps them, and no table: a
+    // heading over no rows reads as a list that failed to load.
+    if view.rules.is_empty() {
+        let why = "No rules kept yet: the session-start hook keeps them the first time a \
+                   session starts with the agent's feature flags off, and `antumbra claude \
+                   remember` keeps them by hand.";
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(why, Style::default().fg(t.ink3))))
+                .wrap(Wrap { trim: true }),
+            inner,
+        );
+        return;
+    }
+    let note = view.checked.as_deref().unwrap_or_default();
     let parts = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
@@ -41,43 +52,48 @@ fn rules(f: &mut Frame, app: &App, area: Rect) {
         return;
     };
     f.render_widget(
-        Paragraph::new(Line::from(Span::styled(note, Style::default().fg(t.dim))))
+        Paragraph::new(Line::from(Span::styled(note, Style::default().fg(t.ink2))))
             .wrap(Wrap { trim: true }),
         *note_area,
     );
 
     let rows = view.rules.iter().map(|rule| {
-        let (standing, color) = match (rule.current_in, rule.retired_in) {
-            (0, _) => ("retired".to_string(), t.warning),
-            (current, 0) => (format!("current in {current}"), t.success),
+        // Current everywhere is in force, retired everywhere is ended, and a
+        // rule current in some workspaces and retired in others is open.
+        let (tone, standing) = match (rule.current_in, rule.retired_in) {
+            (0, _) => (Tone::Ended, "retired".to_string()),
+            (current, 0) => (Tone::Settled, format!("current in {current}")),
             (current, retired) => (
+                Tone::Open,
                 format!("current in {current}, retired in {retired}"),
-                t.text,
             ),
         };
         Row::new(vec![
-            Cell::from(Span::styled(rule.rule.clone(), Style::default().fg(t.text))),
-            Cell::from(Span::styled(standing, Style::default().fg(color))),
+            Cell::from(Span::styled(rule.rule.clone(), Style::default().fg(t.ink))),
+            Cell::from(state_line(&t, tone, standing)),
         ])
     });
     let table = Table::new(rows, [Constraint::Min(22), Constraint::Min(16)])
-        .header(header(&t, &["rule", "workspaces"]));
+        .header(header(&t, &["RULE", "WORKSPACES"]));
     f.render_widget(table, *table_area);
 }
 
 fn skills(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let view = &app.sovereign;
-    let title = format!(" skill use · {} · stalest first ", view.skills.len());
-    let block = panel(&t, Span::styled(title, Style::default().fg(t.ink)));
+    let title = format!(
+        " Skills · {} · least recently used first ",
+        view.skills.len()
+    );
+    let block = panel(&t, Span::styled(title, Style::default().fg(t.ink2)));
 
     if view.skills.is_empty() {
         let inner = block.inner(area);
         f.render_widget(block, area);
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "no skill has been counted yet: two hooks run `antumbra claude skill-used`",
-                Style::default().fg(t.dim),
+                "No skill use counted yet: `antumbra setup` wires the two hooks that count it, and a skill is counted the next time one is used.",
+                Style::default().fg(t.ink3),
             )))
             .wrap(Wrap { trim: true }),
             inner,
@@ -96,21 +112,19 @@ fn skills(f: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_default()
         .iter()
         .map(|row| {
+            // A stale skill's date fades; the list is stalest first, so the
+            // faded dates are the ones it opens with.
             let idle = (now - row.last_used).num_days();
-            let color = if idle >= STALE_DAYS {
-                t.warning
-            } else {
-                t.text
-            };
+            let color = if idle >= STALE_DAYS { t.ink3 } else { t.ink };
             Row::new(vec![
-                Cell::from(Span::styled(row.skill.clone(), Style::default().fg(t.text))),
+                Cell::from(Span::styled(row.skill.clone(), Style::default().fg(t.ink))),
                 Cell::from(Span::styled(
                     row.workspace.clone(),
-                    Style::default().fg(t.dim),
+                    Style::default().fg(t.ink2),
                 )),
                 Cell::from(Span::styled(
                     row.uses.to_string(),
-                    Style::default().fg(t.value),
+                    Style::default().fg(t.ink),
                 )),
                 Cell::from(Span::styled(
                     row.last_used.format("%Y-%m-%d").to_string(),
@@ -126,15 +140,10 @@ fn skills(f: &mut Frame, app: &App, area: Rect) {
         Constraint::Length(10),
     ];
     let table = Table::new(rows, widths)
-        .header(header(&t, &["skill", "workspace", "uses", "last used"]))
+        .header(header(&t, &["SKILL", "WORKSPACE", "USES", "LAST USED"]))
         .block(block)
-        .row_highlight_style(
-            Style::default()
-                .bg(t.sel)
-                .fg(t.text)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("▌ ");
+        .row_highlight_style(t.selected())
+        .highlight_symbol("▸ ");
     let mut state = TableState::default();
     state.select(Some(rel_sel));
     f.render_stateful_widget(table, area, &mut state);

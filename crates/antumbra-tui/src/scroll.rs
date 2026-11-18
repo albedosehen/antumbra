@@ -4,7 +4,7 @@
 //! Hand-rolled on ratatui core.
 
 use ratatui::layout::{Margin, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{
     Block, List, ListItem, ListState, Scrollbar, ScrollbarOrientation, ScrollbarState,
@@ -44,7 +44,7 @@ pub fn list<'a>(
         List::new(items)
             .block(block)
             .highlight_symbol("▸ ")
-            .highlight_style(Style::default().bg(t.sel).add_modifier(Modifier::BOLD)),
+            .highlight_style(t.selected()),
         area,
         &mut state,
     );
@@ -55,7 +55,7 @@ pub fn list<'a>(
                 .begin_symbol(None)
                 .end_symbol(None)
                 .thumb_style(Style::default().fg(t.accent))
-                .track_style(Style::default().fg(t.dim)),
+                .track_style(Style::default().fg(t.line)),
             area.inner(Margin::new(0, 1)),
             &mut sb,
         );

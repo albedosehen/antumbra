@@ -24,10 +24,10 @@ use antumbra_core::behavior::missed::{self, Missed};
 use antumbra_core::behavior::{self, learnable, Spec, State, Status};
 use antumbra_core::ports::Embedder;
 use antumbra_core::{
-    BoundaryId, Expert, ExpertId, FailureBoundary, Generation, Memory, MemoryId, Result, RunId,
-    Shadow, ShadowId, ShadowStatus, TenantId, UserId,
+    BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary, Generation, Memory,
+    MemoryId, Result, RunId, Shadow, ShadowId, ShadowStatus, SubjectKind, TenantId, UserId,
 };
-use antumbra_store::repo::{boundary, expert, memory, principal, shadow};
+use antumbra_store::repo::{boundary, evaluation, expert, memory, principal, shadow};
 use antumbra_store::{Store, EMBED_DIM};
 use antumbra_train::behave::{self as course, Verdict};
 use antumbra_train::{
@@ -727,7 +727,87 @@ pub async fn note_audit(store: &Store, plan: &Plan, audited: &Audited) -> Result
         expert::delete(store, &e.id).await?;
         expert::insert(store, &e).await?;
     }
+    record_audit(store, plan, audited).await?;
     Ok(())
+}
+
+/// The run a scope's training or audit is kept under: the set it was of, so
+/// the training of a set and the later audit of the expert it made read as
+/// one run.
+fn run_of(set: &str) -> RunId {
+    RunId::new(format!("standing:{}", &set[..set.len().min(12)]))
+}
+
+/// Keep a training as an evaluation: the scope's expert measured on the tasks
+/// held out from its training, against the base model on the same ones. One
+/// row a training, admitted or refused, so how an expert has done is recorded
+/// by the trainings themselves and not by a command someone has to run.
+async fn record_training(
+    store: &Store,
+    plan: &Plan,
+    base: f32,
+    expert: f32,
+    verdict: &Verdict,
+) -> Result<()> {
+    let run = EvaluationRun {
+        run_id: run_of(&behavior::fingerprint(&plan.taught)),
+        subject_kind: SubjectKind::Expert,
+        subject_id: expert_id(&plan.tenant, &plan.user, &plan.scope)
+            .as_str()
+            .to_string(),
+        corpus_task_id: format!("training:{}", plan.scope),
+        status: if verdict.admitted {
+            EvalStatus::Success
+        } else {
+            EvalStatus::Failure
+        },
+        metrics: Some(serde_json::json!({
+            "kind": "training",
+            "scope": plan.scope,
+            "base": base,
+            "expert": expert,
+            "behaviors": plan.taught.len(),
+            "learned": verdict.learned().len(),
+            "missed": verdict.missed().len(),
+            "admitted": verdict.admitted,
+            "reasons": verdict.reasons,
+        })),
+        regression_fingerprint: None,
+        created_at: Utc::now(),
+    };
+    evaluation::insert(store, &run).await
+}
+
+/// Keep an audit as an evaluation: the served expert and the base model on
+/// the examples its behaviors gained since it was trained. It passes when
+/// the expert did at least as well as the base model on what neither had
+/// seen. An audit of no later example measured nothing and is not kept.
+async fn record_audit(store: &Store, plan: &Plan, audited: &Audited) -> Result<()> {
+    if audited.fresh() == 0 {
+        return Ok(());
+    }
+    let run = EvaluationRun {
+        run_id: run_of(&audited.set),
+        subject_kind: SubjectKind::Expert,
+        subject_id: audited.expert.as_str().to_string(),
+        corpus_task_id: format!("audit:{}", plan.scope),
+        status: if audited.passed() >= audited.base() {
+            EvalStatus::Success
+        } else {
+            EvalStatus::Failure
+        },
+        metrics: Some(serde_json::json!({
+            "kind": "audit",
+            "scope": plan.scope,
+            "examples": audited.fresh(),
+            "base": audited.base(),
+            "expert": audited.passed(),
+            "behaviors": audited.behaviors.len(),
+        })),
+        regression_fingerprint: None,
+        created_at: Utc::now(),
+    };
+    evaluation::insert(store, &run).await
 }
 
 /// The object under `key` on a card, made when absent or null: the sections
@@ -786,6 +866,14 @@ pub async fn mint(
     record_boundaries(store, plan, &trained.verdict, &trained.misses).await?;
     if !trained.verdict.admitted {
         note(store, plan, &trained.verdict, &trained.misses, None).await?;
+        record_training(
+            store,
+            plan,
+            trained.base_fitness,
+            trained.fitness,
+            &trained.verdict,
+        )
+        .await?;
         settle(store, plan, parent, trained.adapter_uri, curve, false).await?;
         return Ok(BehaveReport {
             behaviors: ids,
@@ -900,6 +988,7 @@ pub async fn mint(
         true,
     )
     .await?;
+    record_training(store, plan, trained.base_fitness, trained.fitness, &verdict).await?;
     Ok(BehaveReport {
         behaviors: ids,
         replay: trained.replay,

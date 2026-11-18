@@ -1,7 +1,7 @@
 use super::*;
 use crate::backend::Backend;
 use antumbra_core::generational::LoopCommand;
-use antumbra_core::ShadowStatus;
+use antumbra_core::{BoundaryId, ExpertId, ShadowId, ShadowStatus};
 use antumbra_store::repo::{
     boundary, edge, evaluation, expert, generation, loop_control, memory, shadow,
 };
@@ -11,19 +11,21 @@ use anyhow::Context as _;
 
 #[test]
 fn every_page_has_a_number_key_and_no_key_reaches_past_the_last() -> anyhow::Result<()> {
-    let keys: Vec<Option<usize>> = "0123456789x".chars().map(Page::index_for_key).collect();
-    let reached: Vec<usize> = keys.iter().flatten().copied().collect();
-    assert_eq!(reached, (0..Page::ALL.len()).collect::<Vec<_>>());
-    assert_eq!(Page::index_for_key('0'), None);
-    assert_eq!(Page::index_for_key('x'), None);
+    let keys: Vec<char> = Page::ALL.iter().filter_map(|page| page.key()).collect();
+    assert_eq!(
+        keys,
+        vec!['1', '2', '3', '4', '5', '6'],
+        "one key a page, in order"
+    );
     // The tab the key selects is the tab the bar numbers it as.
     for (index, page) in Page::ALL.iter().enumerate() {
         assert_eq!(page.index(), index);
+        assert_eq!(
+            page.key().and_then(|key| key.to_digit(10)),
+            u32::try_from(index + 1).ok()
+        );
     }
-    assert_eq!(
-        Page::index_for_key('5').and_then(|i| Page::ALL.get(i)),
-        Some(&Page::Sovereign)
-    );
+    assert_eq!(Page::Sovereign.key(), Some('5'));
     Ok(())
 }
 
@@ -432,30 +434,86 @@ async fn loop_halt_request_writes_the_control_and_cancel_clears_it() -> anyhow::
     generation::save_head(&store, &head).await?;
     app.reload(&Backend::demo(store.clone())).await?;
     assert_eq!(app.loop_heads.len(), 1);
-    assert!(!app.loop_halt_pending);
+    assert!(!app.selected_halt_pending());
 
     // `x` on the Loop page stages a halt confirm; applying writes the control.
     app.page = Page::Loop;
     app.request_action();
     assert!(matches!(app.pending, Some(Pending::HaltLoop(_))));
     app.apply_pending(&Backend::demo(store.clone())).await;
-    assert!(app.loop_halt_pending, "halt is now pending");
+    assert!(app.selected_halt_pending(), "halt is now pending");
     assert_eq!(
         loop_control::load(&store, &RunId::new("run:z")).await?,
         LoopCommand::Halt
     );
+    assert!(
+        app.current_notice()
+            .is_some_and(|n| n.text.contains("halt requested")),
+        "the main view says what was done"
+    );
 
-    // Re-requesting is inert while a halt is already pending.
+    // With a halt pending, `x` offers to cancel it, behind a confirm; going
+    // ahead clears the control back to Run.
     app.request_action();
-    assert!(app.pending.is_none());
-
-    // Canceling clears the control back to Run.
-    app.cancel_halt(&Backend::demo(store.clone())).await;
-    assert!(!app.loop_halt_pending);
+    assert!(matches!(app.pending, Some(Pending::CancelHalt(_))));
+    app.apply_pending(&Backend::demo(store.clone())).await;
+    assert!(!app.selected_halt_pending());
     assert_eq!(
         loop_control::load(&store, &RunId::new("run:z")).await?,
         LoopCommand::Run
     );
+
+    // With none pending, the palette's cancel stages nothing and says so.
+    app.request_cancel_halt();
+    assert!(app.pending.is_none());
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(app
+        .current_notice()
+        .is_some_and(|n| n.text.contains("no halt is pending")));
+    Ok(())
+}
+
+/// A halt is asked of the run the Loop page is on, and said of that run: with
+/// two runs and the second selected, the first is left running.
+#[tokio::test]
+async fn a_halt_is_asked_of_the_selected_run_and_of_no_other() -> anyhow::Result<()> {
+    let (store, mut app) = seeded().await?;
+    for run in ["run:a", "run:b"] {
+        generation::save_head(&store, &GenerationHead::new(RunId::new(run), Utc::now())).await?;
+    }
+    let backend = Backend::demo(store.clone());
+    app.reload(&backend).await?;
+    assert_eq!(app.loop_heads.len(), 2);
+    app.page = Page::Loop;
+    app.select_next();
+    let selected = app
+        .selected_loop_head()
+        .context("no run is selected")?
+        .run_id
+        .clone();
+    let other = app
+        .loop_heads
+        .iter()
+        .map(|h| h.run_id.clone())
+        .find(|run| run.as_str() != selected.as_str())
+        .context("there is no other run")?;
+
+    app.request_action();
+    assert!(
+        matches!(&app.pending, Some(Pending::HaltLoop(run)) if run.as_str() == selected.as_str()),
+        "the halt names the selected run"
+    );
+    app.apply_pending(&backend).await;
+    assert_eq!(
+        loop_control::load(&store, &selected).await?,
+        LoopCommand::Halt
+    );
+    assert_eq!(loop_control::load(&store, &other).await?, LoopCommand::Run);
+    assert!(
+        app.halt_pending(&selected),
+        "said of the run that was asked"
+    );
+    assert!(!app.halt_pending(&other), "and not of the other");
     Ok(())
 }
 
@@ -491,23 +549,6 @@ async fn eval_history_groups_by_subject_and_drill_down_opens() -> anyhow::Result
     app.evals.clear();
     app.open_detail();
     assert_eq!(app.mode, Mode::Normal, "no drill-down with no runs");
-    Ok(())
-}
-
-#[tokio::test]
-async fn dashboard_metrics_summarize_the_substrate() -> anyhow::Result<()> {
-    let (_store, mut app) = seeded().await?;
-    let m = app.dashboard_metrics();
-    assert_eq!(
-        m.map(|(label, _)| label),
-        ["fitness", "frozen", "graduated", "gating", "memory"]
-    );
-    // No experts seeded → zero mean fitness; the one shadow is exploring.
-    assert_eq!(m[0].1, 0.0, "no experts");
-    assert_eq!(m[2].1, 0.0, "no graduated shadows");
-    // Graduate the lone shadow → the graduation ratio becomes 1/1.
-    app.shadows[0].status = ShadowStatus::Graduated;
-    assert_eq!(app.dashboard_metrics()[2].1, 1.0);
     Ok(())
 }
 
@@ -589,16 +630,16 @@ async fn a_read_only_console_stages_no_action_and_says_why() -> anyhow::Result<(
     assert!(app.pending.is_none());
     assert_eq!(app.mode, Mode::Normal);
     assert!(
-        app.events.iter().any(|e| e.text.contains("read-only")),
+        app.events.iter().any(|e| e.text.contains("Read-only")),
         "the event stream says it is read-only"
     );
     Ok(())
 }
 
 #[tokio::test]
-async fn request_action_skips_a_pruned_shadow_and_experts() -> anyhow::Result<()> {
+async fn an_action_with_nothing_to_act_on_stages_nothing_and_says_why() -> anyhow::Result<()> {
     let (_store, mut app) = seeded().await?;
-    // Pruned shadow: no action is staged.
+    // Pruned shadow: no action is staged, and the main view says why.
     app.shadows[0].status = ShadowStatus::Pruned;
     app.focus = Focus::Shadows;
     app.request_action();
@@ -607,9 +648,23 @@ async fn request_action_skips_a_pruned_shadow_and_experts() -> anyhow::Result<()
         "no prune on an already-pruned shadow"
     );
     assert_eq!(app.mode, Mode::Normal);
-    // Experts focus has no operator action.
+    assert!(app
+        .current_notice()
+        .is_some_and(|n| n.text.contains("already pruned")));
+    // The experts' list is empty here: nothing to freeze, and it says so.
+    anyhow::ensure!(app.experts.is_empty(), "the fixture has no expert");
     app.focus = Focus::Experts;
     app.request_action();
     assert!(app.pending.is_none());
+    assert!(app
+        .current_notice()
+        .is_some_and(|n| n.text.contains("no expert is selected")));
+    // A page with nothing to act on says that.
+    app.page = Page::Memory;
+    app.request_action();
+    assert!(app.pending.is_none());
+    assert!(app
+        .current_notice()
+        .is_some_and(|n| n.text.contains("nothing on this page")));
     Ok(())
 }

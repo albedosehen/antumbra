@@ -34,13 +34,18 @@ cat "$FAKE_RESPONSE"
 STUB
 # `claude reanchor` writes its arguments, and whether it was handed the token,
 # to ANTUMBRA_TEST_MARKER, then takes five seconds, so a hook that waited for it
-# would be caught.
+# would be caught. `claude remember` does the same to ANTUMBRA_TEST_REMEMBERED.
 cat >"$work/bin/antumbra" <<'STUB'
 #!/usr/bin/env bash
 [ "$1 $2" = "claude brief" ] && printf '%s\n' '## Sovereign mode' '' '- a line the agent must see'
 if [ "$1 $2" = "claude reanchor" ]; then
   echo "$*" >"$ANTUMBRA_TEST_MARKER"
   [ -n "${ANTUMBRA_TOKEN:-}" ] && echo "token handed on" >>"$ANTUMBRA_TEST_MARKER"
+  sleep 5
+fi
+if [ "$1 $2" = "claude remember" ]; then
+  echo "$*" >"$ANTUMBRA_TEST_REMEMBERED"
+  [ -n "${ANTUMBRA_TOKEN:-}" ] && echo "token handed on" >>"$ANTUMBRA_TEST_REMEMBERED"
   sleep 5
 fi
 exit 0
@@ -52,6 +57,7 @@ jq -nc '{memories: [range(1; 13) | {id: ("memory:" + tostring), content: ("M" + 
 jq -nc '{memories: [{id: "memory:a", content: "first small"}, {id: "memory:b", content: "second small"}]}' >"$work/small.json"
 
 marker="$work/reanchored.txt"
+remembered="$work/remembered.txt"
 # A clone with a GitHub origin, for the cases that need a repository.
 mkdir -p "$work/clone"
 git -C "$work/clone" init -q
@@ -60,7 +66,8 @@ git -C "$work/clone" remote add origin https://github.com/acme/orders.git
 run_in() { # directory, response file, then extra environment assignments
   local dir="$1" response="$2"; shift 2
   (cd "$dir" && env PATH="$work/bin:$PATH" FAKE_RESPONSE="$response" ANTUMBRA_TOKEN=test-token \
-    ANTUMBRA_TEST_MARKER="$marker" ANTUMBRA_REANCHOR_LOG="$work/reanchor.log" "$@" bash "$hook" </dev/null)
+    ANTUMBRA_TEST_MARKER="$marker" ANTUMBRA_REANCHOR_LOG="$work/reanchor.log" \
+    ANTUMBRA_TEST_REMEMBERED="$remembered" ANTUMBRA_REMEMBER_LOG="$work/remember.log" "$@" bash "$hook" </dev/null)
 }
 run() { # response file, then extra environment assignments
   local response="$1"; shift
@@ -142,6 +149,22 @@ for _ in $(seq 1 30); do [ -e "$marker" ] && break; sleep 0.2; done
 check "reports the last three days of merges" grep -q 'claude reanchor --days 3' "$marker"
 check "hands the report the token" grep -q 'token handed on' "$marker"
 check "still answers" grep -q 'first small' <<<"$ctx"
+# The stub's brief says the session is in the mode the rules are for.
+for _ in $(seq 1 30); do [ -e "$remembered" ] && break; sleep 0.2; done
+check "keeps the rules the session runs by" grep -q 'claude remember' "$remembered"
+check "hands that the token" grep -q 'token handed on' "$remembered"
+
+echo "the rules, turned off"
+rm -f "$remembered"
+ctx=$(run_in "$work/clone" "$work/small.json" ANTUMBRA_REANCHOR=0 ANTUMBRA_REMEMBER=0 | context)
+sleep 2
+check "keeps no rules" test ! -e "$remembered"
+check "still answers" grep -q 'first small' <<<"$ctx"
+
+echo "the rules, outside the mode they are for"
+ctx=$(run_in "$work/clone" "$work/small.json" ANTUMBRA_REANCHOR=0 ANTUMBRA_BIN=antumbra-is-not-installed | context)
+sleep 2
+check "keeps no rules when the brief says nothing" test ! -e "$remembered"
 
 echo "in a clone, turned off"
 rm -f "$marker"

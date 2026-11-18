@@ -1,20 +1,20 @@
-╭ generational loop · run:demo ──────────────────────────────────────────╮
+╭ Training loop · run:demo ──────────────────────────────────────────────╮
 │run:demo                                                                │
 │generation 4                                                            │
-│state      score                                                        │
+│stage      score                                                        │
 │                                                                        │
-│lifecycle                                                               │
-│  ✓ grow                                                                │
-│  ✓ explore                                                             │
-│  ◉ score       verifiers + critic produce reward signals               │
-│  · decide                                                              │
-│  · consolidate                                                         │
+│Stages                                                                  │
+│  ● grow                                                                │
+│  ● explore                                                             │
+│  ◉ score       each candidate's answers are checked                    │
+│  ○ decide                                                              │
+│  ○ consolidate                                                         │
 │                                                                        │
-│running · x requests a graceful halt                                    │
+│running                                                                 │
 │                                                                        │
-│evaluations  ·  2 for this run                                          │
-│  pass    expert  expert:arith-specialist                               │
-│  FAIL    shadow  shadow:g4                                             │
+│Evaluations · 2 for this run                                            │
+│  ● pass    expert    expert:arith-specialist                           │
+│  ▲ FAIL    candidate shadow:g4                                         │
 │                                                                        │
 │                                                                        │
 │                                                                        │

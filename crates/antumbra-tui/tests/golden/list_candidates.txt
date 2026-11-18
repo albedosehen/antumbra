@@ -1,0 +1,36 @@
+ ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                 ● live
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent  ·  6 Services
+ Candidates: experts in training. One that passes its checks graduates; one that does not is pruned.
+╭  Experts 3 │ Candidates 2 │ Boundaries 2  ─────────────────────────╮╭ Candidate ─────────────────────────────────────╮
+│  CANDIDATE                      WHEN     BASE → TRAINED STATUS     ││shadow:g3                                       │
+│▸ shadow:g3 · g3                 now         0.20 → 0.93 ● graduated││status     ● graduated                          │
+│  code                           now         0.42 → 0.91 ● graduated││when       now                                  │
+│                                                                    ││generation 3                                    │
+│                                                                    ││reward     ███████████▏ 0.93                    │
+│                                                                    │╰────────────────────────────────────────────────╯
+│                                                                    │╭ Reward · step by step ─────────────────────────╮
+│                                                                    ││1.0│                                            │
+│                                                                    ││   │                                        ⢀⣀⡠⠤│
+│                                                                    ││   │                                ⢀⣀⡠⠤⠔⠒⠊⠉⠁   │
+│                                                                    ││   │                           ⢀⡠⠒⠊⠉⠁           │
+│                                                                    ││   │                         ⡠⠔⠁                │
+│                                                                    ││   │                      ⢀⠔⠊                   │
+│                                                                    ││   │                   ⢀⡠⠊⠁                     │
+│                                                                    ││   │                 ⡠⠔⠁                        │
+│                                                                    ││   │              ⢀⠔⠊                           │
+│                                                                    ││   │             ⡰⠁                             │
+│                                                                    ││   │           ⡠⠊                               │
+│                                                                    ││   │         ⢀⠔⠁                                │
+│                                                                    ││   │        ⡰⠁                                  │
+│                                                                    ││   │      ⡠⠊                                    │
+│                                                                    ││   │    ⢀⠔⠁                                     │
+│                                                                    ││   │   ⡰⠁                                       │
+│                                                                    ││   │ ⡠⠊                                         │
+│                                                                    ││   │⠔⠁                                          │
+│                                                                    ││   │                                            │
+│                                                                    ││   │                                            │
+│                                                                    ││   │                                            │
+│                                                                    ││0.0│                                            │
+╰────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
+
+ ↑↓  move   enter  details   tab  next list   /  find   x  prune   p  graduate   :  commands   ?  help   q  quit

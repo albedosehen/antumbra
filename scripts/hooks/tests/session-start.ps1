@@ -17,11 +17,12 @@ function Check([string]$What, [bool]$Holds) {
     if ($Holds) { Write-Output "  ok    $What" } else { Write-Output "  FAIL  $What"; $script:failed = 1 }
 }
 
-# --- a stub `antumbra` that knows `claude brief` and `claude reanchor` -------------
+# --- a stub `antumbra` that knows `claude brief`, `reanchor` and `remember` -------
 # `reanchor` writes its arguments, and whether it was handed the token, to
 # ANTUMBRA_TEST_MARKER, then takes five seconds, so a hook that waited for it
-# would be caught.
+# would be caught. `remember` does the same to ANTUMBRA_TEST_REMEMBERED.
 $marker = Join-Path $work 'reanchored.txt'
+$remembered = Join-Path $work 'remembered.txt'
 if ($IsWindows) {
     $stub = Join-Path $work 'antumbra.cmd'
     Set-Content -Path $stub -Value (@(
@@ -36,6 +37,11 @@ if ($IsWindows) {
         'if defined ANTUMBRA_TOKEN >>"%ANTUMBRA_TEST_MARKER%" echo token handed on'
         'ping -n 6 127.0.0.1 >nul'
         ')'
+        'if "%1 %2"=="claude remember" ('
+        '>"%ANTUMBRA_TEST_REMEMBERED%" echo %*'
+        'if defined ANTUMBRA_TOKEN >>"%ANTUMBRA_TEST_REMEMBERED%" echo token handed on'
+        'ping -n 6 127.0.0.1 >nul'
+        ')'
     ) -join "`r`n")
 } else {
     $stub = Join-Path $work 'antumbra'
@@ -43,12 +49,15 @@ if ($IsWindows) {
         '#!/usr/bin/env bash'
         'if [ "$1 $2" = "claude brief" ]; then printf ''%s\n'' ''## Sovereign mode'' '''' ''- a line the agent must see''; fi'
         'if [ "$1 $2" = "claude reanchor" ]; then echo "$*" > "$ANTUMBRA_TEST_MARKER"; [ -n "$ANTUMBRA_TOKEN" ] && echo "token handed on" >> "$ANTUMBRA_TEST_MARKER"; sleep 5; fi'
+        'if [ "$1 $2" = "claude remember" ]; then echo "$*" > "$ANTUMBRA_TEST_REMEMBERED"; [ -n "$ANTUMBRA_TOKEN" ] && echo "token handed on" >> "$ANTUMBRA_TEST_REMEMBERED"; sleep 5; fi'
     ) -join "`n")
     & chmod +x $stub
 }
 $env:ANTUMBRA_TEST_MARKER = $marker
 $env:ANTUMBRA_TOKEN = 'test-token'
 $env:ANTUMBRA_REANCHOR_LOG = Join-Path $work 'reanchor.log'
+$env:ANTUMBRA_TEST_REMEMBERED = $remembered
+$env:ANTUMBRA_REMEMBER_LOG = Join-Path $work 'remember.log'
 
 # A clone with a GitHub origin, for the cases that need a repository.
 $clone = Join-Path $work 'clone'
@@ -211,6 +220,20 @@ $said = if (Test-Path $marker) { Get-Content -Raw $marker } else { '' }
 Check 'reports the last three days of merges' $said.Contains('claude reanchor --days 3')
 Check 'hands the report the token' $said.Contains('token handed on')
 Check 'still answers' $ctx.Contains('first small')
+# The stub's brief says the session is in the mode the rules are for.
+foreach ($wait in 1..30) { if (Test-Path $remembered) { break }; Start-Sleep -Milliseconds 200 }
+$kept = if (Test-Path $remembered) { Get-Content -Raw $remembered } else { '' }
+Check 'keeps the rules the session runs by' $kept.Contains('claude remember')
+Check 'hands that the token' $kept.Contains('token handed on')
+
+Write-Output 'the rules, turned off'
+Remove-Item -Force $remembered -ErrorAction SilentlyContinue
+$env:ANTUMBRA_REMEMBER = '0'
+$ctx = Get-Context $small $stub $clone
+Start-Sleep -Seconds 2
+Check 'keeps no rules' (-not (Test-Path $remembered))
+Check 'still answers' $ctx.Contains('first small')
+Remove-Item Env:ANTUMBRA_REMEMBER
 
 Write-Output 'in a clone, turned off'
 Remove-Item -Force $marker -ErrorAction SilentlyContinue

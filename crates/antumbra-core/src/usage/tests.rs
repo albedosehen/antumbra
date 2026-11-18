@@ -133,3 +133,22 @@ fn a_policy_missing_knobs_reads_with_their_defaults() -> anyhow::Result<()> {
     assert_eq!(u.recalled, 0);
     Ok(())
 }
+
+// How long a proposed behavior waits before the server accepts it is a knob
+// like the others: a day by default, read as that from a row stored before
+// the knob was, held in range, and turned off at nothing.
+#[test]
+fn the_wait_before_a_behavior_is_accepted_is_a_knob() -> anyhow::Result<()> {
+    assert_eq!(MemoryPolicy::default().accept_after_hours, 24.0);
+    let stored_before: MemoryPolicy = serde_json::from_str(r#"{"auto": true}"#)?;
+    assert_eq!(stored_before.accept_after_hours, 24.0);
+    let Some(knob) = MemoryPolicy::knob("accept_after_hours") else {
+        anyhow::bail!("the wait is not among the knobs");
+    };
+    let mut policy = MemoryPolicy::default();
+    (knob.set)(&mut policy, 0.0);
+    assert_eq!(policy.clone().clamped().accept_after_hours, 0.0);
+    (knob.set)(&mut policy, 100_000.0);
+    assert_eq!(policy.clamped().accept_after_hours, 720.0);
+    Ok(())
+}

@@ -1,15 +1,15 @@
-╭ gate · router ───────────────────────────────────────────────────────╮
-│learned gate · 3 experts                                              │
-│temperature 0.20                                                      │
-│floor      0.10                                                       │
+╭ Router ──────────────────────────────────────────────────────────────╮
+│Trained on 3 experts                                                  │
+│sharpness  0.20   lower prefers the best match more strongly          │
+│hands on   0.10   below this match, no expert takes the task          │
 │                                                                      │
-│metric weights  (learned per-dimension emphasis)                      │
+│What it weighs · learned emphasis across the embedding                │
 │  ··········░░░░░░░░░░▒▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓█████████▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▒░│
 │                                                                      │
-│self-routing  (each centroid routed → should pick itself)             │
-│  arith-specialist      → arith-specialist       99%  ✓               │
-│  string-specialist     → string-specialist      99%  ✓               │
-│  json-shaper           → json-shaper            99%  ✓               │
+│Self-check · each expert's own centre should route back to it         │
+│  arith-specialist      → arith-specialist       99%  ●               │
+│  string-specialist     → string-specialist      99%  ●               │
+│  json-shaper           → json-shaper            99%  ●               │
 │                                                                      │
 │                                                                      │
 │                                                                      │

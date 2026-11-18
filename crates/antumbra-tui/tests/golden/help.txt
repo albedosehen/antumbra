@@ -1,29 +1,34 @@
-╭ help ────────────────────────────────────────────────╮
-│navigate                                              │
-│  ↑↓ jk   select in the focused list                  │
-│  enter   drill into the selected item                │
-│  g G     jump to first / last  (home / end)          │
-│  pgup/dn move by a page                              │
-│  tab     switch focus: umbra / penumbra / antumbra   │
-│                                                      │
-│view                                                  │
-│  [ ] 1-4 switch page: population/memory/loop/evals   │
-│  l       cycle layout: focused/dashboard/graph/table │
-│  s       sort the population table (fitness/name/gen)│
-│  t       cycle theme: shadow / ember / mono          │
-│                                                      │
-│frame rate                                            │
-│  + -     pin the cap to a refresh rate               │
-│  a       follow the active monitor                   │
-│                                                      │
-│command                                               │
-│  /       filter the focused list, jump to a match    │
-│  :       command palette (ask · route a task here)   │
-│  e       live event stream of store changes          │
-│  c       connect your agent: hooks + token           │
-│  K       memory knobs: how memories are kept         │
-│  x       prune/graduate · freeze · delete            │
-│  r       reload from the store                       │
-│  ? esc   close this help                             │
-│  q       quit                                        │
-╰──────────────────────────────────────────────────────╯
+╭ Help · Population ─────────────────────────────────────────────────────────╮
+│move                                                                        │
+│  ↑↓  j k        move the selection                                         │
+│  home end  g G  jump to the first or the last                              │
+│  pgup pgdn      move ten at a time                                         │
+│  enter          open everything about what is selected                     │
+│  tab            move to the next list: experts, candidates, boundaries     │
+│  /              find in this list, and jump to it                          │
+│                                                                            │
+│act on the selection                                                        │
+│  x              thaw the selected expert, or freeze one that is not        │
+│                                                                            │
+│view                                                                        │
+│  1-6  [ ]       Population, Memory, Training, Evaluations, Agent, Services │
+│  l  L           change the layout: list, dashboard, graph, table           │
+│  s              sort the experts: by fitness, name or generation           │
+│  t              change the theme: night, mist, mono                        │
+│  + -  0         raise or lower the frame-rate cap; 0 follows the monitor   │
+│                                                                            │
+│console                                                                     │
+│  a              ask which expert would take a task                         │
+│  K              the memory knobs: how memories are kept                    │
+│  :              run a command by its name                                  │
+│  e              what changed since the console opened, and what it did     │
+│  c              how to connect an agent, and what this console reads       │
+│  r              read the server again now                                  │
+│  ?              this help                                                  │
+│  q  ctrl-c      quit                                                       │
+│                                                                            │
+│in a panel                                                                  │
+│  esc            close it; the footer shows its other keys                  │
+│                                                                            │
+│words                                                                       │
+╰────────────────────────────────────────────────────────────────────────────╯

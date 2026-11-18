@@ -35,6 +35,8 @@ const state = {
   route: 0,
   // The blast radius showing, or null for every pair.
   dependencies: null,
+  // Every pair and every service, for the drawn graph.
+  graph: null,
 };
 
 /** Thrown when the server answers 401: the token no longer opens anything. */
@@ -168,6 +170,8 @@ function clearSections() {
   state.experts = new Map();
   byId("route").reset();
   state.dependencies = null;
+  state.graph = null;
+  byId("dep-graph").hidden = true;
   byId("pairs-more").hidden = true;
   byId("all-pairs").hidden = true;
   byId("radius").reset();
@@ -218,7 +222,7 @@ async function refresh() {
       section(byId("behaviors"), loadBehaviors),
       section(byId("dependencies"), () => {
         const view = state.dependencies;
-        return view ? loadRadius(view.service, view.direction) : loadPairs();
+        return view ? loadRadius(view.service, view.direction, view.depth) : loadPairs();
       }),
     ];
     if (state.memory.view) loads.push(section(byId("memories"), () => runMemory(state.memory.view)));
@@ -372,14 +376,91 @@ function routedNote(text) {
   return h("p", { class: "note small" }, text);
 }
 
+/** A scope as a name: a repository's by its last part, any other as it is. */
+function scopeName(scope) {
+  const parts = String(scope).split("/");
+  return parts[parts.length - 1] || String(scope);
+}
+
+/** What a standing expert's reading for a task comes to. */
+function standingSays(s) {
+  if (s.answers) return "answers it";
+  return s.in_scope ? "in scope, too far to answer alone" : "for its repository only";
+}
+
+/** Where a behavior near a task stands. */
+function taughtSays(t) {
+  if (t.learned === true) return "learned";
+  if (t.learned === false) return "not learned at its last training";
+  return t.status === "proposed" ? "proposed, waiting to be accepted" : "not trained yet";
+}
+
+/** One row of a reading: a name over its detail, and a tag beside a meter. */
+function nearRow(name, detail, tag, similarity) {
+  return h(
+    "li",
+    {},
+    h("div", {}, h("span", { class: "name" }, name), h("span", { class: "id" }, detail)),
+    h("span", { class: "nowrap" }, h("span", { class: "tag" }, tag), " ", weightCell(similarity)),
+  );
+}
+
+/**
+ * What a task is near, of the user's own: their standing experts, which are
+ * never routed to, and the nearest of what they have taught. A workspace of
+ * standing experts is routed to none of them for any task, so this is the
+ * half of the answer it has. A server from before it read them sends neither.
+ */
+function nearPanels(out) {
+  const panels = [];
+  const standing = out.standing || [];
+  if (standing.length) {
+    panels.push(
+      routedNote("Standing experts, the closest to this task first:"),
+      h(
+        "div",
+        { class: "panel" },
+        h(
+          "ul",
+          { class: "list" },
+          ...standing.map((s) => nearRow(scopeName(s.scope), s.scope, standingSays(s), s.similarity)),
+        ),
+      ),
+    );
+  }
+  const taught = out.taught || [];
+  if (taught.length) {
+    panels.push(
+      routedNote("The nearest of what you have taught:"),
+      h(
+        "div",
+        { class: "panel" },
+        h(
+          "ul",
+          { class: "list" },
+          ...taught.map((t) => nearRow(t.rule, `${t.scope} · ${t.status}`, taughtSays(t), t.similarity)),
+        ),
+      ),
+    );
+  }
+  return panels;
+}
+
 async function runRoute(task) {
   const ticket = ++state.route;
   const out = await call("route", { task, top_k: 5 });
   if (ticket !== state.route) return;
   const target = byId("routed");
   if (out.escalate) {
+    // With none routed, a standing expert answers a task in its scope that is
+    // like what it was taught; failing one, the agent.
+    const answers = (out.standing || []).find((s) => s.answers);
+    const lead = answers
+      ? `No expert is routed to it; your standing expert ${scopeName(answers.scope)} answers it.`
+      : "No expert takes it; it goes to your agent.";
     target.replaceChildren(
-      routedNote(`No expert takes it; it goes to your agent. Why: ${out.reason || "nothing covers it"}.`),
+      routedNote(`${lead} Why: ${out.reason || "nothing covers it"}.`),
+      ...nearPanels(out),
     );
     return;
   }
@@ -411,6 +492,7 @@ async function runRoute(task) {
         ),
       ),
     ),
+    ...nearPanels(out),
   );
 }
 
@@ -477,6 +559,184 @@ function serviceButton(name) {
   return button;
 }
 
+// The graph, drawn. Services are in columns, a service before what it
+// depends on, so the picture reads left to right as a chain of "depends on".
+
+const SVG = "http://www.w3.org/2000/svg";
+/** The drawing's width in its own units, a row's height, a box's, and the
+ *  most services drawn at once: past that only a walk's own are. */
+const GRAPH = { width: 960, row: 40, box: 28, most: 48 };
+/** The weakest pair a walk follows: the server's default floor. */
+const WALKED_FROM = 0.4;
+
+/** An SVG element. Like `h`: a string child becomes a text node. */
+function svg(tag, attrs = {}, ...children) {
+  const node = document.createElementNS(SVG, tag);
+  for (const [name, value] of Object.entries(attrs)) {
+    if (value === undefined || value === null || value === false) continue;
+    node.setAttribute(name, String(value));
+  }
+  node.append(...children.filter((c) => c !== undefined && c !== null && c !== false));
+  return node;
+}
+
+/**
+ * Where each service goes: its column, the longest run of pairs that ends at
+ * it, and its place down the column, ordered by where its neighbors sit,
+ * which is what uncrosses most lines. Every pair is relaxed once a service at
+ * most, so a cycle settles with one of its pairs pointing backward.
+ */
+function graphLayout(names, pairs) {
+  const at = new Map(names.map((name, i) => [name, i]));
+  const edges = pairs
+    .map((p) => [at.get(p.from), at.get(p.to)])
+    .filter(([from, to]) => from !== undefined && to !== undefined && from !== to);
+  const layer = names.map(() => 0);
+  for (let pass = 0; pass < names.length; pass += 1) {
+    let moved = false;
+    for (const [from, to] of edges) {
+      const next = layer[from] + 1;
+      if (layer[to] < next && next < names.length) {
+        layer[to] = next;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  const columns = Array.from({ length: Math.max(0, ...layer) + 1 }, () => []);
+  names.forEach((_, i) => columns[layer[i]].push(i));
+  const shares = () => {
+    const share = names.map(() => 0);
+    for (const column of columns) column.forEach((n, i) => (share[n] = (i + 0.5) / column.length));
+    return share;
+  };
+  for (let sweep = 0; sweep < 4; sweep += 1) {
+    const down = sweep % 2 === 0;
+    const order = [...columns.keys()];
+    if (!down) order.reverse();
+    for (const c of order) {
+      const share = shares();
+      const key = (n) => {
+        const near = edges
+          .filter(([from, to]) => (down ? to === n && layer[from] < c : from === n && layer[to] > c))
+          .map(([from, to]) => share[down ? from : to]);
+        return near.length ? near.reduce((a, b) => a + b, 0) / near.length : share[n];
+      };
+      columns[c] = columns[c]
+        .map((n) => [key(n), n])
+        .sort((a, b) => a[0] - b[0])
+        .map(([, n]) => n);
+    }
+  }
+  return columns;
+}
+
+/**
+ * Draw the graph: every service, or, in a workspace with more than can be
+ * read at once, the service a walk starts from and what it reached. `origin`
+ * and `reached` are the blast radius showing, when one is.
+ */
+function drawGraph(origin, reached) {
+  const figure = byId("dep-graph");
+  const note = byId("dep-graph-note");
+  const data = state.graph;
+  note.textContent = "";
+  if (!data || !data.pairs.length) {
+    figure.hidden = true;
+    return;
+  }
+  const within = new Set(reached.map((r) => r.service));
+  const walked = new Set(reached.flatMap((r) => r.path.map((p) => `${p.from}\n${p.to}`)));
+  let names = data.services;
+  if (names.length > GRAPH.most) {
+    if (!origin) {
+      figure.hidden = true;
+      return;
+    }
+    names = [origin, ...within];
+    note.textContent = `Showing ${numbers.format(names.length)} of ${numbers.format(data.services.length)} services: the one picked and what the walk reached.`;
+  }
+  const drawn = new Set(names);
+  const pairs = data.pairs.filter((p) => drawn.has(p.from) && drawn.has(p.to));
+  const columns = graphLayout(names, pairs);
+  const column = GRAPH.width / columns.length;
+  const tallest = Math.max(...columns.map((c) => c.length));
+  const height = tallest * GRAPH.row + 24;
+  const box = Math.max(60, Math.min(200, column - 56));
+  const at = new Map();
+  columns.forEach((services, c) => {
+    const top = (height - services.length * GRAPH.row) / 2;
+    services.forEach((n, i) => {
+      at.set(names[n], { x: c * column + 10, y: top + i * GRAPH.row + (GRAPH.row - GRAPH.box) / 2 });
+    });
+  });
+  // About 6.6 units a letter at this size; a name that does not fit is cut,
+  // and its whole slug is the box's title.
+  const letters = Math.max(4, Math.floor((box - 16) / 6.6));
+  const label = (name) => {
+    const short = scopeName(name);
+    return short.length > letters ? `${short.slice(0, letters - 1)}…` : short;
+  };
+  const arrow = (id, lit) =>
+    svg(
+      "marker",
+      { id, viewBox: "0 0 8 8", refX: 7, refY: 4, markerWidth: 7, markerHeight: 7, orient: "auto" },
+      svg("path", { d: "M0 0L8 4L0 8z", class: lit ? "dep-arrowhead lit" : "dep-arrowhead" }),
+    );
+  const lines = pairs.map((p) => {
+    const from = at.get(p.from);
+    const to = at.get(p.to);
+    const lit = walked.has(`${p.from}\n${p.to}`);
+    const [x1, y1] = [from.x + box, from.y + GRAPH.box / 2];
+    const [x2, y2] = [to.x - 3, to.y + GRAPH.box / 2];
+    const mid = (x1 + x2) / 2;
+    return svg("path", {
+      d: `M${x1} ${y1}C${mid} ${y1} ${mid} ${y2} ${x2} ${y2}`,
+      class: ["dep-edge", lit && "lit", p.weight < WALKED_FROM && "weak"].filter(Boolean).join(" "),
+      "data-src": p.evidence.length ? p.evidence[0].source : "claimed",
+      "marker-end": `url(#${lit ? "dep-arrow-lit" : "dep-arrow"})`,
+    });
+  });
+  // The lines a walk took go over the rest.
+  lines.sort((a, b) => Number(a.classList.contains("lit")) - Number(b.classList.contains("lit")));
+  const boxes = names.map((name) => {
+    const { x, y } = at.get(name);
+    const kind = name === origin ? "origin" : within.has(name) ? "reached" : "";
+    const node = svg(
+      "g",
+      {
+        class: `dep-node ${kind}`.trim(),
+        role: "button",
+        tabindex: 0,
+        "aria-label": `${name}: show its blast radius`,
+      },
+      svg("title", {}, name),
+      svg("rect", { x, y, width: box, height: GRAPH.box, rx: 6 }),
+      svg("text", { x: x + 8, y: y + GRAPH.box / 2 + 4 }, label(name)),
+    );
+    const pick = () => {
+      byId("service").value = name;
+      radiusAction();
+    };
+    node.addEventListener("click", pick);
+    node.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        pick();
+      }
+    });
+    return node;
+  });
+  const drawing = byId("dep-svg");
+  drawing.setAttribute("viewBox", `0 0 ${GRAPH.width} ${height}`);
+  drawing.replaceChildren(
+    svg("defs", {}, arrow("dep-arrow", false), arrow("dep-arrow-lit", true)),
+    svg("g", {}, ...lines),
+    svg("g", {}, ...boxes),
+  );
+  figure.hidden = false;
+}
+
 function weightCell(weight) {
   const fill = h("span");
   fill.style.setProperty("--value", String(Math.min(1, Math.max(0, weight || 0))));
@@ -494,6 +754,8 @@ async function loadPairs() {
   const out = await call("list_dependencies", { limit: 200 });
   if (ticket !== state.radius) return;
   state.dependencies = null;
+  state.graph = out;
+  drawGraph(null, []);
   byId("services").replaceChildren(...out.services.map((s) => h("option", { value: s })));
   byId("all-pairs").hidden = true;
   const summary = byId("dependencies-summary");
@@ -561,21 +823,29 @@ async function loadPairs() {
 
 /** What a change to a service reaches, or what it needs, each by its
  *  strongest path with every hop's evidence. */
-async function loadRadius(service, direction) {
+async function loadRadius(service, direction, depth) {
   const ticket = ++state.radius;
   const summary = byId("dependencies-summary");
   summary.textContent = "Loading";
-  const out = await call("blast_radius", { service, direction });
+  // The graph is drawn from every pair, which a page opened on a radius has
+  // not read yet.
+  const [out, pairs] = await Promise.all([
+    call("blast_radius", { service, direction, depth }),
+    state.graph ? state.graph : call("list_dependencies", { limit: 200 }),
+  ]);
   if (ticket !== state.radius) return;
-  state.dependencies = { service, direction };
+  state.dependencies = { service, direction, depth };
+  state.graph = pairs;
+  drawGraph(out.service, out.reached);
   byId("pairs-more").hidden = true;
   byId("all-pairs").hidden = false;
   const panel = byId("dependencies");
   const dependents = out.direction === "dependents";
   const n = out.reached.length;
+  const far = `within ${numbers.format(depth)} ${depth === 1 ? "hop" : "hops"}`;
   summary.textContent = dependents
-    ? `${numbers.format(n)} ${n === 1 ? "service depends" : "services depend"} on ${out.service}, strongest path first`
-    : `${out.service} depends on ${numbers.format(n)} ${n === 1 ? "service" : "services"}, strongest path first`;
+    ? `${numbers.format(n)} ${n === 1 ? "service depends" : "services depend"} on ${out.service} ${far}, strongest path first`
+    : `${out.service} depends on ${numbers.format(n)} ${n === 1 ? "service" : "services"} ${far}, strongest path first`;
   if (!n) {
     panel.replaceChildren(
       h(
@@ -651,7 +921,9 @@ async function radiusAction() {
     return;
   }
   try {
-    await section(byId("dependencies"), () => loadRadius(service, form.elements.direction.value));
+    await section(byId("dependencies"), () =>
+      loadRadius(service, form.elements.direction.value, Number(form.elements.depth.value) || 3),
+    );
   } catch (error) {
     if (error instanceof SignedOut) signOut(REFUSED);
   }
@@ -907,9 +1179,10 @@ function start() {
     event.preventDefault();
     radiusAction();
   });
-  // A different direction re-runs what is showing, the other way.
+  // A different direction, or a different distance, re-runs what is showing.
   byId("radius").addEventListener("change", (event) => {
-    if (event.target.name === "direction" && !byId("all-pairs").hidden) radiusAction();
+    const walk = event.target.name === "direction" || event.target.name === "depth";
+    if (walk && !byId("all-pairs").hidden) radiusAction();
   });
   byId("all-pairs").addEventListener("click", async () => {
     try {

@@ -6,14 +6,12 @@
 //! buffer, then idle to `None` when done, so the loop only spends the extra
 //! frames while one is running.
 
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
+
+use crate::ui::{frame_rows, list_columns};
 use tachyonfx::{fx, Effect, EffectTimer, Interpolation};
 
 use crate::theme::Theme;
-
-/// The dark terminal background the console is designed against (the color a
-/// wash settles out of).
-const BG: ratatui::style::Color = ratatui::style::Color::Rgb(12, 14, 18);
 
 /// Which region of the frame an effect plays over.
 pub enum Scope {
@@ -29,26 +27,17 @@ pub enum Scope {
 /// A queued effect and the part of the frame it animates.
 pub type Pending = (Effect, Scope);
 
-/// The body row, the same chrome split [`crate::ui::render`] uses: a 3-row
-/// header, the 1-row tab strip, the 1-row metric strip, the body, then the
-/// 1-row footer.
+/// The body between the chrome above and the notice and footer below, from
+/// the one split [`crate::ui::render`] uses.
 fn body(frame: Rect) -> Rect {
-    Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .split(frame)[3]
+    frame_rows(frame).body
 }
 
 /// The detail column (right body panel) a focus-switch effect plays over: the
 /// same split [`crate::ui::render`] uses, so the effect lands on the panel that
 /// actually changed.
 pub fn detail_area(frame: Rect) -> Rect {
-    Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)]).split(body(frame))
-        [1]
+    list_columns(body(frame))[1]
 }
 
 /// Resolve a fixed [`Scope`] to the rectangle it animates within `frame`.
@@ -69,12 +58,14 @@ pub fn focus_switch() -> Pending {
     )
 }
 
-/// Theme cycled (`t`): a brief wash of the new accent settles into the palette.
+/// Theme cycled (`t`): a brief wash of the new accent settles into the
+/// palette, out of the new theme's ground.
 pub fn theme_wash(theme: &Theme) -> Pending {
+    let (r, g, b) = theme.ground_rgb();
     (
         fx::fade_from(
             theme.accent,
-            BG,
+            ratatui::style::Color::Rgb(r as u8, g as u8, b as u8),
             EffectTimer::from((220u32, Interpolation::SineOut)),
         ),
         Scope::Detail,
@@ -105,7 +96,7 @@ mod tests {
     #[test]
     fn each_transition_targets_the_right_scope() -> anyhow::Result<()> {
         assert!(matches!(focus_switch().1, Scope::Detail));
-        assert!(matches!(theme_wash(&theme::SHADOW).1, Scope::Detail));
+        assert!(matches!(theme_wash(&theme::NIGHT).1, Scope::Detail));
         assert!(matches!(layout_switch().1, Scope::Body));
         assert!(matches!(overlay_open().1, Scope::Overlay));
         Ok(())

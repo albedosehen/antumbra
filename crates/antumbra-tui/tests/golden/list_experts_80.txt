@@ -1,0 +1,24 @@
+ ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                         ● live
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent  ·  6 S
+ Experts: small models trained from your own verified work, each for one kind …
+╭  Experts 3 │ Candidates 2 │ Boundaries 2  ─╮╭ Expert ────────────────────────╮
+│  EXPERT                       FIT  STATE   ││arith-specialist                │
+│▸ arith-specialist             0.92 ● frozen││kind       routed               │
+│  datetime-specialist          0.81 ● frozen││fitness    ███████████─ 0.92    │
+│  json-shaper                  0.55 ○ open  ││state      ● frozen             │
+│                                            ││generation 0                    │
+│                                            ││base model Qwen2.5-Coder-1.5B   │
+│                                            ││                                │
+│                                            ││                                │
+│                                            ││                                │
+│                                            ││                                │
+│                                            │╰────────────────────────────────╯
+│                                            │╭ Routing ───────────────────────╮
+│                                            ││router     not trained yet: a   │
+│                                            ││task goes to the nearest expert │
+│                                            ││boundaries 2 · 1 in force       │
+│                                            ││● run `npm install` · runtime   │
+│                                            ││                                │
+╰────────────────────────────────────────────╯╰────────────────────────────────╯
+
+ ↑↓  move   enter  details   tab  next list   x  thaw   ?  help   q  quit

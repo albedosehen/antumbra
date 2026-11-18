@@ -1,8 +1,9 @@
-//! Rendering: the living population graph (umbra orbiting the tri-node core of
-//! umbra/penumbra/antumbra, three linked minds), with detail and gate panels.
-//! Orbit, pulse, and link-energy are hand-rolled from the animation clock so the
+//! Rendering: the top bar, the tabs and the page under them, then the notice
+//! and the footer. The population page's graph (the experts orbiting a core
+//! of three linked nodes) is hand-rolled from the animation clock so the
 //! motion is fully under control. Every color tints from the active [`Theme`],
-//! so cycling a theme (`t`) recolors the whole console.
+//! so cycling a theme (`t`) recolors the whole console; every word is from
+//! [`crate::words`] or says what its panel holds in the same plain terms.
 //!
 //! Split across submodules: [`graph`] (the canvas), [`chrome`] (header/footer),
 //! [`panels`] (the region detail panels), and [`overlays`] (help / palette /
@@ -14,10 +15,14 @@ mod evals;
 mod graph;
 mod heatmap;
 mod knobs;
+mod links;
+mod lists;
 mod loops;
 mod memory;
+mod netdraw;
 mod overlays;
 mod panels;
+mod services;
 mod sovereign;
 mod table;
 
@@ -34,9 +39,59 @@ use antumbra_core::{FailureBoundary, Shadow};
 
 use crate::app::{App, Focus, LayoutMode, Mode, Page};
 use crate::overlay;
-use crate::theme::Theme;
+use crate::theme::{Theme, Tone};
+use crate::words;
 
 pub use overlays::overlay_area;
+
+/// The frame's rows, top to bottom: the top bar, the tabs, the sentence that
+/// says what the page is, the page's body, then the two rows that are never
+/// covered or dimmed, what the console last said and the keys of the view in
+/// front.
+pub struct FrameRows {
+    pub header: Rect,
+    pub tabs: Rect,
+    pub caption: Rect,
+    pub body: Rect,
+    pub notice: Rect,
+    pub footer: Rect,
+}
+
+impl FrameRows {
+    /// Everything above the notice and the footer: where an overlay is drawn,
+    /// and what is dimmed behind it.
+    pub fn stage(&self) -> Rect {
+        Rect {
+            x: self.header.x,
+            y: self.header.y,
+            width: self.header.width,
+            height: self.notice.y.saturating_sub(self.header.y),
+        }
+    }
+}
+
+/// Split `area` into the frame's rows. The one split the renderer, the
+/// overlays and the transitions all read, so none can disagree about where
+/// the body is.
+pub fn frame_rows(area: Rect) -> FrameRows {
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
+    FrameRows {
+        header: rows[0],
+        tabs: rows[1],
+        caption: rows[2],
+        body: rows[3],
+        notice: rows[4],
+        footer: rows[5],
+    }
+}
 
 pub fn render(f: &mut Frame, app: &App) {
     // Guard the render loop against a degenerately-small terminal: the fixed
@@ -45,26 +100,23 @@ pub fn render(f: &mut Frame, app: &App) {
     if f.area().width < 8 || f.area().height < 3 {
         return;
     }
-    let rows = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .split(f.area());
-    chrome::header(f, app, rows[0]);
-    chrome::tabs(f, app, rows[1]);
-    chrome::metrics(f, app, rows[2]);
-    page_body(f, app, rows[3]);
-    chrome::footer(f, app, rows[4]);
+    // The page first: the theme's ground behind every cell, and its ink for
+    // whatever a widget draws without a colour of its own. A theme that leaves
+    // the ground to the terminal paints nothing here.
+    let t = app.theme();
+    f.render_widget(Block::default().style(t.page()), f.area());
+    let rows = frame_rows(f.area());
+    chrome::header(f, app, rows.header);
+    chrome::tabs(f, app, rows.tabs);
+    chrome::caption(f, app, rows.caption);
+    page_body(f, app, rows.body);
     // A fresh, empty store would otherwise render as inert panels; the first-run
     // hint explains how to populate it. Only in the live view (not over a modal).
     if app.mode == Mode::Normal && app.is_empty() {
         overlays::first_run_hint(f, app);
     }
     if app.mode != Mode::Normal {
-        overlay::dim_backdrop(f, f.area());
+        overlay::dim_backdrop(f, &t, rows.stage());
         match app.mode {
             Mode::Help => overlays::help_overlay(f, app),
             Mode::Palette => overlays::palette_overlay(f, app),
@@ -79,34 +131,46 @@ pub fn render(f: &mut Frame, app: &App) {
             Mode::Normal => {}
         }
     }
+    // Last, and never dimmed: what the console last did or could not do, and
+    // the keys of whatever is in front, the page or the overlay over it.
+    chrome::notice(f, app, rows.notice);
+    chrome::footer(f, app, rows.footer);
 }
 
-/// Route the body to the active page. `Population` is the live view; the other
-/// pages surface store subsystems and are placeholders until built out.
+/// Route the body to the active page.
 fn page_body(f: &mut Frame, app: &App, area: Rect) {
     match app.page {
         Page::Population => body(f, app, area),
         Page::Memory => memory::page(f, app, area),
+        Page::Services => services::page(f, app, area),
         Page::Loop => loops::page(f, app, area),
         Page::Evals => evals::page(f, app, area),
         Page::Sovereign => sovereign::page(f, app, area),
     }
 }
 
-/// The body between header and footer, arranged per the active layout: graph
-/// beside one focused detail, graph beside all three regions, or graph alone.
+/// A page that is a list beside the detail of what is selected: the list's
+/// column and the detail's. The one split the pages and the transitions read.
+pub fn list_columns(body: Rect) -> [Rect; 2] {
+    let cols =
+        Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)]).split(body);
+    [cols[0], cols[1]]
+}
+
+/// The population page's body, arranged per the active layout: the list in
+/// front beside the detail of what is selected, the graph beside all three
+/// lists, the graph alone, or the experts as a full-width table.
 fn body(f: &mut Frame, app: &App, area: Rect) {
     match app.layout {
         LayoutMode::Table => table::experts_table(f, app, area),
         LayoutMode::Graph => graph::graph(f, app, area),
-        LayoutMode::Focused => {
-            let cols = Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)])
-                .split(area);
-            graph::graph(f, app, cols[0]);
+        LayoutMode::List => {
+            let [list, detail] = list_columns(area);
+            lists::population(f, app, list);
             match app.focus {
-                Focus::Experts => panels::detail(f, app, cols[1]),
-                Focus::Shadows => panels::shadows(f, app, cols[1]),
-                Focus::Boundaries => panels::boundaries(f, app, cols[1]),
+                Focus::Experts => panels::detail(f, app, detail),
+                Focus::Shadows => panels::candidate_side(f, app, detail),
+                Focus::Boundaries => panels::boundary_side(f, app, detail),
             }
         }
         LayoutMode::Dashboard => {
@@ -138,45 +202,94 @@ pub(super) fn visible_window(len: usize, selected: usize, rows: usize) -> (usize
     (offset, sel - offset)
 }
 
-/// A rounded, dim-bordered panel block with a titled, inked header.
+/// A panel's title: its name, in the secondary ink, set off from the border.
+fn title<'a>(t: &Theme, name: &str) -> Line<'a> {
+    Line::from(Span::styled(
+        format!(" {name} "),
+        Style::default().fg(t.ink2),
+    ))
+}
+
+/// What an expert's state is, to the eye and in a word: frozen is settled,
+/// sealed for good; one that is not is still open to training.
+fn expert_state(e: &antumbra_core::Expert) -> (Tone, &'static str) {
+    if e.is_frozen() {
+        (Tone::Settled, "frozen")
+    } else {
+        (Tone::Open, "open to training")
+    }
+}
+
+/// What an empty list says. A list the server sends only to an operator is
+/// empty for any other token whatever the server holds, so there it says an
+/// operator's token is needed ([`words::OPERATOR_ONLY`]); else `why` it is
+/// empty and what fills it.
+fn nothing_here<'a>(app: &App, t: &Theme, why: &'a str) -> Vec<Line<'a>> {
+    if app.operator || app.demo {
+        vec![Line::from(Span::styled(why, Style::default().fg(t.ink3)))]
+    } else {
+        vec![Line::from(Span::styled(
+            words::OPERATOR_ONLY,
+            Style::default().fg(t.ink2),
+        ))]
+    }
+}
+
+/// A rounded panel block, its border in the line colour and its title in the
+/// secondary ink.
 fn panel<'a>(t: &Theme, title: impl Into<Line<'a>>) -> Block<'a> {
     Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(t.dim))
+        .border_style(Style::default().fg(t.line))
         .title(title.into())
 }
 
-/// A panel whose border and title brighten to the accent when it holds focus:
-/// the dashboard's active-panel indicator.
+/// A panel whose border and title take the accent when it holds focus, so the
+/// one panel the keys drive is the one that is lit.
 fn panel_focused<'a>(t: &Theme, title: &str, focused: bool) -> Block<'a> {
-    let (border, marker) = if focused {
-        (t.accent, "◆ ")
+    let (border, name, marker) = if focused {
+        (t.accent, t.accent, "◆ ")
     } else {
-        (t.dim, "")
+        (t.line, t.ink2, "")
     };
     Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(border))
-        .title(Line::from(format!(" {marker}{title} ")).style(Style::default().fg(border)))
+        .title(Line::from(format!(" {marker}{title} ")).style(Style::default().fg(name)))
 }
 
-/// A bold, accent-colored panel heading (selected item's name).
+/// A panel's heading, the selected item's name: bold, at full strength. The
+/// accent is kept for the selection and for what is in force.
 fn heading<'a>(t: &Theme, text: String) -> Line<'a> {
     Line::from(Span::styled(
         text,
-        Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
+        Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
     ))
 }
 
+/// A `label  value` row: the label in the secondary ink, the value at full
+/// strength.
 fn kv<'a>(t: &Theme, k: &str, v: &str) -> Line<'a> {
     Line::from(vec![
-        Span::styled(format!("{k:<11}"), Style::default().fg(t.dim)),
-        Span::styled(v.to_string(), Style::default().fg(t.value)),
+        Span::styled(format!("{k:<11}"), Style::default().fg(t.ink2)),
+        Span::styled(v.to_string(), Style::default().fg(t.ink)),
+    ])
+}
+
+/// A `label  ● word` row for a state: its shape and its word, in the state's
+/// colour.
+fn state_row<'a>(t: &Theme, k: &str, tone: Tone, word: &str) -> Line<'a> {
+    Line::from(vec![
+        Span::styled(format!("{k:<11}"), Style::default().fg(t.ink2)),
+        Span::styled(
+            format!("{} {word}", tone.glyph()),
+            Style::default().fg(t.tone(tone)),
+        ),
     ])
 }
 
 /// A horizontal gauge for a `[0,1]` value: `width` cells filled to eighth-of-a-
-/// cell resolution in `color`, the remaining track dim.
+/// cell resolution in `color`, the rest of its track in the line colour.
 fn gauge_spans<'a>(t: &Theme, value: f32, width: u16, color: Color) -> Vec<Span<'a>> {
     const EIGHTHS: [&str; 8] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
     let v = (value.clamp(0.0, 1.0) as f64) * width as f64;
@@ -194,17 +307,20 @@ fn gauge_spans<'a>(t: &Theme, value: f32, width: u16, color: Color) -> Vec<Span<
     let track = "─".repeat((width as usize).saturating_sub(cells));
     vec![
         Span::styled(filled, Style::default().fg(color)),
-        Span::styled(track, Style::default().fg(t.dim)),
+        Span::styled(track, Style::default().fg(t.line)),
     ]
 }
 
 /// A `key  ▆▆▆▍──  0.62` row: a labeled gauge with its numeric value.
 fn gauge_row<'a>(t: &Theme, k: &'a str, value: f32, color: Color) -> Line<'a> {
-    let mut spans = vec![Span::styled(format!("{k:<11}"), Style::default().fg(t.dim))];
+    let mut spans = vec![Span::styled(
+        format!("{k:<11}"),
+        Style::default().fg(t.ink2),
+    )];
     spans.extend(gauge_spans(t, value, 12, color));
     spans.push(Span::styled(
         format!(" {value:.2}"),
-        Style::default().fg(t.value),
+        Style::default().fg(t.ink),
     ));
     Line::from(spans)
 }
@@ -213,7 +329,10 @@ fn gauge_row<'a>(t: &Theme, k: &'a str, value: f32, color: Color) -> Line<'a> {
 /// its own value, so a rising (or collapsing) trajectory reads at a glance.
 fn sparkline_row<'a>(t: &Theme, k: &'a str, curve: &[f32]) -> Line<'a> {
     const BARS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
-    let mut spans = vec![Span::styled(format!("{k:<11}"), Style::default().fg(t.dim))];
+    let mut spans = vec![Span::styled(
+        format!("{k:<11}"),
+        Style::default().fg(t.ink2),
+    )];
     for &v in curve {
         let level = (v.clamp(0.0, 1.0) * 7.0).round() as usize;
         spans.push(Span::styled(
@@ -224,12 +343,63 @@ fn sparkline_row<'a>(t: &Theme, k: &'a str, curve: &[f32]) -> Line<'a> {
     Line::from(spans)
 }
 
-/// Status color: graduated = success, pruned = dim, in-flight = warning.
-fn shadow_color(t: &Theme, status: &str) -> Color {
+/// What a shadow's status is to the eye: graduated is settled, pruned is
+/// ended, and any other is still under way.
+fn shadow_tone(status: &str) -> Tone {
     match status {
-        "graduated" => t.success,
-        "pruned" => t.dim,
-        _ => t.warning,
+        "graduated" => Tone::Settled,
+        "pruned" => Tone::Ended,
+        _ => Tone::Open,
+    }
+}
+
+/// A candidate's state as a list says it: its status, or `replaced` for a
+/// standing expert's run that a later run took the place of. Every one of an
+/// expert's runs graduated, so the status alone reads the same on each, and
+/// only the newest is the adapter the expert answers with.
+fn candidate_state(app: &App, s: &Shadow) -> (Tone, &'static str) {
+    if app.replaced_by(s).is_some() {
+        (Tone::Ended, "replaced")
+    } else {
+        (shadow_tone(s.status.as_str()), s.status.as_str())
+    }
+}
+
+/// How long ago `at` was, as the coarsest unit that fits: `3d ago`, `5h ago`,
+/// `now`.
+fn since(at: chrono::DateTime<chrono::Utc>) -> String {
+    elapsed(at).map_or_else(|| "now".into(), |age| format!("{age} ago"))
+}
+
+/// The same without `ago`, for a column whose heading says it is an age:
+/// `3d`, `5h`, `now`.
+fn age(at: chrono::DateTime<chrono::Utc>) -> String {
+    elapsed(at).unwrap_or_else(|| "now".into())
+}
+
+/// The time since `at` as the coarsest unit that fits, `3d`, `5h` or `7m`;
+/// `None` for under a minute.
+fn elapsed(at: chrono::DateTime<chrono::Utc>) -> Option<String> {
+    let d = chrono::Utc::now() - at;
+    let (days, hours, minutes) = (d.num_days(), d.num_hours(), d.num_minutes());
+    if days > 0 {
+        Some(format!("{days}d"))
+    } else if hours > 0 {
+        Some(format!("{hours}h"))
+    } else if minutes > 0 {
+        Some(format!("{minutes}m"))
+    } else {
+        None
+    }
+}
+
+/// A boundary in force (actionable: it gates routing) is settled; one that is
+/// only recorded is open.
+fn boundary_tone(b: &FailureBoundary) -> Tone {
+    if b.is_actionable() {
+        Tone::Settled
+    } else {
+        Tone::Open
     }
 }
 
@@ -238,8 +408,8 @@ fn clip(s: &str, max: usize) -> String {
     antumbra_core::text::clipped(s, max).into_owned()
 }
 
-/// A shadow's name: a standing expert's training by the scope it trained,
-/// any other (the generational loop's) by its id and generation. A standing
+/// A candidate's name: a standing expert's training by the scope it trained,
+/// any other (the training loop's) by its id and generation. A standing
 /// expert's trainings are all generation zero, and their ids run to some
 /// sixty characters, the scope near the end where a list cuts it off.
 fn shadow_name(s: &Shadow) -> String {
@@ -273,41 +443,54 @@ fn short_scope(scope: &str) -> &str {
         .unwrap_or(scope)
 }
 
-/// A shadow's list row: its status glyph (graduated ✦, pruned ×, in flight
-/// ◌), what it trained and where its reward went. The glyph and the row's
-/// color carry the status, which the training panel spells out; the list is
-/// narrow, and the trained reading at the row's end is what it is read for.
-/// A standing expert's training is named by its scope, shortened; the loop's
-/// by its id and generation.
-fn shadow_row(s: &Shadow) -> String {
-    let glyph = match s.status.as_str() {
-        "graduated" => "✦",
-        "pruned" => "×",
-        _ => "◌",
+/// A list row for something with a state: its shape in the state's colour,
+/// then its text at a strength that follows the state. A list reads by shape
+/// first, and a long one is not painted by the states in it.
+fn state_line<'a>(t: &Theme, tone: Tone, text: String) -> Line<'a> {
+    let strength = match tone {
+        Tone::Settled | Tone::Failed => t.ink,
+        Tone::Open => t.ink2,
+        Tone::Ended => t.ink3,
     };
-    let name = match behavior::shadow_scope(&s.id) {
-        Some(scope) => short_scope(scope).to_string(),
+    Line::from(vec![
+        Span::styled(
+            format!("{} ", tone.glyph()),
+            Style::default().fg(t.tone(tone)),
+        ),
+        Span::styled(text, Style::default().fg(strength)),
+    ])
+}
+
+/// A shadow's list row: its state's shape (graduated ●, replaced or pruned ×,
+/// under way ○), what it trained, when, and where its reward went. The shape
+/// carries the state, which the training panel spells out; the list is
+/// narrow, and the trained reading at the row's end is what it is read for. A
+/// standing expert's training is named by its scope, shortened, and told from
+/// the expert's other trainings by when it was; the loop's by its id and
+/// generation.
+fn shadow_row<'a>(t: &Theme, app: &App, s: &Shadow) -> Line<'a> {
+    let mut row = match behavior::shadow_scope(&s.id) {
+        Some(scope) => format!("{} · {}", short_scope(scope), since(s.created_at)),
         None => shadow_name(s),
     };
-    let mut row = format!("{glyph} {name}");
     if let Some(r) = reward_span(&s.reward_curve) {
         row.push_str(" · ");
         row.push_str(&r);
     }
-    row
+    state_line(t, candidate_state(app, s).0, row)
 }
 
-/// A boundary's list row: actionable ⛔ or open ○, the behavior, then the
+/// A boundary's list row: in force ● or open ○, the behavior, then the
 /// scope its context names, shortened, when it names one (a training's
 /// does). The behavior leads: a standing expert misses several behaviors in
 /// one scope, and with the scope first a narrow list shows the same words on
 /// each of their rows.
-fn boundary_row(b: &FailureBoundary) -> String {
-    let glyph = if b.is_actionable() { "⛔" } else { "○" };
-    match b.fail_context.get("scope").and_then(|s| s.as_str()) {
-        Some(scope) => format!("{glyph} {} · {}", b.behavior, short_scope(scope)),
-        None => format!("{glyph} {}", b.behavior),
-    }
+fn boundary_row<'a>(t: &Theme, b: &FailureBoundary) -> Line<'a> {
+    let row = match b.fail_context.get("scope").and_then(|s| s.as_str()) {
+        Some(scope) => format!("{} · {}", b.behavior, short_scope(scope)),
+        None => b.behavior.clone(),
+    };
+    state_line(t, boundary_tone(b), row)
 }
 
 /// A boundary context's fields as `(key, value)` rows, a string value as it

@@ -153,11 +153,13 @@ fn demo_app() -> App {
         knob_selected: 0,
         knob_draft: antumbra_core::MemoryPolicy::default(),
         selected_memory: 0,
+        memory_kind: None,
+        memory_graph: false,
         sovereign: crate::sovereign::View::default(),
         selected_skill: 0,
         loop_heads: demo_loop_heads(now),
         selected_loop: 0,
-        loop_halt_pending: false,
+        halts: std::collections::HashSet::new(),
         evals: demo_evals(now),
         selected_eval: 0,
         router: None,
@@ -166,18 +168,28 @@ fn demo_app() -> App {
         selected_shadow: 0,
         page: crate::app::Page::Population,
         focus: Focus::Experts,
-        layout: LayoutMode::Focused,
+        layout: LayoutMode::List,
         sort: crate::app::SortKey::Fitness,
         mode: Mode::Normal,
         palette: Palette::default(),
         filter: String::new(),
         filter_selected: 0,
+        filter_hits: Vec::new(),
         events: Vec::new(),
         events_scroll: 0,
         detail_scroll: 0,
         pending: None,
+        notice: None,
+        reads_failing: false,
         ask_query: String::new(),
         ask_result: None,
+        ask_reason: None,
+        ask_near: crate::backend::Near::default(),
+        standing: Vec::new(),
+        services: crate::services::Services::default(),
+        selected_service: 0,
+        service_hops: 3,
+        service_direction: antumbra_core::depgraph::Direction::Dependents,
         real_embedder: false,
         ev_experts: std::collections::HashMap::new(),
         ev_shadows: std::collections::HashMap::new(),
@@ -207,6 +219,15 @@ fn demo_app() -> App {
         },
         should_quit: false,
     }
+}
+
+/// Give `app` the example services: eight of them, with claims that are
+/// declared, observed and claimed, and the page opened on the one the most
+/// depend on. The claims are not added to its memories, so the Memory page's
+/// frames stay what they were.
+fn with_services(app: &mut App) {
+    app.services = crate::services::Services::read(&crate::services::tests::ledger(), Utc::now());
+    app.selected_service = app.services.most_depended_on();
 }
 
 fn graduated_shadow() -> Shadow {
@@ -367,10 +388,10 @@ fn the_memory_detail_names_its_anchor_and_scope() -> anyhow::Result<()> {
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(text.contains("github.com/acme/orders@abc1234"), "{text}");
     assert!(text.contains("branch     feature/retry"), "{text}");
-    assert!(text.contains("other_branch"), "{text}");
+    assert!(text.contains("learned    ○ on another branch"), "{text}");
     app.git.branch = Some("feature/retry".into());
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
-    assert!(text.contains("in_scope"), "{text}");
+    assert!(text.contains("learned    ● here"), "{text}");
     Ok(())
 }
 
@@ -474,17 +495,10 @@ fn golden_reward_heatmap() -> anyhow::Result<()> {
     ];
     app.set_layout(LayoutMode::Dashboard);
     let buf = render(&mut app, 120, 36, 1600.0)?;
-    // Recompute the heatmap strip: the body is the 4th chrome row, then the
-    // dashboard puts the heatmap in the bottom Length(9) slice.
-    let chrome = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .split(buf.area);
-    let strip = Layout::vertical([Constraint::Min(0), Constraint::Length(9)]).split(chrome[3])[1];
+    // The heatmap strip: the dashboard puts it in the bottom Length(9) slice
+    // of the frame's body.
+    let body = crate::ui::frame_rows(buf.area).body;
+    let strip = Layout::vertical([Constraint::Min(0), Constraint::Length(9)]).split(body)[1];
     assert_golden("reward_heatmap", &to_text_in(&buf, strip))?;
     Ok(())
 }
@@ -505,7 +519,7 @@ fn golden_loop_page() -> anyhow::Result<()> {
 fn golden_loop_halted() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.set_page(crate::app::Page::Loop);
-    app.loop_halt_pending = true;
+    app.halts.insert("run:demo".into());
     let buf = render(&mut app, 120, 36, 1600.0)?;
     assert_golden("loop_halted", &to_text(&buf))?;
     Ok(())
@@ -681,3 +695,12 @@ fn golden_focused_boundaries_panel() -> anyhow::Result<()> {
 }
 
 mod behavior;
+mod keys;
+mod links;
+mod lists;
+mod look;
+mod runs;
+mod services;
+mod standing;
+mod training;
+mod wording;

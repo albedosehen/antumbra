@@ -5,6 +5,8 @@
 //! A child module of `app`, so these are the same inherent methods on the same
 //! `App`; they moved here only because `app.rs` had grown past the size rule.
 
+use std::borrow::Cow;
+
 use super::*;
 
 impl App {
@@ -13,16 +15,85 @@ impl App {
         self.focus = focus;
     }
 
-    /// The label every item of the focused list filters/jumps by.
-    fn focused_labels(&self) -> Vec<String> {
+    /// What the filter searches, in a word: the list the keys drive on this
+    /// page.
+    pub fn filter_subject(&self) -> &'static str {
+        match self.page {
+            Page::Memory => "memories",
+            Page::Evals => "evaluations",
+            Page::Sovereign => "skills",
+            Page::Loop => "training runs",
+            Page::Services => "services",
+            Page::Population => match self.focus {
+                Focus::Experts => "experts",
+                Focus::Shadows => "candidates",
+                Focus::Boundaries => "boundaries",
+            },
+        }
+    }
+
+    /// The label every item of the focused list filters/jumps by: the list
+    /// the navigation keys drive on this page, in the same order, so a match's
+    /// index is that item's place in it.
+    fn focused_labels(&self) -> Vec<Cow<'_, str>> {
+        // Borrowed wherever the label is a field: a store holds thousands of
+        // memories, and a label is read to be scored, not kept.
+        match self.page {
+            Page::Memory => {
+                return self
+                    .listed_memories()
+                    .into_iter()
+                    .map(|i| Cow::Borrowed(self.memories[i].content.as_str()))
+                    .collect()
+            }
+            Page::Evals => {
+                return self
+                    .evals
+                    .iter()
+                    .map(|e| Cow::Owned(format!("{} · {}", e.subject_id, e.corpus_task_id)))
+                    .collect()
+            }
+            Page::Sovereign => {
+                return self
+                    .sovereign
+                    .skills
+                    .iter()
+                    .map(|s| Cow::Borrowed(s.skill.as_str()))
+                    .collect()
+            }
+            Page::Loop => {
+                return self
+                    .loop_heads
+                    .iter()
+                    .map(|h| Cow::Borrowed(h.run_id.as_str()))
+                    .collect()
+            }
+            Page::Services => {
+                return self
+                    .services
+                    .names
+                    .iter()
+                    .map(|name| Cow::Borrowed(name.as_str()))
+                    .collect()
+            }
+            Page::Population => {}
+        }
         match self.focus {
-            Focus::Experts => self.experts.iter().map(|e| e.name.clone()).collect(),
+            Focus::Experts => self
+                .experts
+                .iter()
+                .map(|e| Cow::Owned(crate::words::expert_name(e)))
+                .collect(),
             Focus::Shadows => self
                 .shadows
                 .iter()
-                .map(|s| s.id.as_str().to_string())
+                .map(|s| Cow::Borrowed(s.id.as_str()))
                 .collect(),
-            Focus::Boundaries => self.boundaries.iter().map(|b| b.behavior.clone()).collect(),
+            Focus::Boundaries => self
+                .boundaries
+                .iter()
+                .map(|b| Cow::Borrowed(b.behavior.as_str()))
+                .collect(),
         }
     }
 
@@ -30,18 +101,49 @@ impl App {
     pub fn open_filter(&mut self) {
         self.mode = Mode::Filter;
         self.filter.clear();
-        self.filter_selected = 0;
+        self.refilter();
     }
 
     /// Append a typed character to the filter query (resets the selection).
     pub fn filter_input(&mut self, c: char) {
         self.filter.push(c);
-        self.filter_selected = 0;
+        self.refilter();
     }
 
     /// Delete the last character of the filter query (resets the selection).
     pub fn filter_backspace(&mut self) {
         self.filter.pop();
+        self.refilter();
+    }
+
+    /// The most matches the filter keeps. The overlay shows a dozen, and a
+    /// longer query narrows the rest.
+    pub const FILTER_KEPT: usize = 200;
+
+    /// Work out the filter's matches for the query as it now reads, and put
+    /// the highlight on the best. Done when the query or the list changes,
+    /// never while drawing: scoring every memory of a large store is too much
+    /// to do on each frame.
+    pub(super) fn refilter(&mut self) {
+        let needle = command::lowered(&self.filter);
+        let labels = self.focused_labels();
+        let mut scored: Vec<(usize, i32)> = labels
+            .iter()
+            .enumerate()
+            .filter_map(|(i, label)| command::score_chars(label, &needle).map(|score| (i, score)))
+            .collect();
+        // Stable, so equal matches keep the list's order.
+        scored.sort_by_key(|&(_, score)| score);
+        scored.truncate(Self::FILTER_KEPT);
+        let hits = scored
+            .into_iter()
+            .map(|(i, _)| {
+                // One line, of a length a row can show.
+                let flat = labels[i].split_whitespace().collect::<Vec<_>>().join(" ");
+                (i, antumbra_core::text::clipped(&flat, 96).into_owned())
+            })
+            .collect();
+        self.filter_hits = hits;
         self.filter_selected = 0;
     }
 
@@ -57,38 +159,32 @@ impl App {
     }
 
     /// The focused list's items matching the filter query, best first, as
-    /// `(original index, label)` pairs.
-    pub fn filtered(&self) -> Vec<(usize, String)> {
-        let mut scored: Vec<(usize, String, i32)> = self
-            .focused_labels()
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, label)| {
-                command::fuzzy_score(&label, &self.filter).map(|score| (i, label, score))
-            })
-            .collect();
-        scored.sort_by_key(|&(_, _, score)| score);
-        scored.into_iter().map(|(i, label, _)| (i, label)).collect()
+    /// `(the item's place in its list, its label)` pairs: at most
+    /// [`Self::FILTER_KEPT`] of them, as last worked out ([`Self::refilter`]).
+    pub fn filtered(&self) -> &[(usize, String)] {
+        &self.filter_hits
     }
 
     /// Jump the focused selection to the highlighted filter match and close.
     pub fn filter_apply(&mut self) {
-        let matches = self.filtered();
-        let idx = self.filter_selected.min(matches.len().saturating_sub(1));
-        if let Some(&(target, _)) = matches.get(idx) {
+        let idx = self
+            .filter_selected
+            .min(self.filter_hits.len().saturating_sub(1));
+        if let Some(target) = self.filter_hits.get(idx).map(|(place, _)| *place) {
             self.set_focused_selection(target);
         }
         self.mode = Mode::Normal;
         self.filter.clear();
+        self.filter_hits.clear();
     }
 
     /// Cycle the body layout: focused -> dashboard -> graph.
     pub fn cycle_layout(&mut self) {
         let next = match self.layout {
-            LayoutMode::Focused => LayoutMode::Dashboard,
+            LayoutMode::List => LayoutMode::Dashboard,
             LayoutMode::Dashboard => LayoutMode::Graph,
             LayoutMode::Graph => LayoutMode::Table,
-            LayoutMode::Table => LayoutMode::Focused,
+            LayoutMode::Table => LayoutMode::List,
         };
         self.set_layout(next);
     }
@@ -112,7 +208,8 @@ impl App {
             .map(|e| e.id.as_str().to_string());
         match self.sort {
             SortKey::Fitness => self.experts.sort_by(|a, b| b.fitness.total_cmp(&a.fitness)),
-            SortKey::Name => self.experts.sort_by(|a, b| a.name.cmp(&b.name)),
+            // By the name shown, so the list reads in the order it is in.
+            SortKey::Name => self.experts.sort_by_cached_key(crate::words::expert_name),
             SortKey::Generation => self
                 .experts
                 .sort_by_key(|e| std::cmp::Reverse(e.generation.0)),
@@ -127,8 +224,9 @@ impl App {
     /// Set the body layout (the palette's layout commands).
     pub fn set_layout(&mut self, layout: LayoutMode) {
         self.layout = layout;
-        // The table is the expert data-grid; point navigation at the population.
-        if layout == LayoutMode::Table {
+        // The table and the graph draw the experts alone, so the keys drive
+        // the experts there: a list that is not drawn is not navigated.
+        if matches!(layout, LayoutMode::Table | LayoutMode::Graph) {
             self.focus = Focus::Experts;
         }
     }
@@ -143,13 +241,6 @@ impl App {
         let n = Page::ALL.len() as i32;
         let i = (self.page.index() as i32 + delta).rem_euclid(n);
         self.page = Page::ALL[i as usize];
-    }
-
-    /// Jump to a page by tab index (the `1`-`4` keys); ignored if out of range.
-    pub fn goto_page(&mut self, idx: usize) {
-        if let Some(&page) = Page::ALL.get(idx) {
-            self.page = page;
-        }
     }
 
     /// Cycle which region the keys drive and detail: umbra -> penumbra -> antumbra.
@@ -211,10 +302,20 @@ impl App {
     /// truth all the selection movers (next/prev/first/last/page) dispatch on.
     fn focused_list(&self) -> (usize, usize) {
         match self.page {
-            Page::Memory => return (self.memories.len(), self.selected_memory),
+            // The list is the kind in front; the selection's place in it is
+            // where it sits among that kind, or the top when it is of another.
+            Page::Memory => {
+                let listed = self.listed_memories();
+                let at = listed
+                    .iter()
+                    .position(|&i| i == self.selected_memory)
+                    .unwrap_or(0);
+                return (listed.len(), at);
+            }
             Page::Evals => return (self.evals.len(), self.selected_eval),
             Page::Sovereign => return (self.sovereign.skills.len(), self.selected_skill),
             Page::Loop => return (self.loop_heads.len(), self.selected_loop),
+            Page::Services => return (self.services.names.len(), self.selected_service),
             Page::Population => {}
         }
         match self.focus {
@@ -229,7 +330,9 @@ impl App {
     fn set_focused_selection(&mut self, idx: usize) {
         match self.page {
             Page::Memory => {
-                self.selected_memory = idx;
+                if let Some(&memory) = self.listed_memories().get(idx) {
+                    self.selected_memory = memory;
+                }
                 return;
             }
             Page::Evals => {
@@ -242,6 +345,10 @@ impl App {
             }
             Page::Loop => {
                 self.selected_loop = idx;
+                return;
+            }
+            Page::Services => {
+                self.selected_service = idx;
                 return;
             }
             Page::Population => {}
@@ -301,55 +408,104 @@ impl App {
         self.memories.get(self.selected_memory)
     }
 
-    /// The KPI strip: five `[0,1]` quality ratios across the substrate, namely mean
-    /// population fitness, the frozen ratio, the shadow graduation rate, the
-    /// share of boundaries actively gating, and mean memory strength. Always
-    /// rendered above the body, so every page carries the same health readout.
-    pub fn dashboard_metrics(&self) -> [(&'static str, f32); 5] {
-        let mean = |vals: &[f32]| {
-            if vals.is_empty() {
-                0.0
-            } else {
-                vals.iter().sum::<f32>() / vals.len() as f32
-            }
-        };
-        let ratio = |num: usize, den: usize| {
-            if den == 0 {
-                0.0
-            } else {
-                num as f32 / den as f32
-            }
-        };
-        let fitness = mean(&self.experts.iter().map(|e| e.fitness).collect::<Vec<_>>());
-        let frozen = ratio(
-            self.experts.iter().filter(|e| e.is_frozen()).count(),
-            self.experts.len(),
-        );
-        let graduated = ratio(
-            self.shadows
+    /// The memories the Memory page lists, as indices into `memories` in the
+    /// order they are shown: those of the kind in front, or every one, kind
+    /// after kind in the order the title names the kinds. The server sends
+    /// each kind strongest first, and that order is kept within it.
+    pub fn listed_memories(&self) -> Vec<usize> {
+        // The graph is of links, so its keys move through the memories that
+        // have one.
+        if self.memory_graph {
+            return self.linked_memories();
+        }
+        let of = |kind: MemoryNetwork| {
+            self.memories
                 .iter()
-                .filter(|s| s.status.as_str() == "graduated")
-                .count(),
-            self.shadows.len(),
-        );
-        let gating = ratio(
-            self.boundaries.iter().filter(|b| b.is_actionable()).count(),
-            self.boundaries.len(),
-        );
-        let memory = mean(
-            &self
-                .memories
-                .iter()
-                .map(|m| m.confidence)
-                .collect::<Vec<_>>(),
-        );
-        [
-            ("fitness", fitness),
-            ("frozen", frozen),
-            ("graduated", graduated),
-            ("gating", gating),
-            ("memory", memory),
-        ]
+                .enumerate()
+                .filter(move |(_, m)| m.network == kind)
+                .map(|(i, _)| i)
+        };
+        match self.memory_kind {
+            Some(kind) => of(kind).collect(),
+            None => Self::MEMORY_KINDS
+                .into_iter()
+                .flatten()
+                .flat_map(of)
+                .collect(),
+        }
+    }
+
+    /// How many memories there are of `kind`, or in all.
+    pub fn memory_count(&self, kind: Option<MemoryNetwork>) -> usize {
+        match kind {
+            None => self.memories.len(),
+            Some(kind) => self.memories.iter().filter(|m| m.network == kind).count(),
+        }
+    }
+
+    /// The kinds the Memory page lists, in the order Tab moves through them:
+    /// all, then each network.
+    pub const MEMORY_KINDS: [Option<MemoryNetwork>; 4] = [
+        None,
+        Some(MemoryNetwork::World),
+        Some(MemoryNetwork::Bank),
+        Some(MemoryNetwork::Opinion),
+    ];
+
+    /// List the next kind of memory (Tab on the Memory page), wrapping. The
+    /// selection stays where it is when it is of that kind, and moves to the
+    /// strongest of that kind when it is not, so what is selected is always
+    /// in the list.
+    pub fn next_memory_kind(&mut self) {
+        let at = Self::MEMORY_KINDS
+            .iter()
+            .position(|kind| *kind == self.memory_kind)
+            .unwrap_or(0);
+        self.memory_kind = Self::MEMORY_KINDS[(at + 1) % Self::MEMORY_KINDS.len()];
+        let listed = self.listed_memories();
+        if !listed.contains(&self.selected_memory) {
+            if let Some(&first) = listed.first() {
+                self.selected_memory = first;
+            }
+        }
+    }
+
+    /// The memories that are linked to another, as indices into `memories`:
+    /// the most linked first, then in the order the server sent them. A store
+    /// holds thousands of memories and a few links, so these are the ones a
+    /// picture of links has anything to say about.
+    pub fn linked_memories(&self) -> Vec<usize> {
+        let mut links: HashMap<&str, usize> = HashMap::new();
+        for e in &self.edges {
+            *links.entry(e.from_id.as_str()).or_default() += 1;
+            *links.entry(e.to_id.as_str()).or_default() += 1;
+        }
+        let mut linked: Vec<(usize, usize)> = self
+            .memories
+            .iter()
+            .enumerate()
+            .filter_map(|(i, m)| links.get(m.id.as_str()).map(|count| (i, *count)))
+            .collect();
+        linked.sort_by_key(|(i, count)| (std::cmp::Reverse(*count), *i));
+        linked.into_iter().map(|(i, _)| i).collect()
+    }
+
+    /// Swap the Memory page's list for the selected memory's links, drawn,
+    /// or back (`l` on the Memory page). The graph is of every kind, and its
+    /// keys move through the memories that have a link; when the one selected
+    /// has none, the selection goes to the most linked, so the graph opens on
+    /// a picture and not on a sentence saying there is none.
+    pub fn toggle_memory_graph(&mut self) {
+        self.memory_graph = !self.memory_graph;
+        if self.memory_graph {
+            self.memory_kind = None;
+            let linked = self.linked_memories();
+            if !linked.contains(&self.selected_memory) {
+                if let Some(&most) = linked.first() {
+                    self.selected_memory = most;
+                }
+            }
+        }
     }
 
     /// Edges touching `id`, as `(edge, is_outgoing)`: the selected trace's links.

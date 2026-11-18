@@ -69,10 +69,19 @@ pub async fn substrate(store: &Store, snapshot: &mut Snapshot) -> Result<()> {
     shadows.sort_by_key(|s| std::cmp::Reverse(s.created_at));
     snapshot.shadows = shadows;
     snapshot.loop_heads = generation::all_heads(store).await?;
-    snapshot.loop_halt_pending = match snapshot.loop_heads.first() {
-        Some(head) => loop_control::load(store, &head.run_id).await? == LoopCommand::Halt,
-        None => false,
-    };
+    // Every loop's halt, so the console can say it of the run it shows; the
+    // first loop's alone is still said for a console that reads only that.
+    let mut halts = Vec::new();
+    for head in &snapshot.loop_heads {
+        if loop_control::load(store, &head.run_id).await? == LoopCommand::Halt {
+            halts.push(head.run_id.clone());
+        }
+    }
+    snapshot.loop_halt_pending = snapshot
+        .loop_heads
+        .first()
+        .is_some_and(|first| halts.iter().any(|r| r.as_str() == first.run_id.as_str()));
+    snapshot.halts_pending = halts;
     snapshot.evals = evaluation::recent_unscoped(store).await?;
     snapshot.router = router::load(store).await?;
     snapshot.operator = true;

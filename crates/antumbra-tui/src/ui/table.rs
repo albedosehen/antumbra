@@ -9,50 +9,62 @@ use ratatui::widgets::{Cell, Row, Table, TableState};
 use ratatui::Frame;
 
 use crate::app::App;
+use crate::theme::Tone;
 
 use super::{gauge_spans, panel};
 
 pub(super) fn experts_table(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let title = format!(
-        " population · {} experts · sort: {} (s) ",
+        " Experts · {} · sorted by {} ",
         app.experts.len(),
         app.sort.name()
     );
-    let block = panel(&t, Span::styled(title, Style::default().fg(t.ink)));
+    let block = panel(&t, Span::styled(title, Style::default().fg(t.ink2)));
 
     let header = Row::new([
-        Cell::from("name"),
-        Cell::from("fitness"),
-        Cell::from("gen"),
-        Cell::from("state"),
-        Cell::from("model"),
+        Cell::from("EXPERT"),
+        Cell::from("FITNESS"),
+        Cell::from("GEN"),
+        Cell::from("STATE"),
+        Cell::from("BASE MODEL"),
     ])
-    .style(Style::default().fg(t.dim).add_modifier(Modifier::BOLD));
+    .style(Style::default().fg(t.ink2).add_modifier(Modifier::BOLD));
 
     // Build only the on-screen rows so the table scales to any population size.
     let visible = (area.height as usize).saturating_sub(3); // borders + header
     let (offset, rel_sel) = super::visible_window(app.experts.len(), app.selected, visible);
     let end = (offset + visible).min(app.experts.len());
     let rows = app.experts[offset..end].iter().map(|e| {
-        let mut fit = gauge_spans(&t, e.fitness, 10, t.fitness(e.fitness, 1.0));
+        let mut fit = gauge_spans(&t, e.fitness, 10, t.accent);
         fit.push(Span::styled(
             format!(" {:.2}", e.fitness),
-            Style::default().fg(t.value),
+            Style::default().fg(t.ink),
         ));
-        let state = if e.is_frozen() { "frozen" } else { "live" };
-        let state_color = if e.is_frozen() { t.value } else { t.success };
+        // Frozen is settled, sealed for good; one that is not is still open
+        // to training.
+        let (tone, state) = if e.is_frozen() {
+            (Tone::Settled, "frozen")
+        } else {
+            (Tone::Open, "open")
+        };
         Row::new(vec![
-            Cell::from(Span::styled(e.name.clone(), Style::default().fg(t.text))),
+            Cell::from(Span::styled(
+                crate::words::expert_name(e),
+                Style::default().fg(t.ink),
+            )),
             Cell::from(Line::from(fit)),
             Cell::from(Span::styled(
                 e.generation.0.to_string(),
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink2),
             )),
-            Cell::from(Span::styled(state, Style::default().fg(state_color))),
+            Cell::from(Span::styled(
+                format!("{} {state}", tone.glyph()),
+                Style::default().fg(t.tone(tone)),
+            )),
             Cell::from(Span::styled(
                 e.base_model.clone(),
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink2),
             )),
         ])
     });
@@ -61,19 +73,14 @@ pub(super) fn experts_table(f: &mut Frame, app: &App, area: Rect) {
         Constraint::Min(16),
         Constraint::Length(16),
         Constraint::Length(5),
-        Constraint::Length(8),
+        Constraint::Length(10),
         Constraint::Min(12),
     ];
     let table = Table::new(rows, widths)
         .header(header)
         .block(block)
-        .row_highlight_style(
-            Style::default()
-                .bg(t.sel)
-                .fg(t.text)
-                .add_modifier(Modifier::BOLD),
-        )
-        .highlight_symbol("▌ ");
+        .row_highlight_style(t.selected())
+        .highlight_symbol("▸ ");
 
     let mut state = TableState::default();
     if !app.experts.is_empty() {

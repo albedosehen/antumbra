@@ -1,22 +1,21 @@
-╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│◆◆◆  ANTUMBRA   self-improving substrate · 1 umbra · gen 0  ·  144 fps  ·  focused                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-  1 population  ·  2 memory  ·  3 loop  ·  4 evals  ·  5 sovereign
-  fitness █████▍ 0.90  frozen ██████ 1.00  graduated ────── 0.00  gating ────── 0.00  memory ████▊─ 0.79
-╭ generational loop ───────────────────────────────────────────────────────────────────────────────────────────────────╮
+ ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                 ● live
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent  ·  6 Services
+ Training: what the server is teaching your experts, and the loop that grows new ones when it is run.
+╭ Training loop ───────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                                      │
 │  run:arith                 gen 4     score                                                                           │
-│▌ run:strings               gen 2     explore                                                                         │
+│▸ run:strings               gen 2     explore                                                                         │
 │  run:lists                 gen 7     consolidate                                                                     │
 │                                                                                                                      │
-│  generation 2    ·    run:strings    ·    state explore                                                              │
+│  generation 2    ·    run:strings    ·    stage explore                                                              │
 │                                                                                                                      │
 │  ○ grow  →  ◉ explore  →  ○ score  →  ○ decide  →  ○ consolidate  ↺                                                  │
 │                                                                                                                      │
-│  → shadows train (DIY candle QLoRA via the trainer)                                                                  │
+│  → the candidates train                                                                                              │
 │                                                                                                                      │
-│  x · request a graceful halt (stops at the next generation)                                                          │
-│  enter · inspect this run                                                                                            │
+│  x · halt this run at its next generation                                                                            │
+│  enter · everything about this run                                                                                   │
+│                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
@@ -33,4 +32,5 @@
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- q  quit   ↑↓  select   tab  focus:umbra   []  page:loop   t  theme:shadow   ±  cap:144   r  reload   ?  help   :  palet
+
+ ↑↓  move   enter  details   /  find   x  halt   1-6  pages   a  ask   :  commands   ?  help   q  quit

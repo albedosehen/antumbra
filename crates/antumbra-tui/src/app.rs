@@ -1,21 +1,21 @@
 //! Operator-console state: the live population (umbra), boundaries (antumbra),
 //! and the learned gate, read through the [`Backend`] and ticked for animation.
 
-use antumbra_core::behavior;
-use antumbra_core::console::Action as ConsoleAction;
 pub use antumbra_core::console::Snapshot;
 use antumbra_core::generational::GenerationHead;
 use antumbra_core::{
-    BoundaryId, EvaluationRun, Expert, ExpertId, FailureBoundary, LearnedRouter, Memory,
-    MemoryEdge, MemoryPolicy, MemoryUse, RunId, Shadow, ShadowId,
+    EvaluationRun, Expert, FailureBoundary, LearnedRouter, Memory, MemoryEdge, MemoryNetwork,
+    MemoryPolicy, MemoryUse, RunId, Shadow,
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::backend::Backend;
 use crate::command::{self, Action, Command};
 use crate::events::{Event, EventKind};
 use crate::theme::Theme;
+
+pub use acting::{Notice, Pending};
 
 /// Which list the navigation keys drive, and which detail panel is shown: one
 /// per region of the cast shadow: the population (umbra), the shadows in training
@@ -47,28 +47,13 @@ pub enum Mode {
     Knobs,
 }
 
-/// An operator mutation awaiting a yes/no confirmation.
-pub enum Pending {
-    /// Mark the shadow pruned (collapse it).
-    PruneShadow(ShadowId),
-    /// Mark the shadow graduated (promote it into the population).
-    GraduateShadow(ShadowId),
-    /// Freeze (`true`) or thaw (`false`) the expert.
-    FreezeExpert(ExpertId, bool),
-    /// Delete the boundary from the antumbra.
-    DeleteBoundary(BoundaryId),
-    /// Ask the generational loop to halt gracefully at the next generation.
-    HaltLoop(RunId),
-    /// Replace the workspace's memory knobs with these.
-    SetMemoryPolicy(MemoryPolicy),
-}
-
-/// How the body arranges its panels: the graph beside a single focused detail
-/// (`Focused`), the graph beside all three regions at once (`Dashboard`), or the
-/// graph alone, full width (`Graph`).
+/// How the population page arranges its panels: the list in front beside the
+/// detail of what is selected (`List`, the default), the graph beside all
+/// three lists at once (`Dashboard`), or the graph alone, full width
+/// (`Graph`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LayoutMode {
-    Focused,
+    List,
     Dashboard,
     Graph,
     /// A full-width sortable table of the population (the data-grid view).
@@ -79,7 +64,7 @@ impl LayoutMode {
     /// The lowercase name shown in the header.
     pub fn name(self) -> &'static str {
         match self {
-            LayoutMode::Focused => "focused",
+            LayoutMode::List => "list",
             LayoutMode::Dashboard => "dashboard",
             LayoutMode::Graph => "graph",
             LayoutMode::Table => "table",
@@ -125,34 +110,39 @@ pub enum Page {
     /// A coding agent with its feature flags off: the rules, and which skills
     /// are used. Read-only.
     Sovereign,
+    /// What depends on what, and what a change to a service reaches.
+    Services,
 }
 
 impl Page {
     /// Every page, in tab order.
-    pub const ALL: [Page; 5] = [
+    pub const ALL: [Page; 6] = [
         Page::Population,
         Page::Memory,
         Page::Loop,
         Page::Evals,
         Page::Sovereign,
+        Page::Services,
     ];
 
-    /// The lowercase tab label.
+    /// The tab's label: what the page holds, in the dashboard's words.
     pub fn title(self) -> &'static str {
         match self {
-            Page::Population => "population",
-            Page::Memory => "memory",
-            Page::Loop => "loop",
-            Page::Evals => "evals",
-            Page::Sovereign => "sovereign",
+            Page::Population => "Population",
+            Page::Memory => "Memory",
+            Page::Loop => "Training",
+            Page::Evals => "Evaluations",
+            Page::Sovereign => "Agent",
+            Page::Services => "Services",
         }
     }
 
-    /// The tab a number key selects: `1` is the first page. Asked of
+    /// The number key that goes to this page: `1` for the first. Asked of
     /// [`Page::ALL`], so a page added to it cannot be left without its key.
-    pub fn index_for_key(key: char) -> Option<usize> {
-        let number = key.to_digit(10)? as usize;
-        (1..=Page::ALL.len()).contains(&number).then(|| number - 1)
+    pub fn key(self) -> Option<char> {
+        u32::try_from(self.index() + 1)
+            .ok()
+            .and_then(|number| char::from_digit(number, 10))
     }
 
     /// Position in [`Page::ALL`] (the tab index).
@@ -189,6 +179,11 @@ pub struct App {
     pub knob_draft: MemoryPolicy,
     /// Index into `memories` of the highlighted trace (Memory page).
     pub selected_memory: usize,
+    /// The kind of memory the Memory page lists: one network, or all three.
+    pub memory_kind: Option<MemoryNetwork>,
+    /// Whether the Memory page shows the graph of the kinds and their links
+    /// in place of the list.
+    pub memory_graph: bool,
     /// The Sovereign page's reading of `memories`, made once per reload.
     pub sovereign: crate::sovereign::View,
     /// Index into `sovereign.skills` of the highlighted row (Sovereign page).
@@ -197,8 +192,9 @@ pub struct App {
     pub loop_heads: Vec<GenerationHead>,
     /// Index into `loop_heads` of the run the Loop page is focused on.
     pub selected_loop: usize,
-    /// Whether a graceful halt is pending for the displayed loop run.
-    pub loop_halt_pending: bool,
+    /// The runs with a graceful halt requested that they have not reached
+    /// yet, by run id.
+    pub halts: HashSet<String>,
     /// Recent evaluation runs (newest first), for the Evals page.
     pub evals: Vec<EvaluationRun>,
     /// Index into `evals` of the highlighted run (Evals page).
@@ -226,6 +222,10 @@ pub struct App {
     pub filter: String,
     /// The highlighted match within the filter results.
     pub filter_selected: usize,
+    /// The filter's matches for the query as typed, best first: each item's
+    /// place in its list and the label shown. Worked out when the query or
+    /// the list changes, and only read while drawing.
+    pub filter_hits: Vec<(usize, String)>,
     /// The live event stream (store changes), newest first.
     pub events: Vec<Event>,
     /// Scroll position within the events overlay.
@@ -234,14 +234,41 @@ pub struct App {
     pub detail_scroll: u16,
     /// An operator mutation awaiting confirmation (used while `mode == Confirm`).
     pub pending: Option<Pending>,
+    /// What the console last did, declined to do, or could not do, for the
+    /// line above the footer.
+    pub notice: Option<Notice>,
+    /// Whether the last read of the server failed, so what is shown may be
+    /// behind.
+    pub reads_failing: bool,
     /// The route-ask query text (used while `mode == Ask`).
     pub ask_query: String,
     /// The gate's routing for the last ask: `(expert name, probability)` best
     /// first, or `Some(empty)` when it escalates. `None` before the first ask.
     pub ask_result: Option<Vec<(String, f32)>>,
-    /// Whether a real embedding endpoint backs the ask (`--embed-url`). When
-    /// false, the ask uses the demo embedder and warns it's only coherent on a
-    /// demo store.
+    /// Why the last ask was routed to no expert, in the server's words, when
+    /// it was routed to none and the server said.
+    pub ask_reason: Option<String>,
+    /// What the last ask's task is near, of the user's own: their standing
+    /// experts and what they have taught.
+    pub ask_near: crate::backend::Near,
+    /// What the server is teaching: each scope a user has behaviors or a
+    /// standing expert in, and where its training stands. Worked out from
+    /// the behaviors and experts read, when they are read.
+    pub standing: Vec<crate::standing::Scope>,
+    /// The services the workspace's dependency claims name, read from the
+    /// memories that hold them.
+    pub services: crate::services::Services,
+    /// The service the Services page's walk starts from: its place among the
+    /// services' names.
+    pub selected_service: usize,
+    /// How far the walk goes, in hops.
+    pub service_hops: u32,
+    /// Which way it goes: to what depends on the service, or to what the
+    /// service depends on.
+    pub service_direction: antumbra_core::depgraph::Direction,
+    /// Whether a server answers the ask, embedding the task with its own
+    /// model. When false, the ask uses the demo's stand-in embedder and says
+    /// so.
     pub real_embedder: bool,
     /// Per-entity fingerprints from the last reload, to diff the next one.
     pub ev_experts: HashMap<String, bool>,
@@ -311,11 +338,13 @@ impl App {
             knob_selected: 0,
             knob_draft: MemoryPolicy::default(),
             selected_memory: 0,
+            memory_kind: None,
+            memory_graph: false,
             sovereign: crate::sovereign::View::default(),
             selected_skill: 0,
             loop_heads: Vec::new(),
             selected_loop: 0,
-            loop_halt_pending: false,
+            halts: HashSet::new(),
             evals: Vec::new(),
             selected_eval: 0,
             router: None,
@@ -324,18 +353,28 @@ impl App {
             selected_shadow: 0,
             page: Page::Population,
             focus: Focus::Experts,
-            layout: LayoutMode::Focused,
+            layout: LayoutMode::List,
             sort: SortKey::Fitness,
             mode: Mode::Normal,
             palette: Palette::default(),
             filter: String::new(),
             filter_selected: 0,
+            filter_hits: Vec::new(),
             events: Vec::new(),
             events_scroll: 0,
             detail_scroll: 0,
             pending: None,
+            notice: None,
+            reads_failing: false,
             ask_query: String::new(),
             ask_result: None,
+            ask_reason: None,
+            ask_near: crate::backend::Near::default(),
+            standing: Vec::new(),
+            services: crate::services::Services::default(),
+            selected_service: 0,
+            service_hops: 3,
+            service_direction: antumbra_core::depgraph::Direction::Dependents,
             real_embedder: false,
             ev_experts: HashMap::new(),
             ev_shadows: HashMap::new(),
@@ -368,6 +407,16 @@ impl App {
             app.token_from = token_from;
         }
         app.reload(backend).await?;
+        // Every list opens on its first row. The experts arrive in the
+        // store's order and are sorted here, and the sort keeps the selection
+        // on its expert, which at the first read is whichever came first from
+        // the store; the Memory page lists kind after kind.
+        app.selected = 0;
+        // The Services page opens on the service the most depend on.
+        app.selected_service = app.services.most_depended_on();
+        if let Some(&first) = app.listed_memories().first() {
+            app.selected_memory = first;
+        }
         Ok(app)
     }
 
@@ -391,12 +440,11 @@ impl App {
         Ok(())
     }
 
-    /// [`Self::reload`], saying a failure in the event stream rather than
-    /// ending the console: over a network, a missed read is ordinary.
+    /// Read the server again now, saying a failure on the main view rather
+    /// than ending the console: over a network, a missed read is ordinary.
     pub async fn refresh(&mut self, backend: &Backend) {
-        if let Err(e) = self.reload(backend).await {
-            self.operator_event(format!("reload failed · {e:#}"));
-        }
+        let read = backend.snapshot().await;
+        self.read_finished(read);
     }
 
     /// Swap in a freshly loaded [`Snapshot`]: re-run the App-state-dependent expert
@@ -404,15 +452,25 @@ impl App {
     /// Cheap and synchronous, so the run loop can call it the moment an off-thread
     /// load finishes, keeping the periodic refresh off the render thread.
     pub fn apply_snapshot(&mut self, snap: Snapshot) {
+        // Every run's halt from a server that lists them, else the first
+        // run's alone, which is all an older server says. Read before the
+        // snapshot is taken apart.
+        self.halts = snap
+            .loop_heads
+            .iter()
+            .filter(|head| snap.halt_pending(&head.run_id))
+            .map(|head| head.run_id.as_str().to_string())
+            .collect();
+        // What is selected, by what it is: the lists are about to be
+        // replaced, and need not come back in the order they were in.
+        let kept = self.kept();
         self.experts = snap.experts;
         self.sort_experts();
         self.boundaries = snap.boundaries;
         self.shadows = snap.shadows;
         self.memories = snap.memories;
         self.sovereign = crate::sovereign::View::from_memories(&self.memories);
-        self.selected_skill = self
-            .selected_skill
-            .min(self.sovereign.skills.len().saturating_sub(1));
+        self.services = crate::services::Services::read(&self.memories, chrono::Utc::now());
         self.edges = snap.edges;
         self.usage = snap
             .usage
@@ -426,27 +484,23 @@ impl App {
         }
         self.policy = snap.policy;
         self.loop_heads = snap.loop_heads;
-        self.loop_halt_pending = snap.loop_halt_pending;
         self.evals = snap.evals;
         self.router = snap.router;
         self.operator = snap.operator;
-        if !self.experts.is_empty() && self.selected >= self.experts.len() {
-            self.selected = self.experts.len() - 1;
-        }
-        if !self.boundaries.is_empty() && self.selected_boundary >= self.boundaries.len() {
-            self.selected_boundary = self.boundaries.len() - 1;
-        }
-        if !self.shadows.is_empty() && self.selected_shadow >= self.shadows.len() {
-            self.selected_shadow = self.shadows.len() - 1;
-        }
-        if !self.memories.is_empty() && self.selected_memory >= self.memories.len() {
-            self.selected_memory = self.memories.len() - 1;
-        }
-        if !self.evals.is_empty() && self.selected_eval >= self.evals.len() {
-            self.selected_eval = self.evals.len() - 1;
-        }
-        if !self.loop_heads.is_empty() && self.selected_loop >= self.loop_heads.len() {
-            self.selected_loop = self.loop_heads.len() - 1;
+        self.standing = crate::standing::read(
+            &self.memories,
+            &self.experts,
+            &self.shadows,
+            self.policy.accept_after_hours,
+            chrono::Utc::now(),
+        );
+        // Each selection back on what it was on; one whose item is gone
+        // keeps its row, within the list.
+        self.keep(kept);
+        // A list that changed under an open filter is searched again, so a
+        // match never points at a row that has moved.
+        if self.mode == Mode::Filter {
+            self.refilter();
         }
         self.record_events();
         self.since_reload_ms = 0.0;
@@ -479,7 +533,7 @@ impl App {
             emit.push((
                 EventKind::System,
                 format!(
-                    "connected · {} experts · {} shadows · {} boundaries",
+                    "connected · {} experts · {} candidates · {} boundaries",
                     self.experts.len(),
                     self.shadows.len(),
                     self.boundaries.len()
@@ -488,13 +542,18 @@ impl App {
         } else {
             for e in &self.experts {
                 match self.ev_experts.get(e.id.as_str()) {
-                    None => emit.push((EventKind::Spawn, format!("expert {} emerged", e.name))),
-                    Some(&frozen) if !frozen && e.is_frozen() => {
-                        emit.push((EventKind::Freeze, format!("expert {} frozen", e.name)))
-                    }
-                    Some(&frozen) if frozen && !e.is_frozen() => {
-                        emit.push((EventKind::Freeze, format!("expert {} thawed", e.name)))
-                    }
+                    None => emit.push((
+                        EventKind::Spawn,
+                        format!("expert {} added", crate::words::expert_name(e)),
+                    )),
+                    Some(&frozen) if !frozen && e.is_frozen() => emit.push((
+                        EventKind::Freeze,
+                        format!("expert {} frozen", crate::words::expert_name(e)),
+                    )),
+                    Some(&frozen) if frozen && !e.is_frozen() => emit.push((
+                        EventKind::Freeze,
+                        format!("expert {} thawed", crate::words::expert_name(e)),
+                    )),
                     _ => {}
                 }
             }
@@ -503,7 +562,7 @@ impl App {
                 match self.ev_shadows.get(s.id.as_str()) {
                     None => emit.push((
                         EventKind::Spawn,
-                        format!("shadow {} spawned ({status})", s.id.as_str()),
+                        format!("candidate {} started ({status})", s.id.as_str()),
                     )),
                     Some(prev) if prev != status => {
                         let kind = match status {
@@ -511,7 +570,7 @@ impl App {
                             "pruned" => EventKind::Prune,
                             _ => EventKind::System,
                         };
-                        emit.push((kind, format!("shadow {} {status}", s.id.as_str())));
+                        emit.push((kind, format!("candidate {} {status}", s.id.as_str())));
                     }
                     _ => {}
                 }
@@ -524,7 +583,7 @@ impl App {
                     )),
                     Some(&actionable) if !actionable && b.is_actionable() => emit.push((
                         EventKind::Boundary,
-                        format!("boundary now gates · {}", b.behavior),
+                        format!("boundary now in force · {}", b.behavior),
                     )),
                     _ => {}
                 }
@@ -541,218 +600,6 @@ impl App {
         self.ev_shadows = shadows;
         self.ev_boundaries = boundaries;
         self.ev_router = router;
-    }
-
-    /// Record an operator-initiated event in the stream (immediate feedback).
-    pub fn operator_event(&mut self, text: String) {
-        self.push_event(EventKind::System, text);
-    }
-
-    /// Whether this console may act. A read-only one says how to become able.
-    fn may_act(&mut self) -> bool {
-        if !self.operator {
-            self.operator_event(
-                "read-only · acting needs an operator's token (antumbra-mcp --mint-token --operator)"
-                    .into(),
-            );
-        }
-        self.operator
-    }
-
-    /// Stage the operator action for the focused selection (`x`), opening the
-    /// confirm prompt. Prune the focused shadow, or delete the focused boundary.
-    pub fn request_action(&mut self) {
-        if !self.may_act() {
-            return;
-        }
-        // The Loop page's operator action is a graceful halt of the run.
-        if self.page == Page::Loop {
-            if let Some(head) = self.loop_heads.first().filter(|_| !self.loop_halt_pending) {
-                self.pending = Some(Pending::HaltLoop(head.run_id.clone()));
-                self.mode = Mode::Confirm;
-            }
-            return;
-        }
-        // The remaining operator actions target the population regions.
-        if self.page != Page::Population {
-            return;
-        }
-        if self.focus == Focus::Shadows && self.selected_is_kept() {
-            return;
-        }
-        let pending = match self.focus {
-            Focus::Shadows => self
-                .selected_shadow()
-                .filter(|s| s.status.as_str() != "pruned")
-                .map(|s| Pending::PruneShadow(s.id.clone())),
-            Focus::Boundaries => self
-                .selected_boundary()
-                .map(|b| Pending::DeleteBoundary(b.id.clone())),
-            Focus::Experts => None,
-        };
-        if let Some(pending) = pending {
-            self.pending = Some(pending);
-            self.mode = Mode::Confirm;
-        }
-    }
-
-    /// Whether the selected shadow is a standing expert's training, said on
-    /// the event line when it is. Pruning and graduating steer the
-    /// generational loop, which reads them back; the standing-experts keeper
-    /// settles its own trainings and never does, so on one of its shadows
-    /// either would only misstate what is serving.
-    fn selected_is_kept(&mut self) -> bool {
-        let Some(scope) = self
-            .selected_shadow()
-            .and_then(|s| behavior::shadow_scope(&s.id))
-            .map(str::to_owned)
-        else {
-            return false;
-        };
-        self.operator_event(format!(
-            "{scope}: the keeper settles a standing expert's training · freeze the expert to stop it serving"
-        ));
-        true
-    }
-
-    /// Stage graduating the selected shadow (the palette's graduate command):
-    /// promote it into the population, unless it already graduated.
-    pub fn request_graduate(&mut self) {
-        if !self.may_act() || self.selected_is_kept() {
-            return;
-        }
-        if let Some(s) = self
-            .selected_shadow()
-            .filter(|s| s.status.as_str() != "graduated")
-        {
-            self.pending = Some(Pending::GraduateShadow(s.id.clone()));
-            self.mode = Mode::Confirm;
-        }
-    }
-
-    /// Stage freezing the selected expert, or thawing it if already frozen (the
-    /// palette's freeze command toggles on the expert's current state).
-    pub fn request_freeze(&mut self) {
-        if !self.may_act() {
-            return;
-        }
-        if let Some(e) = self.selected_expert() {
-            let freeze = !e.is_frozen();
-            self.pending = Some(Pending::FreezeExpert(e.id.clone(), freeze));
-            self.mode = Mode::Confirm;
-        }
-    }
-
-    /// The confirmation prompt for the staged action, if any.
-    pub fn pending_prompt(&self) -> Option<String> {
-        self.pending.as_ref().map(|p| match p {
-            Pending::PruneShadow(id) => format!("Prune shadow {} ?", id.as_str()),
-            Pending::GraduateShadow(id) => format!("Graduate shadow {} ?", id.as_str()),
-            Pending::FreezeExpert(id, freeze) => {
-                let verb = if *freeze { "Freeze" } else { "Thaw" };
-                format!("{verb} expert {} ?", id.as_str())
-            }
-            Pending::HaltLoop(run) => {
-                format!(
-                    "Halt loop {} ? (stops at the next generation)",
-                    run.as_str()
-                )
-            }
-            Pending::DeleteBoundary(id) => {
-                let behavior = self
-                    .boundaries
-                    .iter()
-                    .find(|b| b.id.as_str() == id.as_str())
-                    .map_or_else(|| id.as_str().to_string(), |b| b.behavior.clone());
-                format!("Delete boundary \"{behavior}\" ?")
-            }
-            Pending::SetMemoryPolicy(policy) => match self.knobs_changed(policy) {
-                1 => format!("Apply {} ?", self.knob_changes(policy)),
-                n => format!("Apply {n} knob changes ?"),
-            },
-        })
-    }
-
-    /// Cancel the staged action.
-    pub fn cancel_action(&mut self) {
-        self.pending = None;
-        self.mode = Mode::Normal;
-    }
-
-    /// Carry out the staged operator action through `backend`, then reload so
-    /// the change (and the event it raises) shows immediately. A refusal or a
-    /// target that is gone is said in the event stream. Returns to the live
-    /// view whether or not anything was staged.
-    pub async fn apply_pending(&mut self, backend: &Backend) {
-        if let Some(pending) = self.pending.take() {
-            let (action, said) = match pending {
-                Pending::PruneShadow(shadow) => (ConsoleAction::PruneShadow { shadow }, None),
-                Pending::GraduateShadow(shadow) => (ConsoleAction::GraduateShadow { shadow }, None),
-                Pending::FreezeExpert(expert, true) => {
-                    (ConsoleAction::FreezeExpert { expert }, None)
-                }
-                Pending::FreezeExpert(expert, false) => {
-                    (ConsoleAction::ThawExpert { expert }, None)
-                }
-                Pending::DeleteBoundary(boundary) => {
-                    let behavior = self
-                        .boundaries
-                        .iter()
-                        .find(|b| b.id.as_str() == boundary.as_str())
-                        .map(|b| format!("boundary removed · {}", b.behavior));
-                    (ConsoleAction::DeleteBoundary { boundary }, behavior)
-                }
-                Pending::HaltLoop(run) => {
-                    let said = format!("halt requested · loop {}", run.as_str());
-                    (ConsoleAction::HaltLoop { run }, Some(said))
-                }
-                Pending::SetMemoryPolicy(policy) => {
-                    let said = format!("memory knobs set · {}", self.knob_changes(&policy));
-                    (ConsoleAction::SetMemoryPolicy { policy }, Some(said))
-                }
-            };
-            self.act(backend, action, said).await;
-        }
-        self.mode = Mode::Normal;
-    }
-
-    /// Cancel a pending loop halt (clear the control back to `Run`), then reload.
-    pub async fn cancel_halt(&mut self, backend: &Backend) {
-        if !self.may_act() {
-            return;
-        }
-        if let Some(run) = self.loop_heads.first().map(|h| h.run_id.clone()) {
-            let said = format!("halt canceled · loop {}", run.as_str());
-            self.act(backend, ConsoleAction::CancelHalt { run }, Some(said))
-                .await;
-        }
-    }
-
-    /// Send `action`, say `said` once it is done, and reload.
-    async fn act(&mut self, backend: &Backend, action: ConsoleAction, said: Option<String>) {
-        match backend.act(action).await {
-            Ok(true) => {
-                if let Some(said) = said {
-                    self.operator_event(said);
-                }
-            }
-            Ok(false) => self.operator_event("not done · it is no longer there".into()),
-            Err(e) => self.operator_event(format!("not done · {e:#}")),
-        }
-        self.refresh(backend).await;
-    }
-
-    /// Record an event at the head of the stream (newest first), capped.
-    fn push_event(&mut self, kind: EventKind, text: String) {
-        self.events.insert(
-            0,
-            Event {
-                at_ms: self.clock_ms,
-                kind,
-                text,
-            },
-        );
-        self.events.truncate(crate::events::MAX_EVENTS);
     }
 
     /// Open the live event-stream overlay.
@@ -793,6 +640,7 @@ impl App {
             Page::Population => {}
             Page::Evals if !self.evals.is_empty() => {}
             Page::Loop if !self.loop_heads.is_empty() => {}
+            Page::Services if !self.services.is_empty() => {}
             _ => return,
         }
         self.mode = Mode::Detail;
@@ -833,37 +681,115 @@ impl App {
     pub fn open_ask(&mut self) {
         self.mode = Mode::Ask;
         self.ask_query.clear();
-        self.ask_result = None;
+        self.forget_ask();
     }
 
     /// Append a character to the ask query (invalidates the stale result).
     pub fn ask_input(&mut self, c: char) {
         self.ask_query.push(c);
-        self.ask_result = None;
+        self.forget_ask();
     }
 
     /// Delete the last character of the ask query (invalidates the result).
     pub fn ask_backspace(&mut self) {
         self.ask_query.pop();
-        self.ask_result = None;
+        self.forget_ask();
     }
 
-    /// Resolve a routing distribution (over expert ids) to `(name, probability)`,
-    /// looking names up in the population, and store it as the ask result.
-    pub fn set_ask_result(&mut self, routed: &[(antumbra_core::ExpertId, f32)]) {
+    /// The service the Services page's walk starts from.
+    pub fn selected_service_name(&self) -> Option<&str> {
+        self.services
+            .names
+            .get(self.selected_service)
+            .map(String::as_str)
+    }
+
+    /// What a change to the selected service reaches, or what it needs, as
+    /// far as the walk is set to go.
+    pub fn service_reach(&self) -> Vec<antumbra_core::depgraph::Reached> {
+        self.selected_service_name()
+            .map_or_else(Vec::new, |origin| {
+                self.services.reach(
+                    origin,
+                    self.service_direction,
+                    self.service_hops,
+                    chrono::Utc::now(),
+                )
+            })
+    }
+
+    /// Let the walk go further: one hop, three, six, and round again.
+    pub fn cycle_hops(&mut self) {
+        let hops = crate::services::HOPS;
+        let at = hops.iter().position(|h| *h == self.service_hops);
+        self.service_hops = hops[at.map_or(0, |i| (i + 1) % hops.len())];
+    }
+
+    /// Turn the walk round: from what depends on the service to what it
+    /// depends on, and back.
+    pub fn turn_walk(&mut self) {
+        use antumbra_core::depgraph::Direction;
+        self.service_direction = match self.service_direction {
+            Direction::Dependents => Direction::Dependencies,
+            Direction::Dependencies => Direction::Dependents,
+        };
+    }
+
+    /// Drop what the last ask came to: it answered another task.
+    fn forget_ask(&mut self) {
+        self.ask_result = None;
+        self.ask_reason = None;
+        self.ask_near = crate::backend::Near::default();
+    }
+
+    /// Keep what routing the task came to: each expert by the name the
+    /// console shows it under, with how likely it is, and why there is none
+    /// when there is none.
+    pub fn set_ask_result(&mut self, routed: &crate::backend::Routed) {
         self.ask_result = Some(
             routed
+                .routes
                 .iter()
-                .map(|(id, p)| {
-                    let name = self
-                        .experts
-                        .iter()
-                        .find(|e| e.id.as_str() == id.as_str())
-                        .map_or_else(|| id.as_str().to_string(), |e| e.name.clone());
-                    (name, *p)
-                })
+                .map(|(id, p)| (self.expert_called(id), *p))
                 .collect(),
         );
+        self.ask_reason = routed.reason.clone();
+        self.ask_near = routed.near.clone();
+    }
+
+    /// The name the console shows an expert under ([`crate::words::expert_name`]),
+    /// or its id for one that is not in the population it reads.
+    pub fn expert_called(&self, id: &antumbra_core::ExpertId) -> String {
+        self.experts
+            .iter()
+            .find(|e| e.id.as_str() == id.as_str())
+            .map_or_else(|| id.as_str().to_string(), crate::words::expert_name)
+    }
+
+    /// The standing experts that shape every answer where the console was
+    /// started: the one for everywhere, then the one for the repository it is
+    /// in. The server composes the same two into an answer there. A standing
+    /// expert is never routed to, so the ask shows these beside what routing
+    /// came to.
+    pub fn standing_here(&self) -> Vec<&Expert> {
+        let here = self.git.repo.as_deref();
+        let of = |scope: &str| {
+            self.experts
+                .iter()
+                .find(move |e| e.standing_scope() == Some(scope))
+        };
+        of(antumbra_core::behavior::EVERYWHERE)
+            .into_iter()
+            .chain(here.and_then(of))
+            .collect()
+    }
+
+    /// How many standing experts there are, in every scope.
+    pub fn standing_count(&self) -> usize {
+        self.experts
+            .iter()
+            .filter(|e| e.standing_scope().is_some())
+            .count()
     }
 
     /// The active palette every panel tints from.
@@ -871,7 +797,7 @@ impl App {
         crate::theme::ALL[self.theme_idx % crate::theme::ALL.len()]
     }
 
-    /// Advance to the next palette (wraps): shadow -> ember -> mono.
+    /// Advance to the next palette (wraps): night -> mist -> mono.
     pub fn cycle_theme(&mut self) {
         self.theme_idx = (self.theme_idx + 1) % crate::theme::ALL.len();
     }
@@ -941,12 +867,24 @@ impl App {
         }
     }
 
-    /// Toggle the keybinding help overlay.
+    /// Toggle the keybinding help overlay, opened at its top.
     pub fn toggle_help(&mut self) {
         self.mode = match self.mode {
             Mode::Help => Mode::Normal,
             _ => Mode::Help,
         };
+        self.detail_scroll = 0;
+    }
+
+    /// Whether `run` has a halt requested that it has not reached yet.
+    pub fn halt_pending(&self, run: &RunId) -> bool {
+        self.halts.contains(run.as_str())
+    }
+
+    /// Whether the run the Loop page is on has a halt pending.
+    pub fn selected_halt_pending(&self) -> bool {
+        self.selected_loop_head()
+            .is_some_and(|head| self.halt_pending(&head.run_id))
     }
 
     /// Dismiss any overlay, returning to the live view.
@@ -997,7 +935,10 @@ impl App {
     }
 }
 
+mod acting;
 mod knobs;
+mod runs;
+mod selection;
 #[cfg(test)]
 mod tests;
 mod view;

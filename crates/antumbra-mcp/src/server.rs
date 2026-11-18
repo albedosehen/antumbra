@@ -955,7 +955,7 @@ impl McpServer {
     /// covering expert(s) ranked, or escalate when the task is out of
     /// distribution. Pure-arithmetic gate inference (no model load).
     #[tool(
-        description = "Route a task across the shared population AND your private experts: which expert(s) cover it, ranked, or escalate if none."
+        description = "Route a task across the shared population AND your private experts: which expert(s) cover it, ranked, or escalate if none. Also says, under `standing`, how close the task is to what each of your standing experts was taught and whether one would answer it (pass `repo` for the repository the task is in), and under `taught`, the behaviors of yours nearest the task with whether each was learned."
     )]
     async fn route(
         &self,
@@ -966,12 +966,19 @@ impl McpServer {
             .routed(&v, p.top_k.unwrap_or(3) as usize)
             .await
             .map_err(err)?;
+        let standing = self
+            .standing_near(&v, p.repo.as_deref())
+            .await
+            .map_err(err)?;
+        let taught = self.taught_near(&v).await.map_err(err)?;
         let covered = !routes.is_empty();
         Ok(Json(RouteOut {
             covered,
             escalate: !covered,
             reason: why.map(str::to_string),
             routes,
+            standing,
+            taught,
         }))
     }
 }

@@ -5,17 +5,20 @@
 //! in its self-improvement cycle. When more than one run is live, the runs are a
 //! selectable list (j/k) and `enter` opens the run's drill-down.
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Cell, Paragraph, Row, Table, Wrap};
 use ratatui::Frame;
 
 use antumbra_core::generational::LoopState;
 
 use crate::app::App;
+use crate::standing::{Scope, Standing};
+use crate::theme::Tone;
+use crate::words;
 
-use super::panel;
+use super::{nothing_here, panel, since};
 
 /// The forward cycle, in order (Paused is a rest state, shown separately).
 pub(super) const STAGES: [LoopState; 5] = [
@@ -42,30 +45,174 @@ pub(super) fn stage_label(s: LoopState) -> &'static str {
 
 pub(super) fn stage_blurb(s: LoopState) -> &'static str {
     match s {
-        LoopState::Grow => "find where the population is weak; spawn shadows there",
-        LoopState::Explore => "shadows train (DIY candle QLoRA via the trainer)",
-        LoopState::Score => "verifiers + critic produce reward signals",
-        LoopState::Decide => "winners graduate to experts; losers prune + log a boundary",
-        LoopState::Consolidate => "update fitness, merge/decay the stores, reindex, checkpoint",
-        LoopState::Paused => "fully resumable rest state",
+        LoopState::Grow => "find where the experts are weak, and start candidates there",
+        LoopState::Explore => "the candidates train",
+        LoopState::Score => "each candidate's answers are checked",
+        LoopState::Decide => {
+            "the winners become experts; the rest are pruned, and where they failed is recorded"
+        }
+        LoopState::Consolidate => {
+            "fitness is updated and the stores tidied, for the next generation"
+        }
+        LoopState::Paused => "at rest; it resumes where it stopped",
     }
 }
 
+/// The Training page: what the server teaches without being asked, over the
+/// loop a person runs. A workspace with no behaviors has only the second.
 pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
+    if app.standing.is_empty() {
+        training_loop(f, app, area);
+        return;
+    }
+    // Its rows, a heading, a note and the border. The loop under it keeps
+    // the rows its pipeline needs, or, with no run, the few its one sentence
+    // does, so a short terminal still lists the experts.
+    let kept = if app.loop_heads.is_empty() { 4 } else { 10 };
+    let wanted = u16::try_from(app.standing.len())
+        .unwrap_or(u16::MAX)
+        .saturating_add(4);
+    let parts = Layout::vertical([
+        Constraint::Length(wanted.min(area.height.saturating_sub(kept))),
+        Constraint::Min(0),
+    ])
+    .split(area);
+    standing(f, app, parts[0]);
+    training_loop(f, app, parts[1]);
+}
+
+/// A wait as its coarsest unit: `5h`, `40m`.
+fn wait(left: chrono::Duration) -> String {
+    if left.num_hours() > 0 {
+        format!("{}h", left.num_hours())
+    } else {
+        format!("{}m", left.num_minutes().max(1))
+    }
+}
+
+/// Where a scope's training stands, as a shape and a sentence.
+fn stands(app: &App, s: &Scope) -> (Tone, String) {
+    match s.state {
+        Standing::UpToDate => (Tone::Settled, "up to date".into()),
+        Standing::Waiting => (Tone::Open, "trained at the server's next pass".into()),
+        Standing::Refused => (
+            Tone::Failed,
+            "not admitted: it waits for a behavior to change".into(),
+        ),
+        Standing::Dropping => (
+            Tone::Ended,
+            "nothing left to teach: dropped at the next pass".into(),
+        ),
+        Standing::Proposed => (
+            Tone::Open,
+            match s.accepts_in {
+                Some(left) if left <= chrono::Duration::zero() => {
+                    "accepted at the server's next pass".into()
+                }
+                Some(left) => format!("its first is accepted in {}", wait(left)),
+                None if app.policy.accept_after_hours > 0.0 => {
+                    "none can be taught yet: the dashboard says why".into()
+                }
+                None => "waits for you to accept it".into(),
+            },
+        ),
+    }
+}
+
+/// The standing experts: each scope, how many of its behaviors are taught,
+/// wait and are proposed, when it was last trained, and where it stands.
+/// The server works through these by itself, so the panel says what it will
+/// do next and not what to type.
+fn standing(f: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme();
+    let name = format!(
+        " Standing experts {} · taught by the server ",
+        app.standing.len()
+    );
+    let block = panel(&t, Span::styled(name, Style::default().fg(t.ink2)));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let parts = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(inner);
+
+    let count = |n: usize| {
+        let ink = if n == 0 { t.ink3 } else { t.ink };
+        Cell::from(Span::styled(n.to_string(), Style::default().fg(ink)))
+    };
+    let rows = app.standing.iter().map(|s| {
+        let (tone, says) = stands(app, s);
+        Row::new(vec![
+            Cell::from(Span::styled(
+                words::scope_name(&s.scope).to_string(),
+                Style::default().fg(t.ink),
+            )),
+            count(s.trained),
+            count(s.accepted),
+            count(s.proposed),
+            Cell::from(Span::styled(
+                s.last_trained.map_or_else(|| "-".to_string(), since),
+                Style::default().fg(t.ink2),
+            )),
+            Cell::from(Line::from(vec![
+                Span::styled(
+                    format!("{} ", tone.glyph()),
+                    Style::default().fg(t.tone(tone)),
+                ),
+                Span::styled(says, Style::default().fg(t.tone(tone))),
+            ])),
+        ])
+    });
+    let header = Row::new(
+        [
+            "EXPERT",
+            "TRAINED",
+            "ACCEPTED",
+            "PROPOSED",
+            "LAST TRAINED",
+            "STATE",
+        ]
+        .into_iter()
+        .map(Cell::from),
+    )
+    .style(Style::default().fg(t.ink2).add_modifier(Modifier::BOLD));
+    let widths = [
+        Constraint::Min(14),
+        Constraint::Length(7),
+        Constraint::Length(8),
+        Constraint::Length(8),
+        Constraint::Length(12),
+        Constraint::Min(34),
+    ];
+    f.render_widget(Table::new(rows, widths).header(header), parts[0]);
+
+    let hours = app.policy.accept_after_hours;
+    let note = if hours > 0.0 {
+        format!(
+            "A proposed behavior that can be taught is accepted after {hours:.0} hours. K changes the wait."
+        )
+    } else {
+        "Proposed behaviors wait for you to accept them. K sets a wait after which the server does."
+            .to_string()
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(note, Style::default().fg(t.ink3))),
+        parts[1],
+    );
+}
+
+/// The generational loop: the run under the cursor as a pipeline.
+fn training_loop(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let block = panel(
         &t,
-        Span::styled(" generational loop ", Style::default().fg(t.ink)),
+        Span::styled(" Training loop ", Style::default().fg(t.ink2)),
     );
     let inner = block.inner(area);
     f.render_widget(block, area);
 
     let Some(head) = app.selected_loop_head() else {
+        let why = "No training loop has run yet: `antumbra train` runs one over a corpus, by hand. A standing expert needs none: the server trains it when a behavior of yours is accepted, and lists it here.";
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "loop not started; no checkpoint yet",
-                Style::default().fg(t.dim),
-            ))),
+            Paragraph::new(nothing_here(app, &t, why)).wrap(Wrap { trim: true }),
             inner,
         );
         return;
@@ -83,21 +230,22 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
             let idx = offset + i;
             let selected = idx == app.selected_loop;
             let (marker, style) = if selected {
-                (
-                    "▌ ",
-                    Style::default()
-                        .bg(t.sel)
-                        .fg(t.text)
-                        .add_modifier(Modifier::BOLD),
-                )
+                ("▸ ", t.selected().fg(t.ink))
             } else {
-                ("  ", Style::default().fg(t.dim))
+                ("  ", Style::default().fg(t.ink2))
+            };
+            // A run with a halt pending says so in the list, so the one that
+            // was halted is found without stepping through them.
+            let halting = if app.halt_pending(&h.run_id) {
+                " · halt requested"
+            } else {
+                ""
             };
             lines.push(Line::from(vec![
                 Span::styled(marker, Style::default().fg(t.accent)),
                 Span::styled(
                     format!(
-                        "{:<24}  gen {:<4}  {}",
+                        "{:<24}  gen {:<4}  {}{halting}",
                         h.run_id.as_str(),
                         h.generation.0,
                         stage_label(h.state)
@@ -108,22 +256,22 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         }
         if end < app.loop_heads.len() {
             lines.push(Line::from(Span::styled(
-                format!("  + {} more run(s)", app.loop_heads.len() - end),
-                Style::default().fg(t.dim),
+                format!("  and {} more", app.loop_heads.len() - end),
+                Style::default().fg(t.ink3),
             )));
         }
         lines.push(Line::from(""));
     }
 
     lines.push(Line::from(vec![
-        Span::styled("  generation ", Style::default().fg(t.dim)),
+        Span::styled("  generation ", Style::default().fg(t.ink2)),
         Span::styled(
             head.generation.0.to_string(),
-            Style::default().fg(t.value).add_modifier(Modifier::BOLD),
+            Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("    ·    {}    ·    state ", head.run_id.as_str()),
-            Style::default().fg(t.dim),
+            format!("    ·    {}    ·    stage ", head.run_id.as_str()),
+            Style::default().fg(t.ink2),
         ),
         Span::styled(
             stage_label(head.state),
@@ -137,52 +285,55 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     for (i, &s) in STAGES.iter().enumerate() {
         let current = s == head.state;
         let glyph = if current { "◉" } else { "○" };
-        let color = if current { t.accent } else { t.dim };
+        let color = if current { t.accent } else { t.ink3 };
         let mut style = Style::default().fg(color);
         if current {
             style = style.add_modifier(Modifier::BOLD);
         }
         spans.push(Span::styled(format!("{glyph} {}", stage_label(s)), style));
         if i < STAGES.len() - 1 {
-            spans.push(Span::styled("  →  ", Style::default().fg(t.dim)));
+            spans.push(Span::styled("  →  ", Style::default().fg(t.line)));
         }
     }
-    spans.push(Span::styled("  ↺", Style::default().fg(t.dim)));
+    spans.push(Span::styled("  ↺", Style::default().fg(t.line)));
     lines.push(Line::from(spans));
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled("  → ", Style::default().fg(t.accent)),
-        Span::styled(stage_blurb(head.state), Style::default().fg(t.ink)),
+        Span::styled(stage_blurb(head.state), Style::default().fg(t.ink2)),
     ]));
 
     if head.state == LoopState::Paused {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "  ‖ paused; resumes into grow",
-            Style::default().fg(t.warning),
+            "  ‖ paused: it resumes where it stopped",
+            Style::default().fg(t.ink2),
         )));
     }
 
     lines.push(Line::from(""));
-    if app.loop_halt_pending {
+    if app.halt_pending(&head.run_id) {
+        // A halt asked for is in force until it is reached or canceled: the
+        // accent, which marks what is in force, and not the danger colour,
+        // which is kept for what failed.
         lines.push(Line::from(Span::styled(
-            "  ⚠ halt requested; the loop will stop at the next generation",
-            Style::default().fg(t.warning).add_modifier(Modifier::BOLD),
+            "  ● halt requested: this run stops at its next generation",
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
-            "    cancel via the palette (loop · cancel a pending halt)",
-            Style::default().fg(t.dim),
+            "    x · cancel the halt",
+            Style::default().fg(t.ink3),
         )));
-    } else {
+    } else if app.operator {
         lines.push(Line::from(Span::styled(
-            "  x · request a graceful halt (stops at the next generation)",
-            Style::default().fg(t.dim),
+            "  x · halt this run at its next generation",
+            Style::default().fg(t.ink3),
         )));
     }
     lines.push(Line::from(Span::styled(
-        "  enter · inspect this run",
-        Style::default().fg(t.dim),
+        "  enter · everything about this run",
+        Style::default().fg(t.ink3),
     )));
 
     f.render_widget(Paragraph::new(lines), inner);

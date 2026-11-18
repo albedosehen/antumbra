@@ -1,36 +1,36 @@
-╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│◆◆◆  ANTUMBRA   self-improving substrate · 1 umbra · gen 0  ·  144 fps  ·  focused                                    │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-  1 population  ·  2 memory  ·  3 loop  ·  4 evals  ·  5 sovereign
-  fitness █████▍ 0.90  frozen ██████ 1.00  graduated ────── 0.00  gating ────── 0.00  memory ████▊─ 0.79
-╭ penumbra · memory networks ────────────────────────────────────────────╮╭ memory ────────────────────────────────────╮
-│                                                                        ││prefer deno over node for new scripts       │
-│                                                                        ││                                            │
-│                                                                        ││network    world                            │
-│                                                                        ││status     committed                        │
-│                                                                        ││strength   ██████████▍─ 0.86                │
-│                                   ◉⠂                                   ││confidence ██████████▍─ 0.86                │
-│                                 ⢀⠔⠁                                    ││reinforce  4                                │
-│                                ⡠⠊                                      ││volatile   no                               │
-│                              ⢀⠔⠁                                       ││use        never seen                       │
-│                             ⡠⠃   world                                 ││                                            │
-│                           ⢀⠜                                           ││evidence                                    │
-│                          ⡠⠃                                            ││  · session-log                             │
-│                        ⢀⠜                                              ││                                            │
-│                       ⡰⠁                                               ││edges (2)                                   │
-│                     ⢀⠎                                                 ││  ← contradicts memory:incident             │
-│                    ⡰⠁                                                  ││  → caused      memory:incident             │
-│                  ⢠⠊                                                    ││                                            │
-│                 ⡔⠁                                                     ││                                            │
-│              ○⢠⠊                                       ○               ││                                            │
-│              ⠐⠁                                                        ││                                            │
-│                                                                        ││                                            │
-│                                                                        ││                                            │
-│             bank                                      opinion          ││                                            │
-│                                                                        ││                                            │
-│                                                                        ││                                            │
-│                                                                        ││                                            │
-│                                                                        ││                                            │
-│                                                                        ││                                            │
-╰────────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────╯
- q  quit   ↑↓  select   tab  focus:umbra   []  page:memory   t  theme:shadow   ±  cap:144   r  reload   ?  help   :  pal
+ ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                 ● live
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent  ·  6 Services
+ Memory: what your agents stored. World is facts, bank is experiences, opinion is judgments.
+╭  All 3 │ World 1 │ Bank 1 │ Opinion 1  ────────────────────────────╮╭ Selected memory ───────────────────────────────╮
+│  MEMORY                                        KIND     STRENGTH   ││prefer deno over node for new scripts           │
+│▸ prefer deno over node for new scripts         world    █████▏ 0.86││                                                │
+│  npm install failed under the deno runtime     bank     ████▎─ 0.70││kind       world · a fact                       │
+│  keep operator docs terse, no emojis           opinion  ████▊─ 0.80││status     committed                            │
+│                                                                    ││strength   ██████████▍─ 0.86                    │
+│                                                                    ││confidence ██████████▍─ 0.86                    │
+│                                                                    ││reinforced 4 times                              │
+│                                                                    ││may change no                                   │
+│                                                                    ││use        not seen in use yet                  │
+│                                                                    ││                                                │
+│                                                                    ││Evidence                                        │
+│                                                                    ││  · session-log                                 │
+│                                                                    ││                                                │
+│                                                                    ││Links · 2                                       │
+│                                                                    ││  ← contradicts memory:incident                 │
+│                                                                    ││  → caused      memory:incident                 │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+╰────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
+
+ ↑↓  move   tab  next kind   /  find   1-6  pages   l  graph   a  ask   :  commands   ?  help   q  quit
