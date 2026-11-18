@@ -39,6 +39,10 @@ A console a newcomer can use, and a server that does more of its own work. The t
 
 - **The agent's rules are kept, and its skills counted, without a command** ([#425](https://github.com/albedosehen/antumbra/pull/425)). The console's Agent page was filled by `antumbra claude remember`, which a person had to run, and by two hooks a person had to paste into their settings. The session-start hook now keeps the rules, detached, in the mode they are for (`ANTUMBRA_REMEMBER=0` turns it off), and `antumbra setup` wires the two hooks that count skill use.
 
+### Dependencies
+
+- **The control server's lockfile is clear of the six lettre advisories of 2026-11-17** ([#432](https://github.com/albedosehen/antumbra/pull/432)). lettre moves from 0.11.23 to 0.11.24, and email-encoding with it. The advisories are in the SMTP client the control server sends sign-in links with when it is built with `smtp`: a forged reply after STARTTLS (RUSTSEC-2026-0560), command injection through a bare LF or CR (0561), a message for an address with a quoted local part going to another address (0563), two panics (0562, 0564) and a reply buffered without bound (0565). The main workspace's lockfile does not hold lettre.
+
 ### Known limits
 
 - **The generational loop still runs by hand.** `antumbra train` needs a corpus of tasks with their checks, which nothing in the store supplies. What trains by itself is a standing expert, from behaviors.
