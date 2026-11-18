@@ -152,10 +152,7 @@ fn graph(f: &mut Frame, app: &App, area: Rect, reached: &[Reached]) {
         );
     }
     let mut key = netdraw::key(&t, ["declared", "observed", "learned or claimed"]);
-    key.push(Span::styled(
-        "   ▸ what a service depends on",
-        Style::default().fg(t.ink3),
-    ));
+    key.push(Span::styled("   ▸ depends on", Style::default().fg(t.ink3)));
     f.render_widget(Paragraph::new(Line::from(key)), rows[2]);
 }
 

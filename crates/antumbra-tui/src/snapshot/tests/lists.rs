@@ -491,11 +491,14 @@ fn the_memory_graph_is_one_key_from_the_list() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.set_page(Page::Memory);
     let list = to_text(&render(&mut app, 120, 36, 1600.0)?);
-    assert!(list.contains("MEMORY") && !list.contains("Memory · by kind"));
+    assert!(list.contains("MEMORY") && !list.contains("memories have one"));
     assert!(list.lines().last().unwrap_or_default().contains("graph"));
     app.toggle_memory_graph();
     let graph = to_text(&render(&mut app, 120, 36, 1600.0)?);
-    assert!(graph.contains("Memory · by kind"), "{graph}");
+    assert!(
+        graph.contains("Links · 2 of 3 memories have one · 2 links"),
+        "{graph}"
+    );
     assert!(!graph.contains("STRENGTH  "), "{graph}");
     // The footer offers the way back, and no Tab, which has no list to move
     // along.
@@ -537,8 +540,9 @@ fn golden_population_list_at_80_columns() -> anyhow::Result<()> {
     )
 }
 
-// Golden the memory page's graph, which the list replaced as what the page
-// opens on. It is statically laid out, so the frame is stable.
+// Golden the memory page's graph: the selected memory's links, drawn. Two
+// memories that each link to the other are drawn with the one line that
+// points forward.
 #[test]
 fn golden_memory_graph() -> anyhow::Result<()> {
     let mut app = demo_app();

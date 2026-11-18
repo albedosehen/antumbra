@@ -189,6 +189,11 @@ pub async fn run(args: Args) -> Result<()> {
             app.theme_idx = theme::Theme::index_of(&args.theme);
             app.set_page(page);
             app.set_layout(layout);
+            // The Memory page has two views of its own, and `graph` asks for
+            // the one that is not its list.
+            if page == app::Page::Memory && layout == app::LayoutMode::Graph {
+                app.toggle_memory_graph();
+            }
             app.set_focus(list);
             match panel {
                 named::Panel::None => {}

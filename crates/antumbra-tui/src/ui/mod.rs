@@ -15,6 +15,7 @@ mod evals;
 mod graph;
 mod heatmap;
 mod knobs;
+mod links;
 mod lists;
 mod loops;
 mod memory;
