@@ -196,15 +196,16 @@ It never fails the agent: whatever goes wrong is said on standard error, and not
 
 ### Which agents, and what setup writes for each
 
-`antumbra setup` connects Claude Code and every other agent it finds on the machine: one whose program is on the PATH, or whose config directory is there. `--agent` names them instead (`--agent gemini`, `--agent claude,codex`, `--agent all`), and `--no-claude` leaves Claude Code out.
+`antumbra setup` connects Claude Code and every other agent it finds on the machine: one whose program is on the PATH, or whose config directory is there. `--agent` names them instead (`--agent gemini`, `--agent claude,codex`, `--agent copilot`, `--agent all`), and `--no-claude` leaves Claude Code out.
 
-Setup touches as little of a person's own files as each agent allows. Where an agent reads a directory of Antumbra's own, that is all setup writes: nothing the person wrote is edited, and connecting again replaces it (Gemini CLI). Where an agent reads only its user's files, setup adds to them as it does for Claude Code: with the agent's own command, or as text, adding only, with a backup, and never twice (Codex). Either way `antumbra setup check` reads back what was written.
+Setup touches as little of a person's own files as each agent allows. Where an agent reads a directory of Antumbra's own, that is all setup writes: nothing the person wrote is edited, and connecting again replaces it (Gemini CLI). Where an agent reads only its user's files, setup adds to them as it does for Claude Code: with the agent's own command, or as text, adding only, with a backup, and never twice (Codex, and Copilot CLI's list of MCP servers). Either way `antumbra setup check` reads back what was written.
 
 | Agent | What setup writes | Opens with memory | Recall for each prompt | Reminder to store |
 | --- | --- | --- | --- | --- |
 | Claude Code | hooks and `env` in `settings.json`; the MCP server, with a headers helper | yes | yes | yes |
 | Gemini CLI | an extension, `~/.gemini/extensions/antumbra`: the bridge and three hooks | yes | yes | yes |
 | Codex | the bridge, with `codex mcp add`; three hooks added to `~/.codex/hooks.json` | yes, once you approve the hooks | yes, once you approve the hooks | yes, once you approve the hooks |
+| Copilot CLI | a hooks file, `~/.copilot/hooks/antumbra.json`; the bridge added to `~/.copilot/mcp-config.json` | yes | yes | yes |
 
 **Gemini CLI.** The extension holds a manifest with the bridge as its MCP server and a `hooks/hooks.json` with `SessionStart`, `BeforeAgent` and `AfterAgent`. Gemini CLI lists it (`gemini extensions list`) and `gemini extensions uninstall antumbra` removes it. Two things are Gemini CLI's own to decide, and setup leaves them as they are:
 
@@ -227,6 +228,13 @@ At a turn's end Gemini CLI shows the reminder to you as a warning that the agent
 - **Codex skips a hook until you approve it.** Start Codex, type `/hooks`, and approve Antumbra's three. Until then a session has Antumbra's tools and the bridge's instructions, and none of the three touchpoints; setup says so when it adds them, and Codex says nothing when it skips them. Approval is asked again when a hook's command changes, which it does when `antumbra` moves on or off the PATH.
 
 Codex moves a hook's context to a file past some 2,500 tokens, so its bootstrap is kept to 7,000 characters (`ANTUMBRA_CONTEXT_LIMIT`) and says how many memories it left out. At a turn's end Codex shows the stop hook as blocked: that is the reminder reaching the agent, which is asked once more and stops.
+
+**Copilot CLI.** The hooks are a file of Antumbra's own in `~/.copilot/hooks` (or under `COPILOT_HOME`), with `sessionStart`, `userPromptSubmitted` and `agentStop`; Copilot CLI runs a user's own hooks without asking. The bridge is one entry, `mcpServers.antumbra`, added to `mcp-config.json` as text, with the rest of the file left byte for byte and a backup beside it. Setup edits that file itself where it uses Codex's own command for Codex's, because the `copilot` on a PATH is not always Copilot CLI: VS Code puts a launcher of that name there.
+
+- Copilot CLI hands its turn's-end hook the path of the session's event log and not the answer, so the answer the server judges a turn's recalls against is read from the end of that log. The log's shape is Copilot CLI's own; when it does not read as expected the turn goes unjudged and nothing else changes.
+- It puts an MCP server's instructions in its system prompt only for servers on a list of its own, so the bridge's are not read there (`--allow-all-mcp-server-instructions` reads them for one run). The hooks carry what a session needs.
+- It asks before an Antumbra tool runs unless you allow it: `--allow-tool antumbra` for a run, or its permission settings.
+- Copilot in VS Code reads the same `~/.copilot` hooks and MCP servers, by VS Code's own account. That was not run here.
 
 ## Leaving work for another of your machines
 

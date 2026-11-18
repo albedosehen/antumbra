@@ -143,6 +143,43 @@ pub fn heard(agent: Agent, event: Event, input: &Value) -> Value {
     Value::Object(out)
 }
 
+/// The last thing the assistant said, in the text of a Copilot CLI session's
+/// event log (`events.jsonl`, one event a line): the content of its last
+/// `assistant.message`. Copilot CLI hands its turn's-end hook the log's path
+/// and not the answer, and the answer is what the server judges a turn's
+/// recalls against. The log's shape is Copilot CLI's own and not promised, so
+/// anything that does not read as expected is no answer, and the turn goes
+/// unjudged.
+pub fn last_in_events(events: &str) -> Option<String> {
+    events.lines().rev().find_map(|line| {
+        let event: Value = serde_json::from_str(line).ok()?;
+        if event.get("type").and_then(Value::as_str) != Some("assistant.message") {
+            return None;
+        }
+        event
+            .pointer("/data/content")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .filter(|text| !text.trim().is_empty())
+    })
+}
+
+/// The end of the file at `path`, at most [`TAIL`] bytes of it, as text. A
+/// first line cut in two is one line that will not read as an event.
+fn tail(path: &Path) -> Option<String> {
+    use std::io::{Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let length = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(length.saturating_sub(TAIL)))
+        .ok()?;
+    let mut bytes = Vec::new();
+    file.take(TAIL).read_to_end(&mut bytes).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// How much of a session's event log is read for its last answer.
+const TAIL: u64 = 512 * 1024;
+
 /// What a script said, whichever of its ways it said it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Said {
@@ -207,9 +244,17 @@ pub fn answer(agent: Agent, event: Event, what: &Said) -> Option<String> {
         (Agent::Codex, Event::Stop, Said::Reminder(text)) => {
             json!({ "decision": "block", "reason": text })
         }
+        // Copilot CLI: context with no wrapper, and a turn's end blocked with
+        // the reminder.
+        (Agent::Copilot, Event::SessionStart | Event::Prompt, Said::Context(text)) => {
+            json!({ "additionalContext": text })
+        }
+        (Agent::Copilot, Event::Stop, Said::Reminder(text)) => {
+            json!({ "decision": "block", "reason": text })
+        }
         // A reminder where a turn is not ending, or context where one is,
         // has no place to go.
-        (Agent::Gemini | Agent::Codex, _, _) => return None,
+        (Agent::Gemini | Agent::Codex | Agent::Copilot, _, _) => return None,
     };
     Some(out.to_string())
 }
@@ -314,7 +359,7 @@ fn run_script(
 fn context_limit(agent: Agent) -> Option<u32> {
     match agent {
         Agent::Codex => Some(7_000),
-        Agent::Gemini => None,
+        Agent::Gemini | Agent::Copilot => None,
     }
 }
 
@@ -358,7 +403,21 @@ fn serve(args: &HookArgs) -> anyhow::Result<Option<String>> {
     let mut raw = Vec::new();
     std::io::stdin().take(MOST).read_to_end(&mut raw)?;
     let input: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
-    let heard = heard(args.agent, args.event, &input);
+    let mut heard = heard(args.agent, args.event, &input);
+    // Copilot CLI names its event log where the others give the answer.
+    if args.agent == Agent::Copilot
+        && args.event == Event::Stop
+        && heard.get("last_assistant_message").is_none()
+    {
+        let said = heard
+            .get("transcript_path")
+            .and_then(Value::as_str)
+            .and_then(|path| tail(Path::new(path)))
+            .and_then(|events| last_in_events(&events));
+        if let (Some(said), Some(heard)) = (said, heard.as_object_mut()) {
+            heard.insert("last_assistant_message".into(), Value::String(said));
+        }
+    }
     let script = script_path(&home.join(".antumbra"), args.event);
     if !script.is_file() {
         anyhow::bail!(
