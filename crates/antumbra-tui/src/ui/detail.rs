@@ -14,8 +14,8 @@ use super::evals::{kind_label, status_label, status_text, status_tone};
 use super::loops::{stage_blurb, stage_label, STAGES};
 use super::overlays::{json_lines, section};
 use super::{
-    boundary_tone, context_fields, expert_state, gauge_row, gauge_spans, heading, kv, reward_span,
-    shadow_name, shadow_tone, sparkline_row, state_row,
+    boundary_tone, candidate_state, context_fields, expert_state, gauge_row, gauge_spans, heading,
+    kv, shadow_name, since, sparkline_row, state_row,
 };
 /// The evaluation drill-down: the run's fields, the regression comparison
 /// against the previous run for the same subject (the no-forgetting
@@ -365,26 +365,38 @@ pub(super) fn shadow_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
     };
     let scope = behavior::shadow_scope(&s.id);
     let mut l = vec![heading(t, s.id.as_str().to_string())];
-    l.push(state_row(
-        t,
-        "status",
-        shadow_tone(s.status.as_str()),
-        s.status.as_str(),
-    ));
+    let (tone, state) = candidate_state(app, s);
+    let state = match app.replaced_by(s) {
+        Some(later) => format!("replaced by the run {}", since(later.created_at)),
+        None => state.to_string(),
+    };
+    l.push(state_row(t, "status", tone, &state));
+    let final_reward = s.reward_curve.last().copied().unwrap_or(0.0);
     match scope {
-        // Settled by the standing-experts keeper, from the held-out tasks;
-        // its parent is the expert it would replace.
+        // Settled by the standing-experts keeper, from the held-out tasks.
         Some(scope) => {
-            l.push(kv(t, "kind", "a standing expert's training"));
+            l.push(kv(t, "kind", "a training run of a standing expert"));
             l.push(kv(t, "scope", scope));
-            l.push(kv(
-                t,
-                "replaces",
-                s.parent_expert.as_ref().map_or("-", |p| p.as_str()),
-            ));
-            if let Some(r) = reward_span(&s.reward_curve) {
-                l.push(kv(t, "pass rate", &r));
+            let runs = app.runs_with(s);
+            if let Some(nth) = runs.iter().position(|run| run.id == s.id) {
+                let of = format!("{} of {}, oldest first", nth + 1, runs.len());
+                l.push(kv(t, "run", &of));
             }
+            l.push(kv(t, "when", &since(s.created_at)));
+            // The held-out pass rate before training and after, on one scale.
+            match s.reward_curve.as_slice() {
+                [base, _, ..] => l.push(gauge_row(t, "base model", *base, t.ink3)),
+                _ => {
+                    l.push(kv(t, "base model", "not kept for this run"));
+                    l.push(Line::from(Span::styled(
+                        "           It was recorded before the base model's pass rate \
+                         was kept with a run. It was trained and it graduated: only \
+                         the reading to set beside its own is missing.",
+                        Style::default().fg(t.ink3),
+                    )));
+                }
+            }
+            l.push(gauge_row(t, "trained", final_reward, t.accent));
         }
         None => {
             l.push(kv(t, "generation", &s.generation.0.to_string()));
@@ -393,24 +405,24 @@ pub(super) fn shadow_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
                 "trained from",
                 s.parent_expert.as_ref().map_or("-", |p| p.as_str()),
             ));
+            l.push(kv(t, "when", &since(s.created_at)));
+            l.push(gauge_row(t, "reward", final_reward, t.accent));
+            if !s.reward_curve.is_empty() {
+                l.push(sparkline_row(t, "reward", &s.reward_curve));
+                let vals = s
+                    .reward_curve
+                    .iter()
+                    .map(|v| format!("{v:.2}"))
+                    .collect::<Vec<_>>()
+                    .join("  ");
+                l.push(Line::from(Span::styled(
+                    format!("  {vals}"),
+                    Style::default().fg(t.ink),
+                )));
+            }
         }
     }
     l.push(kv(t, "adapter", s.adapter_uri.as_deref().unwrap_or("-")));
-    let final_reward = s.reward_curve.last().copied().unwrap_or(0.0);
-    l.push(gauge_row(t, "reward", final_reward, t.accent));
-    if !s.reward_curve.is_empty() {
-        l.push(sparkline_row(t, "reward", &s.reward_curve));
-        let vals = s
-            .reward_curve
-            .iter()
-            .map(|v| format!("{v:.2}"))
-            .collect::<Vec<_>>()
-            .join("  ");
-        l.push(Line::from(Span::styled(
-            format!("  {vals}"),
-            Style::default().fg(t.ink),
-        )));
-    }
     l.push(kv(t, "created", &s.created_at.to_rfc3339()));
     (format!("Candidate · {}", shadow_name(s)), l)
 }

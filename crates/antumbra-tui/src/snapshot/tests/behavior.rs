@@ -783,12 +783,18 @@ fn a_standing_experts_training_reads_by_its_scope() -> anyhow::Result<()> {
         text.contains("▸ code") && text.contains("0.42 → 0.91 ● graduated"),
         "the list row names the scope and the change:\n{text}"
     );
-    assert!(text.contains("standing expert's training"), "titled as one");
-    assert!(text.contains("base"), "the base model's rate is labeled");
+    assert!(
+        text.contains("a training run of its standing expert"),
+        "titled as one:\n{text}"
+    );
+    assert!(
+        text.contains("base model"),
+        "the base model's rate is labeled"
+    );
     assert!(text.contains("trained"), "the trained rate is labeled");
     assert!(
-        text.contains("Pass rate · base model → trained"),
-        "the chart says what its two points are"
+        text.contains("This expert has been trained once."),
+        "two readings of one run are not drawn as a path:\n{text}"
     );
     assert!(
         !text.contains("shadow:ws:"),
