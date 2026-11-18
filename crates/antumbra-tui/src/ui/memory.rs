@@ -21,7 +21,7 @@ use crate::theme::{Theme, Tone};
 use crate::words;
 
 use super::lists::{self, Grid};
-use super::{clip, gauge_row, gauge_spans, heading, kv, panel, state_row};
+use super::{clip, gauge_row, gauge_spans, heading, kv, panel, since, state_row};
 
 /// The three networks and where their clusters anchor on the canvas.
 const ANCHORS: [(MemoryNetwork, (f64, f64)); 3] = [
@@ -307,23 +307,9 @@ fn use_lines<'a>(t: &Theme, app: &App, m: &antumbra_core::Memory) -> Vec<Line<'a
         lines.push(kv(t, "judged", &format!("good {} · bad {}", u.good, u.bad)));
     }
     if let Some(at) = u.last_used_at {
-        lines.push(kv(t, "last used", &ago(chrono::Utc::now() - at)));
+        lines.push(kv(t, "last used", &since(at)));
     }
     lines
-}
-
-/// A duration as the coarsest unit that fits: `3d ago`, `5h ago`, `now`.
-fn ago(d: chrono::Duration) -> String {
-    let (days, hours, minutes) = (d.num_days(), d.num_hours(), d.num_minutes());
-    if days > 0 {
-        format!("{days}d ago")
-    } else if hours > 0 {
-        format!("{hours}h ago")
-    } else if minutes > 0 {
-        format!("{minutes}m ago")
-    } else {
-        "now".into()
-    }
 }
 
 /// The selected trace: its fields, evidence, and the edges touching it.

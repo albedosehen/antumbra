@@ -349,6 +349,46 @@ fn shadow_tone(status: &str) -> Tone {
     }
 }
 
+/// A candidate's state as a list says it: its status, or `replaced` for a
+/// standing expert's run that a later run took the place of. Every one of an
+/// expert's runs graduated, so the status alone reads the same on each, and
+/// only the newest is the adapter the expert answers with.
+fn candidate_state(app: &App, s: &Shadow) -> (Tone, &'static str) {
+    if app.replaced_by(s).is_some() {
+        (Tone::Ended, "replaced")
+    } else {
+        (shadow_tone(s.status.as_str()), s.status.as_str())
+    }
+}
+
+/// How long ago `at` was, as the coarsest unit that fits: `3d ago`, `5h ago`,
+/// `now`.
+fn since(at: chrono::DateTime<chrono::Utc>) -> String {
+    elapsed(at).map_or_else(|| "now".into(), |age| format!("{age} ago"))
+}
+
+/// The same without `ago`, for a column whose heading says it is an age:
+/// `3d`, `5h`, `now`.
+fn age(at: chrono::DateTime<chrono::Utc>) -> String {
+    elapsed(at).unwrap_or_else(|| "now".into())
+}
+
+/// The time since `at` as the coarsest unit that fits, `3d`, `5h` or `7m`;
+/// `None` for under a minute.
+fn elapsed(at: chrono::DateTime<chrono::Utc>) -> Option<String> {
+    let d = chrono::Utc::now() - at;
+    let (days, hours, minutes) = (d.num_days(), d.num_hours(), d.num_minutes());
+    if days > 0 {
+        Some(format!("{days}d"))
+    } else if hours > 0 {
+        Some(format!("{hours}h"))
+    } else if minutes > 0 {
+        Some(format!("{minutes}m"))
+    } else {
+        None
+    }
+}
+
 /// A boundary in force (actionable: it gates routing) is settled; one that is
 /// only recorded is open.
 fn boundary_tone(b: &FailureBoundary) -> Tone {
@@ -417,22 +457,23 @@ fn state_line<'a>(t: &Theme, tone: Tone, text: String) -> Line<'a> {
     ])
 }
 
-/// A shadow's list row: its status shape (graduated ●, pruned ×, under way
-/// ○), what it trained and where its reward went. The shape carries the
-/// status, which the training panel spells out; the list is narrow, and the
-/// trained reading at the row's end is what it is read for. A standing
-/// expert's training is named by its scope, shortened; the loop's by its id
-/// and generation.
-fn shadow_row<'a>(t: &Theme, s: &Shadow) -> Line<'a> {
+/// A shadow's list row: its state's shape (graduated ●, replaced or pruned ×,
+/// under way ○), what it trained, when, and where its reward went. The shape
+/// carries the state, which the training panel spells out; the list is
+/// narrow, and the trained reading at the row's end is what it is read for. A
+/// standing expert's training is named by its scope, shortened, and told from
+/// the expert's other trainings by when it was; the loop's by its id and
+/// generation.
+fn shadow_row<'a>(t: &Theme, app: &App, s: &Shadow) -> Line<'a> {
     let mut row = match behavior::shadow_scope(&s.id) {
-        Some(scope) => short_scope(scope).to_string(),
+        Some(scope) => format!("{} · {}", short_scope(scope), since(s.created_at)),
         None => shadow_name(s),
     };
     if let Some(r) = reward_span(&s.reward_curve) {
         row.push_str(" · ");
         row.push_str(&r);
     }
-    state_line(t, shadow_tone(s.status.as_str()), row)
+    state_line(t, candidate_state(app, s).0, row)
 }
 
 /// A boundary's list row: in force ● or open ○, the behavior, then the

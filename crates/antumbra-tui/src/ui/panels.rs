@@ -6,6 +6,7 @@
 
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
+use ratatui::symbols::Marker;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Axis, Chart, Dataset, GraphType, Paragraph, Wrap};
 use ratatui::Frame;
@@ -15,11 +16,12 @@ use crate::scroll;
 use crate::theme::Tone;
 use crate::words;
 
-use antumbra_core::behavior;
+use antumbra_core::{behavior, Shadow};
 
 use super::{
-    boundary_row, boundary_tone, clip, context_fields, expert_state, gauge_row, heading, kv,
-    nothing_here, panel, panel_focused, shadow_row, shadow_tone, state_line, state_row, title,
+    boundary_row, boundary_tone, candidate_state, clip, context_fields, expert_state, gauge_row,
+    heading, kv, nothing_here, panel, panel_focused, shadow_row, since, state_line, state_row,
+    title,
 };
 
 /// The experts in front: the selected one's detail over how tasks are routed.
@@ -234,19 +236,17 @@ fn boundary_detail(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-/// Beside the candidates' list: the selected one's detail over its reward as
-/// a chart.
+/// Beside the candidates' list: the selected one's detail over a chart. A
+/// standing expert's run is charted among the expert's other runs; the
+/// loop's candidate by its own reward, step by step.
 pub(super) fn candidate_side(f: &mut Frame, app: &App, area: Rect) {
-    let rows = Layout::vertical([Constraint::Length(6), Constraint::Min(0)]).split(area);
+    let rows = Layout::vertical([Constraint::Length(7), Constraint::Min(0)]).split(area);
     candidate_detail(f, app, rows[0]);
-    let kept = app
-        .selected_shadow()
-        .is_some_and(|s| behavior::shadow_scope(&s.id).is_some());
-    let curve = app
-        .selected_shadow()
-        .map(|s| s.reward_curve.as_slice())
-        .unwrap_or(&[]);
-    reward_chart(f, app, rows[1], curve, kept);
+    match app.selected_shadow() {
+        Some(s) if behavior::shadow_scope(&s.id).is_some() => runs_chart(f, app, rows[1], s),
+        Some(s) => reward_chart(f, app, rows[1], &s.reward_curve),
+        None => reward_chart(f, app, rows[1], &[]),
+    }
 }
 
 /// The candidates, newest first: graduated ●, under way ○, pruned ×.
@@ -268,7 +268,7 @@ fn candidate_list(f: &mut Frame, app: &App, area: Rect, selecting: bool, lit: bo
         );
         return;
     }
-    let lines: Vec<Line> = app.shadows.iter().map(|s| shadow_row(&t, s)).collect();
+    let lines: Vec<Line> = app.shadows.iter().map(|s| shadow_row(&t, app, s)).collect();
     scroll::list(
         f,
         &t,
@@ -279,7 +279,8 @@ fn candidate_list(f: &mut Frame, app: &App, area: Rect, selecting: bool, lit: bo
     );
 }
 
-/// The selected candidate: its status, and where its reward got to.
+/// The selected candidate: its state, when it was trained, and where its
+/// reward got to.
 fn candidate_detail(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let mut d: Vec<Line> = Vec::new();
@@ -289,26 +290,28 @@ fn candidate_detail(f: &mut Frame, app: &App, area: Rect) {
     if let Some(s) = app.selected_shadow() {
         let width = (area.width as usize).saturating_sub(2);
         let name = match scope {
-            Some(scope) => format!("{scope} · a standing expert's training"),
+            Some(scope) => format!("{scope} · a training run of its standing expert"),
             None => s.id.as_str().to_string(),
         };
         d.push(heading(&t, clip(&name, width)));
-        d.push(state_row(
-            &t,
-            "status",
-            shadow_tone(s.status.as_str()),
-            s.status.as_str(),
-        ));
+        // A run a later one took the place of says so, and when that was:
+        // each of an expert's runs graduated, and only the newest is in use.
+        let (tone, state) = candidate_state(app, s);
+        let state = match app.replaced_by(s) {
+            Some(later) => format!("replaced by the run {}", since(later.created_at)),
+            None => state.to_string(),
+        };
+        d.push(state_row(&t, "status", tone, &state));
+        d.push(kv(&t, "when", &since(s.created_at)));
         let last = s.reward_curve.last().copied().unwrap_or(0.0);
         if scope.is_some() {
-            // The held-out pass rate before training and after: the base
-            // model's, then the expert's. One recorded from an expert's card
-            // has only the trained one, which the card keeps.
-            let base = match s.reward_curve.as_slice() {
-                [base, _, ..] => format!("{base:.2}"),
-                _ => "not recorded".into(),
-            };
-            d.push(kv(&t, "base model", &base));
+            // The held-out pass rate before training and after, on one scale:
+            // the base model's, then the expert's. A run recorded from an
+            // expert's card has only the trained one, which the card keeps.
+            match s.reward_curve.as_slice() {
+                [base, _, ..] => d.push(gauge_row(&t, "base model", *base, t.ink3)),
+                _ => d.push(kv(&t, "base model", "not kept for this run")),
+            }
             d.push(gauge_row(&t, "trained", last, t.accent));
         } else {
             d.push(kv(&t, "generation", &s.generation.0.to_string()));
@@ -328,25 +331,145 @@ fn candidate_detail(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-/// The selected candidate's reward as a line chart over training steps: the
-/// path that decides whether it graduates. A standing expert's training
-/// (`kept`) reads two points, the base model's pass rate and the trained
-/// expert's.
-fn reward_chart(f: &mut Frame, app: &App, area: Rect, curve: &[f32], kept: bool) {
+/// How a standing expert has done from one training to the next: the trained
+/// expert's held-out pass rate at each of its runs, over the base model's on
+/// the same tasks, with the selected run marked. Two readings of one run are
+/// not a path, and a line between them would draw one; the path worth
+/// reading is the expert's, run after run. One run makes no chart: the two
+/// readings above are all there is, and the panel says so.
+fn runs_chart(f: &mut Frame, app: &App, area: Rect, selected: &Shadow) {
     let t = app.theme();
-    let name = if kept {
-        "Pass rate · base model → trained"
-    } else {
-        "Reward · step by step"
-    };
-    let block = panel(&t, title(&t, name));
-    if curve.is_empty() {
+    let runs = app.runs_with(selected);
+    if runs.len() < 2 {
+        let why = match selected.reward_curve.as_slice() {
+            [_, _, ..] => {
+                "This expert has been trained once. When it is trained again, its runs \
+                 are charted here, to show whether it is getting better."
+            }
+            _ => {
+                "This expert has been trained once, before the base model's pass rate \
+                 was kept with a run, so there is nothing to set its own beside yet. \
+                 When it is trained again, its runs are charted here."
+            }
+        };
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "No reward recorded yet.",
-                Style::default().fg(t.ink3),
-            )))
-            .block(block),
+            Paragraph::new(Line::from(Span::styled(why, Style::default().fg(t.ink3))))
+                .block(panel(&t, title(&t, "This expert's training runs")))
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
+    let at = |i: usize, v: f32| (i as f64, f64::from(v));
+    let trained: Vec<(f64, f64)> = runs
+        .iter()
+        .enumerate()
+        .filter_map(|(i, run)| run.reward_curve.last().map(|v| at(i, *v)))
+        .collect();
+    // A run recorded before the base model's reading was kept has none.
+    let base: Vec<(f64, f64)> = runs
+        .iter()
+        .enumerate()
+        .filter_map(|(i, run)| match run.reward_curve.as_slice() {
+            [base, _, ..] => Some(at(i, *base)),
+            _ => None,
+        })
+        .collect();
+    let this: Vec<(f64, f64)> = runs
+        .iter()
+        .position(|run| run.id == selected.id)
+        .zip(selected.reward_curve.last())
+        .map(|(i, v)| at(i, *v))
+        .into_iter()
+        .collect();
+    let datasets = vec![
+        Dataset::default()
+            .name("base model")
+            .marker(app.canvas_marker())
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(t.ink3))
+            .data(&base),
+        Dataset::default()
+            .name("trained")
+            .marker(app.canvas_marker())
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(t.accent))
+            .data(&trained),
+        Dataset::default()
+            .name("this run")
+            .marker(Marker::Dot)
+            .graph_type(GraphType::Scatter)
+            .style(Style::default().fg(t.ink))
+            .data(&this),
+    ];
+    let name = format!("Pass rate over this expert's {} training runs", runs.len());
+    // The axis's ends say how long ago the first run and the last were. Two
+    // on one day read the same that way, so then each is given by its time.
+    let ends = [runs.first(), runs.last()].into_iter().flatten();
+    let mut labels: Vec<String> = ends.clone().map(|run| since(run.created_at)).collect();
+    if labels.first() == labels.last() {
+        labels = ends
+            .map(|run| {
+                let at = run.created_at.with_timezone(&chrono::Local);
+                at.format("%-d %b %H:%M").to_string()
+            })
+            .collect();
+    }
+    let block = panel(&t, title(&t, &name));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    // What each line is, on a row of its own under the chart: a key drawn
+    // over the plot covers the readings it is the key to.
+    let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(inner);
+    let key = |mark: &'static str, color, word: &'static str| {
+        [
+            Span::styled(mark, Style::default().fg(color)),
+            Span::styled(word, Style::default().fg(t.ink2)),
+        ]
+    };
+    let keys: Vec<Span> = [
+        key(" ── ", t.accent, "trained"),
+        key("   ── ", t.ink3, "base model"),
+        key("   • ", t.ink, "this run"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    f.render_widget(Paragraph::new(Line::from(keys)), rows[1]);
+    let chart = Chart::new(datasets)
+        // A chart draws on a canvas, which resets its cells' background
+        // unless told the page's.
+        .style(Style::default().bg(t.ground).fg(t.ink2))
+        .legend_position(None)
+        .x_axis(
+            Axis::default()
+                .style(Style::default().fg(t.line))
+                .labels(labels)
+                .bounds([0.0, (runs.len() - 1) as f64]),
+        )
+        .y_axis(
+            Axis::default()
+                .style(Style::default().fg(t.ink3))
+                .bounds([0.0, 1.0])
+                .labels(["0.0", "0.5", "1.0"]),
+        );
+    f.render_widget(chart, rows[0]);
+}
+
+/// A loop's candidate's reward as a line chart over training steps: the path
+/// that decides whether it graduates.
+fn reward_chart(f: &mut Frame, app: &App, area: Rect, curve: &[f32]) {
+    let t = app.theme();
+    let block = panel(&t, title(&t, "Reward · step by step"));
+    // One reading is not a path either.
+    let why = match curve {
+        [] => Some("No reward recorded yet.".to_string()),
+        [only] => Some(format!("One reading so far: {only:.2}.")),
+        _ => None,
+    };
+    if let Some(why) = why {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(why, Style::default().fg(t.ink3)))).block(block),
             area,
         );
         return;

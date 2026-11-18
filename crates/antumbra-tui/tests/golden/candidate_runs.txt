@@ -1,0 +1,36 @@
+ ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                 ● live
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent
+ Candidates: experts in training. One that passes its checks graduates; one that does not is pruned.
+╭  Experts 1 │ Candidates 5 │ Boundaries 0  ─────────────────────────╮╭ Candidate ─────────────────────────────────────╮
+│  CANDIDATE                      WHEN     BASE → TRAINED STATUS     ││github.com/acme/orders · a training run of its …│
+│  orders                         2d ago      0.42 → 0.91 ● graduated││status     × replaced by the run 2d ago         │
+│  billing                        5d ago      0.50 → 0.80 ● graduated││when       14d ago                              │
+│▸ orders                         14d ago     0.40 → 0.78 × replaced ││base model ████▊─────── 0.40                    │
+│  orders                         30d ago            0.71 × replaced ││trained    █████████▍── 0.78                    │
+│  shadow:g3 · g3                 40d ago     0.20 → 0.93 ● graduated│╰────────────────────────────────────────────────╯
+│                                                                    │╭ Pass rate over this expert's 3 training runs ──╮
+│                                                                    ││1.0   │                                         │
+│                                                                    ││      │                                        ⣀│
+│                                                                    ││      │                                ⣀⣀⠤⠤⠒⠒⠉⠉ │
+│                                                                    ││      │                        ⣀⣀⠤⠤⠒⠒⠉⠉         │
+│                                                                    ││      │          ⢀⣀⣀⣀⡠⠤⠤⠤⠔⠒•⠒⠉⠉                 │
+│                                                                    ││      │⠤⠤⠔⠒⠒⠒⠊⠉⠉⠉⠁                              │
+│                                                                    ││      │                                         │
+│                                                                    ││      │                                         │
+│                                                                    ││      │                                         │
+│                                                                    ││0.5   │                                         │
+│                                                                    ││      │                                         │
+│                                                                    ││      │                    ⠐⠒⠒⠒⠒⠒⠒⠒⠒⠒⠒⠉⠉⠉⠉⠉⠉⠉⠉⠉⠉│
+│                                                                    ││      │                                         │
+│                                                                    ││      │                                         │
+│                                                                    ││      │                                         │
+│                                                                    ││      │                                         │
+│                                                                    ││      │                                         │
+│                                                                    ││      │                                         │
+│                                                                    ││0.0   │                                         │
+│                                                                    ││      └─────────────────────────────────────────│
+│                                                                    ││30d ago                                   2d ago│
+│                                                                    ││ ── trained   ── base model   • this run        │
+╰────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
+
+ ↑↓  move   enter  details   tab  next list   /  find   x  prune   p  graduate   :  commands   ?  help   q  quit

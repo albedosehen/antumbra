@@ -19,8 +19,8 @@ use crate::app::{App, Focus};
 use crate::theme::{Theme, Tone};
 
 use super::{
-    boundary_tone, gauge_spans, nothing_here, reward_span, shadow_name, shadow_tone, short_scope,
-    visible_window,
+    age, boundary_tone, candidate_state, gauge_spans, nothing_here, reward_span, shadow_name,
+    short_scope, since, visible_window,
 };
 
 /// A panel whose title is several lists side by side, each with its count,
@@ -214,19 +214,26 @@ fn experts(f: &mut Frame, app: &App, t: &Theme, area: Rect, block: Block) {
     table(f, t, area, block, grid, Some(at));
 }
 
-/// The candidates, newest first: what each trained, where its reward went
-/// from and to, and its status.
+/// The candidates, newest first: what each trained, when, where its reward
+/// went from and to, and its state. A standing expert is trained again each
+/// time its behaviors change, so several rows carry one name: when each was
+/// tells them apart, and one that a later run took the place of reads
+/// `replaced`.
 fn candidates(f: &mut Frame, app: &App, t: &Theme, area: Rect, block: Block) {
     if app.shadows.is_empty() {
         let why = "No candidates yet: one appears while an expert is being trained.";
         empty(f, app, t, area, block, why);
         return;
     }
+    // Narrow, the reading before training and the state's word go before a
+    // name is cut: the shape still says the state, and the panel beside
+    // spells it out.
+    let wide = area.width >= 64;
     let (first, last, at) = window(area, app.shadows.len(), app.selected_shadow);
     let rows: Vec<Row> = app.shadows[first..last]
         .iter()
         .map(|s| {
-            let tone = shadow_tone(s.status.as_str());
+            let (tone, state) = candidate_state(app, s);
             // A standing expert's training reads by the scope it trained,
             // shortened; the loop's by its id and generation.
             let name = match behavior::shadow_scope(&s.id) {
@@ -235,31 +242,71 @@ fn candidates(f: &mut Frame, app: &App, t: &Theme, area: Rect, block: Block) {
             };
             // A candidate that ended reads fainter than one that counts.
             let ink = if tone == Tone::Ended { t.ink3 } else { t.ink };
+            // To the right, so a run with only its trained reading has it
+            // under the others' trained readings and not under their first.
+            let reading = if wide {
+                reward_span(&s.reward_curve)
+            } else {
+                s.reward_curve.last().map(|last| format!("{last:.2}"))
+            };
+            let reading = reading.unwrap_or_else(|| "none yet".into());
+            let room = if wide { READINGS } else { TRAINED };
+            let state = if wide {
+                format!("{} {state}", tone.glyph())
+            } else {
+                tone.glyph().to_string()
+            };
             Row::new(vec![
                 Cell::from(Span::styled(name, Style::default().fg(ink))),
                 Cell::from(Span::styled(
-                    reward_span(&s.reward_curve).unwrap_or_else(|| "none yet".into()),
+                    if wide {
+                        since(s.created_at)
+                    } else {
+                        age(s.created_at)
+                    },
                     Style::default().fg(t.ink2),
                 )),
                 Cell::from(Span::styled(
-                    format!("{} {}", tone.glyph(), s.status.as_str()),
-                    Style::default().fg(t.tone(tone)),
+                    format!("{reading:>room$}"),
+                    Style::default().fg(t.ink2),
                 )),
+                Cell::from(Span::styled(state, Style::default().fg(t.tone(tone)))),
             ])
         })
         .collect();
-    let widths = [
-        Constraint::Min(14),
-        Constraint::Length(11),
-        Constraint::Length(11),
-    ];
+    let (names, widths): (&[&str], &[Constraint]) = if wide {
+        (
+            &["CANDIDATE", "WHEN", "BASE → TRAINED", "STATUS"],
+            &[
+                Constraint::Min(14),
+                Constraint::Length(8),
+                Constraint::Length(READINGS as u16),
+                Constraint::Length(11),
+            ],
+        )
+    } else {
+        (
+            &["CANDIDATE", "AGE", "TRAINED", ""],
+            &[
+                Constraint::Min(12),
+                Constraint::Length(4),
+                Constraint::Length(TRAINED as u16),
+                Constraint::Length(1),
+            ],
+        )
+    };
     let grid = Grid {
-        header: heading(t, &["CANDIDATE", "REWARD", "STATUS"]),
+        header: heading(t, names),
         rows,
-        widths: &widths,
+        widths,
     };
     table(f, t, area, block, grid, Some(at));
 }
+
+/// The columns a candidate's readings take: both, `0.42 → 0.91` under
+/// `BASE → TRAINED`, or the trained one alone under `TRAINED`.
+const READINGS: usize = 14;
+const TRAINED: usize = 7;
 
 /// The boundaries: the behavior, where it applies when its context says, and
 /// whether it is in force.
