@@ -39,6 +39,32 @@ fn said(app: &App) -> anyhow::Result<(Tone, &str)> {
 }
 
 #[tokio::test]
+async fn the_console_opens_with_the_first_row_of_each_list_selected() -> anyhow::Result<()> {
+    let (_store, _backend, app) = console().await?;
+    // The experts come from the store in an order of its own and are sorted
+    // by fitness here: the strongest is the first row, and the one selected.
+    assert_eq!(app.selected, 0);
+    let strongest = app
+        .experts
+        .iter()
+        .map(|e| e.fitness)
+        .fold(f32::MIN, f32::max);
+    assert_eq!(
+        app.selected_expert().map(|e| e.fitness),
+        Some(strongest),
+        "the first row is the strongest expert"
+    );
+    assert_eq!(app.selected_shadow, 0);
+    assert_eq!(app.selected_boundary, 0);
+    assert_eq!(
+        Some(&app.selected_memory),
+        app.listed_memories().first(),
+        "the first memory the page lists"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn esc_closes_an_overlay_and_never_quits() -> anyhow::Result<()> {
     let (_store, backend, mut app) = console().await?;
     keys_pressed(&mut app, &backend, &[Key::Char('?')]).await;
@@ -94,8 +120,10 @@ async fn x_on_an_expert_freezes_or_thaws_it_behind_a_confirm() -> anyhow::Result
     assert_eq!(now.is_frozen(), !was_frozen, "the server did it");
     let (tone, text) = said(&app)?;
     assert_eq!(tone, Tone::Settled);
+    // It names the expert as the list does.
     let word = if was_frozen { "thawed" } else { "frozen" };
-    assert!(text.contains(word) && text.contains(id.as_str()), "{text}");
+    let name = app.expert_called(&id);
+    assert!(text.contains(word) && text.contains(&name), "{text}");
     Ok(())
 }
 

@@ -35,6 +35,40 @@ fn demo_tenant() -> antumbra_core::TenantId {
     antumbra_core::TenantId::new(crate::DEMO_TENANT)
 }
 
+/// What routing a task came to: the experts it would go to, most likely
+/// first, and, when there is none, why.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Routed {
+    pub routes: Vec<(ExpertId, f32)>,
+    /// Why no expert is routed to it, in the server's words: a failure
+    /// boundary covers the task, there is no learned router yet, the experts
+    /// that cover it are resting, or it is outside what the population covers.
+    pub reason: Option<String>,
+}
+
+impl Routed {
+    /// Read the server's `route` answer: its `routes`, and its `reason` when
+    /// it gives one.
+    pub fn read(out: &serde_json::Value) -> Self {
+        let routes = out["routes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|hit| {
+                Some((
+                    ExpertId::new(hit["expert_id"].as_str()?),
+                    hit["probability"].as_f64()? as f32,
+                ))
+            })
+            .collect();
+        let reason = out["reason"]
+            .as_str()
+            .filter(|reason| !reason.is_empty())
+            .map(str::to_string);
+        Routed { routes, reason }
+    }
+}
+
 #[derive(Clone)]
 pub enum Backend {
     Server(Arc<Server>),
@@ -83,11 +117,7 @@ impl Backend {
     /// embeds it with the model its population was built with and applies its
     /// boundaries; the demo embeds with its stand-in over `router`, which is
     /// only coherent over the population it seeded.
-    pub async fn route(
-        &self,
-        task: &str,
-        router: Option<&LearnedRouter>,
-    ) -> Result<Vec<(ExpertId, f32)>> {
+    pub async fn route(&self, task: &str, router: Option<&LearnedRouter>) -> Result<Routed> {
         match self {
             Backend::Server(server) => {
                 let server = server.clone();
@@ -96,7 +126,15 @@ impl Backend {
             }
             Backend::Demo(_) => {
                 let vec = FixedEmbedder::new(EMBED_DIM).embed(task).await?;
-                Ok(router.map(|r| r.route(&vec)).unwrap_or_default())
+                let routes = router.map(|r| r.route(&vec)).unwrap_or_default();
+                // The demo says why in the server's words, for the two cases
+                // it has.
+                let reason = match (routes.is_empty(), router) {
+                    (false, _) => None,
+                    (true, None) => Some("no learned router yet".to_string()),
+                    (true, Some(_)) => Some("outside what the population covers".to_string()),
+                };
+                Ok(Routed { routes, reason })
             }
         }
     }
@@ -231,7 +269,7 @@ impl Server {
         }
     }
 
-    fn route(&self, task: &str) -> Result<Vec<(ExpertId, f32)>> {
+    fn route(&self, task: &str) -> Result<Routed> {
         let out = match self
             .surface
             .call("route", json!({ "task": task, "top_k": 5 }))
@@ -245,17 +283,7 @@ impl Server {
             ),
             Err(e) => return Err(e.into()),
         };
-        Ok(out["routes"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|hit| {
-                Some((
-                    ExpertId::new(hit["expert_id"].as_str()?),
-                    hit["probability"].as_f64()? as f32,
-                ))
-            })
-            .collect())
+        Ok(Routed::read(&out))
     }
 
     fn check(&self, status: u16) -> Result<()> {

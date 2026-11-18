@@ -2,12 +2,12 @@
   1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent
  Experts: small models trained from your own verified work, each for one kind …
 ╭  Experts 3 │ Candidates 2 │ Boundaries 2  ─╮╭ Expert ────────────────────────╮
-│  EXPERT              FITNESS       STATE   ││arith-specialist                │
-│▸ arith-specialist    ███████▍ 0.92 ● frozen││fitness    ███████████─ 0.92    │
-│  datetime-specialist ██████▌─ 0.81 ● frozen││state      ● frozen             │
-│  json-shaper         ████▍─── 0.55 ○ open  ││generation 0                    │
+│  EXPERT                       FIT  STATE   ││arith-specialist                │
+│▸ arith-specialist             0.92 ● frozen││kind       routed               │
+│  datetime-specialist          0.81 ● frozen││fitness    ███████████─ 0.92    │
+│  json-shaper                  0.55 ○ open  ││state      ● frozen             │
+│                                            ││generation 0                    │
 │                                            ││base model Qwen2.5-Coder-1.5B   │
-│                                            ││                                │
 │                                            ││                                │
 │                                            ││                                │
 │                                            ││                                │

@@ -12,6 +12,14 @@ fn full_app() -> App {
     let mut app = demo_app();
     app.shadows = vec![graduated_shadow(), kept_shadow()];
     app.boundaries = vec![actionable_boundary(), missed_boundary()];
+    // A standing expert beside the routed one, as a workspace that has
+    // accepted behaviors holds.
+    let mut standing = app.experts[0].clone();
+    standing.id = ExpertId::new("expert:ws:demo:user:demo:behavior:everywhere");
+    standing.name = standing.id.as_str().to_string();
+    standing.capability_card = serde_json::json!({ "standing": true, "scope": "everywhere" });
+    standing.fitness = 0.5;
+    app.experts.push(standing);
     app
 }
 

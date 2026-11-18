@@ -8,6 +8,7 @@ use ratatui::text::{Line, Span};
 
 use crate::app::App;
 use crate::theme::{Theme, Tone};
+use crate::words;
 
 use super::evals::{kind_label, status_label, status_text, status_tone};
 use super::loops::{stage_blurb, stage_label, STAGES};
@@ -259,7 +260,19 @@ pub(super) fn expert_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
             ))],
         );
     };
-    let mut l = vec![heading(t, e.name.clone())];
+    let mut l = vec![heading(t, words::expert_name(e))];
+    match e.standing_scope() {
+        Some(scope) => {
+            l.push(kv(
+                t,
+                "kind",
+                "standing: it shapes every answer in its scope",
+            ));
+            l.push(kv(t, "scope", scope));
+        }
+        None => l.push(kv(t, "kind", "routed: it is sent the tasks it covers")),
+    }
+    l.push(kv(t, "id", e.id.as_str()));
     l.push(gauge_row(t, "fitness", e.fitness, t.accent));
     let (tone, state) = expert_state(e);
     l.push(state_row(t, "state", tone, state));
@@ -320,7 +333,7 @@ pub(super) fn expert_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
                     .experts
                     .iter()
                     .find(|x| x.id.as_str() == id.as_str())
-                    .map_or_else(|| id.as_str().to_string(), |x| x.name.clone());
+                    .map_or_else(|| id.as_str().to_string(), words::expert_name);
                 let label = Style::default().fg(if is_self { t.accent } else { t.ink2 });
                 let mut spans = vec![Span::styled(format!("  {name:<20}"), label)];
                 spans.extend(gauge_spans(
@@ -337,7 +350,7 @@ pub(super) fn expert_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
             }
         }
     }
-    (format!("Expert · {}", e.name), l)
+    (format!("Expert · {}", words::expert_name(e)), l)
 }
 
 pub(super) fn shadow_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {

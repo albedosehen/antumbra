@@ -103,7 +103,7 @@ pub(super) fn graph(f: &mut Frame, app: &App, area: Rect) {
                 ctx.print(
                     ex + 4.0,
                     ey,
-                    Span::styled(e.name.clone(), Style::default().fg(t.ink2)),
+                    Span::styled(crate::words::expert_name(e), Style::default().fg(t.ink2)),
                 );
             }
 

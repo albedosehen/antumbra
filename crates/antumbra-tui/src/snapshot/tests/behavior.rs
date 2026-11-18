@@ -406,7 +406,10 @@ fn ask_overlay_shows_routing_distribution() -> anyhow::Result<()> {
     for c in "arith".chars() {
         app.ask_input(c);
     }
-    app.set_ask_result(&[(ExpertId::new("expert:arith"), 0.82)]);
+    app.set_ask_result(&crate::backend::Routed {
+        routes: vec![(ExpertId::new("expert:arith"), 0.82)],
+        reason: None,
+    });
     let text = to_text(&render(&mut app, 80, 14, 1600.0)?);
     assert!(
         text.contains("Ask · which expert takes a task?"),
@@ -598,9 +601,13 @@ fn event_stream_is_capped_and_newest_first() -> anyhow::Result<()> {
 fn ask_input_invalidates_the_stale_result() -> anyhow::Result<()> {
     let mut app = demo_app();
     app.open_ask();
-    app.set_ask_result(&[(ExpertId::new("expert:arith"), 1.0)]);
+    app.set_ask_result(&crate::backend::Routed {
+        routes: vec![(ExpertId::new("expert:arith"), 1.0)],
+        reason: Some("a reason of some other task's".into()),
+    });
     assert!(app.ask_result.is_some());
     app.ask_input('x');
+    assert!(app.ask_reason.is_none(), "and the reason that went with it");
     assert!(
         app.ask_result.is_none(),
         "a new keystroke clears the result"
@@ -689,7 +696,7 @@ fn escalating_ask_renders_the_hint() -> anyhow::Result<()> {
     app.ask_result = Some(Vec::new());
     let text = to_text(&render(&mut app, 80, 12, 1600.0)?);
     assert!(
-        text.contains("No expert takes it: it goes to your agent."),
+        text.contains("No expert is routed to it: it goes to your agent."),
         "it says where the task goes:\n{text}"
     );
     Ok(())

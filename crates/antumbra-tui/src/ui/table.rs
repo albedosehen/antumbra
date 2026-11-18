@@ -49,7 +49,10 @@ pub(super) fn experts_table(f: &mut Frame, app: &App, area: Rect) {
             (Tone::Open, "open")
         };
         Row::new(vec![
-            Cell::from(Span::styled(e.name.clone(), Style::default().fg(t.ink))),
+            Cell::from(Span::styled(
+                crate::words::expert_name(e),
+                Style::default().fg(t.ink),
+            )),
             Cell::from(Line::from(fit)),
             Cell::from(Span::styled(
                 e.generation.0.to_string(),

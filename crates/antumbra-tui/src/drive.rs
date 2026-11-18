@@ -190,7 +190,7 @@ pub(crate) async fn ask_route(app: &mut App, backend: &Backend) {
         Ok(routed) => routed,
         Err(e) => {
             app.problem(format!("ask failed · {e:#}"));
-            Vec::new()
+            crate::backend::Routed::default()
         }
     };
     app.set_ask_result(&routed);

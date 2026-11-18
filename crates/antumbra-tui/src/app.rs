@@ -258,6 +258,9 @@ pub struct App {
     /// The gate's routing for the last ask: `(expert name, probability)` best
     /// first, or `Some(empty)` when it escalates. `None` before the first ask.
     pub ask_result: Option<Vec<(String, f32)>>,
+    /// Why the last ask was routed to no expert, in the server's words, when
+    /// it was routed to none and the server said.
+    pub ask_reason: Option<String>,
     /// Whether a server answers the ask, embedding the task with its own
     /// model. When false, the ask uses the demo's stand-in embedder and says
     /// so.
@@ -360,6 +363,7 @@ impl App {
             reads_failing: false,
             ask_query: String::new(),
             ask_result: None,
+            ask_reason: None,
             real_embedder: false,
             ev_experts: HashMap::new(),
             ev_shadows: HashMap::new(),
@@ -392,7 +396,11 @@ impl App {
             app.token_from = token_from;
         }
         app.reload(backend).await?;
-        // The Memory page opens on the first memory it lists.
+        // Every list opens on its first row. The experts arrive in the
+        // store's order and are sorted here, and the sort keeps the selection
+        // on its expert, which at the first read is whichever came first from
+        // the store; the Memory page lists kind after kind.
+        app.selected = 0;
         if let Some(&first) = app.listed_memories().first() {
             app.selected_memory = first;
         }
@@ -513,13 +521,18 @@ impl App {
         } else {
             for e in &self.experts {
                 match self.ev_experts.get(e.id.as_str()) {
-                    None => emit.push((EventKind::Spawn, format!("expert {} added", e.name))),
-                    Some(&frozen) if !frozen && e.is_frozen() => {
-                        emit.push((EventKind::Freeze, format!("expert {} frozen", e.name)))
-                    }
-                    Some(&frozen) if frozen && !e.is_frozen() => {
-                        emit.push((EventKind::Freeze, format!("expert {} thawed", e.name)))
-                    }
+                    None => emit.push((
+                        EventKind::Spawn,
+                        format!("expert {} added", crate::words::expert_name(e)),
+                    )),
+                    Some(&frozen) if !frozen && e.is_frozen() => emit.push((
+                        EventKind::Freeze,
+                        format!("expert {} frozen", crate::words::expert_name(e)),
+                    )),
+                    Some(&frozen) if frozen && !e.is_frozen() => emit.push((
+                        EventKind::Freeze,
+                        format!("expert {} thawed", crate::words::expert_name(e)),
+                    )),
                     _ => {}
                 }
             }
@@ -647,36 +660,70 @@ impl App {
         self.mode = Mode::Ask;
         self.ask_query.clear();
         self.ask_result = None;
+        self.ask_reason = None;
     }
 
     /// Append a character to the ask query (invalidates the stale result).
     pub fn ask_input(&mut self, c: char) {
         self.ask_query.push(c);
         self.ask_result = None;
+        self.ask_reason = None;
     }
 
     /// Delete the last character of the ask query (invalidates the result).
     pub fn ask_backspace(&mut self) {
         self.ask_query.pop();
         self.ask_result = None;
+        self.ask_reason = None;
     }
 
-    /// Resolve a routing distribution (over expert ids) to `(name, probability)`,
-    /// looking names up in the population, and store it as the ask result.
-    pub fn set_ask_result(&mut self, routed: &[(antumbra_core::ExpertId, f32)]) {
+    /// Keep what routing the task came to: each expert by the name the
+    /// console shows it under, with how likely it is, and why there is none
+    /// when there is none.
+    pub fn set_ask_result(&mut self, routed: &crate::backend::Routed) {
         self.ask_result = Some(
             routed
+                .routes
                 .iter()
-                .map(|(id, p)| {
-                    let name = self
-                        .experts
-                        .iter()
-                        .find(|e| e.id.as_str() == id.as_str())
-                        .map_or_else(|| id.as_str().to_string(), |e| e.name.clone());
-                    (name, *p)
-                })
+                .map(|(id, p)| (self.expert_called(id), *p))
                 .collect(),
         );
+        self.ask_reason = routed.reason.clone();
+    }
+
+    /// The name the console shows an expert under ([`crate::words::expert_name`]),
+    /// or its id for one that is not in the population it reads.
+    pub fn expert_called(&self, id: &antumbra_core::ExpertId) -> String {
+        self.experts
+            .iter()
+            .find(|e| e.id.as_str() == id.as_str())
+            .map_or_else(|| id.as_str().to_string(), crate::words::expert_name)
+    }
+
+    /// The standing experts that shape every answer where the console was
+    /// started: the one for everywhere, then the one for the repository it is
+    /// in. The server composes the same two into an answer there. A standing
+    /// expert is never routed to, so the ask shows these beside what routing
+    /// came to.
+    pub fn standing_here(&self) -> Vec<&Expert> {
+        let here = self.git.repo.as_deref();
+        let of = |scope: &str| {
+            self.experts
+                .iter()
+                .find(move |e| e.standing_scope() == Some(scope))
+        };
+        of(antumbra_core::behavior::EVERYWHERE)
+            .into_iter()
+            .chain(here.and_then(of))
+            .collect()
+    }
+
+    /// How many standing experts there are, in every scope.
+    pub fn standing_count(&self) -> usize {
+        self.experts
+            .iter()
+            .filter(|e| e.standing_scope().is_some())
+            .count()
     }
 
     /// The active palette every panel tints from.

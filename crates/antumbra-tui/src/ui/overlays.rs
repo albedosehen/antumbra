@@ -43,11 +43,9 @@ pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
         Mode::Gate => Some(overlay::centered(frame, 72, 24)),
         Mode::Connect => Some(overlay::centered(frame, 78, 27)),
         Mode::Ask => {
-            let rows = app
-                .ask_result
-                .as_ref()
-                .map_or(1, |r| r.len().clamp(1, 5) as u16);
-            Some(overlay::centered(frame, 60, rows + 5))
+            // The task's two rows, what it came to, and the border.
+            let rows = u16::try_from(ask_lines(app, &app.theme()).len()).unwrap_or(u16::MAX);
+            Some(overlay::centered(frame, ASK_WIDTH, rows.saturating_add(4)))
         }
         // The question, what going ahead does, a gap and the two keys.
         Mode::Confirm => Some(overlay::centered(frame, 70, 6)),
@@ -227,8 +225,123 @@ pub(super) fn confirm_overlay(f: &mut Frame, app: &App) {
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
-/// The route-ask (`ask` command): a task query embedded and run through the
-/// learned gate, the resulting routing distribution shown as probability gauges.
+/// The ask's width, and the room for text inside its border and indent.
+const ASK_WIDTH: u16 = 76;
+const ASK_ROOM: usize = 70;
+
+/// `text` as lines of at most `width` columns, broken between words.
+fn wrapped(text: &str, width: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for word in text.split_whitespace() {
+        match lines.last_mut() {
+            Some(line) if line.chars().count() + 1 + word.chars().count() <= width => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_string()),
+        }
+    }
+    lines
+}
+
+/// What the ask shows under the task: what routing it came to, then the
+/// standing experts that shape every answer here whatever the task.
+///
+/// The two are different things and a person asking needs both. Routing
+/// answers "which expert would be sent this task", and when the answer is
+/// none it says why, in the server's words. A standing expert is never sent a
+/// task, so a workspace that has only those is told "none" for every task;
+/// which of them shape an answer here is the half of the answer it does have.
+fn ask_lines<'a>(app: &App, t: &Theme) -> Vec<Line<'a>> {
+    let dim = Style::default().fg(t.ink2);
+    let mut lines: Vec<Line> = Vec::new();
+    match &app.ask_result {
+        None => lines.push(Line::from(Span::styled(
+            "  Type a task and press Enter to see which expert it would be sent to.",
+            Style::default().fg(t.ink3),
+        ))),
+        Some(routes) if routes.is_empty() => {
+            lines.push(Line::from(Span::styled(
+                "  No expert is routed to it: it goes to your agent.",
+                Style::default().fg(t.ink),
+            )));
+            if let Some(reason) = &app.ask_reason {
+                for (i, part) in wrapped(reason, ASK_ROOM - 7).into_iter().enumerate() {
+                    let lead = if i == 0 { "  Why: " } else { "       " };
+                    lines.push(Line::from(Span::styled(format!("{lead}{part}"), dim)));
+                }
+            }
+        }
+        Some(routes) => {
+            for (name, p) in routes.iter().take(5) {
+                let mut spans = vec![Span::styled(
+                    format!("  {:<30}", super::clip(name, 29)),
+                    Style::default().fg(t.ink),
+                )];
+                spans.extend(gauge_spans(t, *p, 10, t.accent));
+                spans.push(Span::styled(
+                    format!(" {:>3.0}%", p * 100.0),
+                    Style::default().fg(t.ink),
+                ));
+                lines.push(Line::from(spans));
+            }
+        }
+    }
+
+    let standing = app.standing_count();
+    if standing > 0 {
+        let here = app.standing_here();
+        let place = match app.git.repo.as_deref() {
+            Some(repo) => super::clip(words::scope_name(repo), 26),
+            None => "no repository".to_string(),
+        };
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("  Standing experts, in every answer here ({place}):"),
+            dim,
+        )));
+        for e in &here {
+            // The scope whole, beside its name in brief; the one for
+            // everywhere has no more to its scope than its name.
+            let scope = match e.standing_scope() {
+                Some(antumbra_core::behavior::EVERYWHERE) => "every repository",
+                Some(scope) => scope,
+                None => "",
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {} ", Tone::Settled.glyph()),
+                    Style::default().fg(t.accent),
+                ),
+                Span::styled(
+                    format!("{:<28}", super::clip(&words::expert_name(e), 27)),
+                    Style::default().fg(t.ink),
+                ),
+                Span::styled(
+                    super::clip(scope, ASK_ROOM - 34),
+                    Style::default().fg(t.ink3),
+                ),
+            ]));
+        }
+        if here.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  none of them is for this place",
+                Style::default().fg(t.ink3),
+            )));
+        }
+        let elsewhere = standing - here.len();
+        if elsewhere > 0 {
+            lines.push(Line::from(Span::styled(
+                format!("  and {elsewhere} more, for other repositories"),
+                Style::default().fg(t.ink3),
+            )));
+        }
+    }
+    lines
+}
+
+/// The ask (`a`): a task, routed as the server routes one, with what it came
+/// to under it ([`ask_lines`]).
 pub(super) fn ask_overlay(f: &mut Frame, app: &App) {
     let t = app.theme();
     let Some(area) = overlay_area(app, f.area()) else {
@@ -254,34 +367,7 @@ pub(super) fn ask_overlay(f: &mut Frame, app: &App) {
         )));
     }
     f.render_widget(Paragraph::new(head), rows[0]);
-
-    let lines: Vec<Line> = match &app.ask_result {
-        None => vec![Line::from(Span::styled(
-            "  Type a task and press Enter to see which expert would take it.",
-            Style::default().fg(t.ink3),
-        ))],
-        Some(r) if r.is_empty() => vec![Line::from(Span::styled(
-            "  No expert takes it: it goes to your agent.",
-            Style::default().fg(t.ink2),
-        ))],
-        Some(r) => r
-            .iter()
-            .take(5)
-            .map(|(name, p)| {
-                let mut spans = vec![Span::styled(
-                    format!("  {name:<20}"),
-                    Style::default().fg(t.ink2),
-                )];
-                spans.extend(gauge_spans(&t, *p, 10, t.accent));
-                spans.push(Span::styled(
-                    format!(" {:>3.0}%", p * 100.0),
-                    Style::default().fg(t.ink),
-                ));
-                Line::from(spans)
-            })
-            .collect(),
-    };
-    f.render_widget(Paragraph::new(lines), rows[1]);
+    f.render_widget(Paragraph::new(ask_lines(app, &t)), rows[1]);
 }
 
 /// A dim, bold section divider within a detail view.
