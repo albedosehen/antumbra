@@ -30,12 +30,51 @@ use serde_json::Value;
 pub struct Hook {
     /// The Claude Code event, `SessionStart`, `UserPromptSubmit`, ...
     pub event: &'static str,
-    /// The script's file name, for finding one already wired.
+    /// What marks the hook in a command already wired: its script's file
+    /// name, or, for a command of `antumbra`'s own that has no script, the
+    /// words that name it (`claude skill-used`).
     pub script: &'static str,
     /// The command Claude Code runs.
     pub command: String,
     /// Seconds before Claude Code gives up on it.
     pub timeout: u32,
+    /// The tool the hook is for, where its event is a tool's: the entry's
+    /// `matcher`.
+    pub tool: Option<&'static str>,
+    /// Whether Claude Code waits for it. One that only counts something is
+    /// not waited for, so a slow server never delays what it counts.
+    pub waits: bool,
+}
+
+impl Hook {
+    /// A hook that runs a script and is waited for, which is what every hook
+    /// but a counter is.
+    pub fn script(
+        event: &'static str,
+        script: &'static str,
+        command: String,
+        timeout: u32,
+    ) -> Self {
+        Hook {
+            event,
+            script,
+            command,
+            timeout,
+            tool: None,
+            waits: true,
+        }
+    }
+
+    /// Whether `command`, one already wired, is this hook: it runs a script of
+    /// this one's name, whichever shell it is for, or holds the words that
+    /// name a command of `antumbra`'s.
+    fn is(&self, name: &str, command: &str) -> bool {
+        if self.script.ends_with(".sh") || self.script.ends_with(".ps1") {
+            stem(name) == stem(self.script)
+        } else {
+            command.contains(self.script)
+        }
+    }
 }
 
 /// What setup wants the settings to hold.
@@ -275,7 +314,8 @@ fn first_at(found: &[Member]) -> Option<usize> {
     found.first().map(|m| m.at)
 }
 
-/// The scripts an event's hooks already run, as (file name, command).
+/// The commands an event's hooks already run, each with the script it names
+/// when it names one: (file name or nothing, command).
 fn wired_scripts(event: &Value) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for matcher in event.as_array().into_iter().flatten() {
@@ -288,11 +328,16 @@ fn wired_scripts(event: &Value) -> Vec<(String, String)> {
             let Some(command) = hook.get("command").and_then(Value::as_str) else {
                 continue;
             };
+            let mut named = false;
             for word in command.split(|c: char| c.is_whitespace() || c == '"' || c == '\'') {
                 let name = word.rsplit(['/', '\\']).next().unwrap_or(word);
                 if name.ends_with(".ps1") || name.ends_with(".sh") {
                     out.push((name.to_string(), command.to_string()));
+                    named = true;
                 }
+            }
+            if !named {
+                out.push((String::new(), command.to_string()));
             }
         }
     }
@@ -384,7 +429,7 @@ pub fn wire(text: &str, wiring: &Wiring) -> anyhow::Result<Wired> {
         if let Some(event_value) = event_value {
             if let Some((_, command)) = wired_scripts(event_value)
                 .into_iter()
-                .find(|(name, _)| stem(name) == stem(hook.script))
+                .find(|(name, command)| hook.is(name, command))
             {
                 wired.already.push((hook.event, command));
                 continue;
@@ -441,11 +486,16 @@ pub fn wire(text: &str, wiring: &Wiring) -> anyhow::Result<Wired> {
     Ok(wired)
 }
 
-/// One hook's matcher, written the way people write it by hand: `type`,
-/// `command`, `timeout`, in that order. `indent` is the line it starts on.
+/// One hook's matcher, written the way people write it by hand: the tool it
+/// is for, when it is for one, then `type`, `command`, `timeout`, and
+/// `async` for one that is not waited for. `indent` is the line it starts on.
 fn matcher_text(hook: &Hook, indent: &str) -> String {
+    let tool = hook.tool.map_or_else(String::new, |tool| {
+        format!("{indent}  \"matcher\": {},\n", Value::String(tool.into()))
+    });
+    let detached = if hook.waits { "" } else { ", \"async\": true" };
     format!(
-        "{{\n{indent}  \"hooks\": [\n{indent}    {{ \"type\": \"command\", \"command\": {}, \"timeout\": {} }}\n{indent}  ]\n{indent}}}",
+        "{{\n{tool}{indent}  \"hooks\": [\n{indent}    {{ \"type\": \"command\", \"command\": {}, \"timeout\": {}{detached} }}\n{indent}  ]\n{indent}}}",
         Value::String(hook.command.clone()),
         hook.timeout
     )
@@ -519,18 +569,18 @@ mod tests {
     fn wiring() -> Wiring {
         Wiring {
             hooks: vec![
-                Hook {
-                    event: "SessionStart",
-                    script: "antumbra-session-start.sh",
-                    command: "bash \"/home/me/.antumbra/hooks/antumbra-session-start.sh\"".into(),
-                    timeout: 10,
-                },
-                Hook {
-                    event: "Stop",
-                    script: "antumbra-capture.sh",
-                    command: "bash \"/home/me/.antumbra/hooks/antumbra-capture.sh\"".into(),
-                    timeout: 10,
-                },
+                Hook::script(
+                    "SessionStart",
+                    "antumbra-session-start.sh",
+                    "bash \"/home/me/.antumbra/hooks/antumbra-session-start.sh\"".into(),
+                    10,
+                ),
+                Hook::script(
+                    "Stop",
+                    "antumbra-capture.sh",
+                    "bash \"/home/me/.antumbra/hooks/antumbra-capture.sh\"".into(),
+                    10,
+                ),
             ],
             env: vec![
                 ("ANTUMBRA_URL".into(), "http://127.0.0.1:8081".into()),
@@ -666,6 +716,70 @@ mod tests {
         assert_eq!(v["note"], "a \"quoted\" } brace");
         assert_eq!(v["env"]["ANTUMBRA_WORKSPACE_ID"], "ws:default");
         assert_eq!(v["hooks"]["Stop"].as_array().map(Vec::len), Some(1));
+        Ok(())
+    }
+
+    /// The two hooks that count which skills are used, as setup asks for
+    /// them: one where the agent calls the tool, one where a person types
+    /// the skill's name.
+    fn counting() -> Wiring {
+        let counter = |event, tool| Hook {
+            event,
+            script: "claude skill-used",
+            command: "antumbra claude skill-used".into(),
+            timeout: 10,
+            tool,
+            waits: false,
+        };
+        Wiring {
+            hooks: vec![
+                counter("PostToolUse", Some("Skill")),
+                counter("UserPromptExpansion", None),
+            ],
+            ..Wiring::default()
+        }
+    }
+
+    #[test]
+    fn a_counter_is_wired_for_its_tool_and_is_not_waited_for() -> anyhow::Result<()> {
+        let v = parsed(&wire("", &counting())?.text)?;
+        let called = &v["hooks"]["PostToolUse"][0];
+        assert_eq!(called["matcher"], "Skill");
+        assert_eq!(called["hooks"][0]["command"], "antumbra claude skill-used");
+        assert_eq!(called["hooks"][0]["async"], true);
+        let typed = &v["hooks"]["UserPromptExpansion"][0];
+        assert!(typed.get("matcher").is_none(), "{typed}");
+        assert_eq!(typed["hooks"][0]["async"], true);
+        // A script's hook is waited for, and is for no one tool.
+        let scripts = parsed(&wire("", &wiring())?.text)?;
+        let stop = &scripts["hooks"]["Stop"][0];
+        assert!(stop.get("matcher").is_none() && stop["hooks"][0].get("async").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn a_counter_pasted_in_by_hand_is_not_doubled() -> anyhow::Result<()> {
+        // As the hooks' README gave it to paste, beside a hook of the user's
+        // own on the same event.
+        let text = r#"{
+  "hooks": {
+    "PostToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "my-linter" }] },
+      { "matcher": "Skill", "hooks": [{ "type": "command", "command": "antumbra claude skill-used", "async": true }] }
+    ]
+  }
+}
+"#;
+        let wired = wire(text, &counting())?;
+        let v = parsed(&wired.text)?;
+        assert_eq!(v["hooks"]["PostToolUse"].as_array().map(Vec::len), Some(2));
+        assert_eq!(
+            v["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
+            "my-linter"
+        );
+        // The one it did not have is added, and a second run adds nothing.
+        assert_eq!(wired.added, vec!["UserPromptExpansion"]);
+        assert!(!wire(&wired.text, &counting())?.changed());
         Ok(())
     }
 

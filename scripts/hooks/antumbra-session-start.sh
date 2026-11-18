@@ -138,6 +138,22 @@ if command -v "$BIN" >/dev/null 2>&1; then
   brief=$("$BIN" claude brief 2>/dev/null || true)
 fi
 
+# --- keep the rules this mode runs by (fail-open, detached) ----------------------
+# What `antumbra claude brief` just said is also kept as memories, in a
+# `claude-code` compartment of the user's own: the console's Agent page lists
+# them, and an agent can recall why a feature is missing. `antumbra claude
+# remember` does that, and was a command for a person to run, which nobody
+# did. It is safe every session: a rule already kept is left, and a changed one
+# is stored and the old text penalized. Only in the mode the rules are for,
+# which is when the brief says anything. Detached, like the merges, so it never
+# delays the session. Off with ANTUMBRA_REMEMBER=0. Its last output is in
+# ~/.antumbra/remember.log, or wherever ANTUMBRA_REMEMBER_LOG names.
+if [ -n "$brief" ] && [ "${ANTUMBRA_REMEMBER:-1}" != "0" ]; then
+  log="${ANTUMBRA_REMEMBER_LOG:-$HOME/.antumbra/remember.log}"
+  mkdir -p "$(dirname "$log")" 2>/dev/null || true
+  ( ANTUMBRA_URL="$URL" ANTUMBRA_TOKEN="$TOKEN" nohup "$BIN" claude remember </dev/null >"$log" 2>&1 & ) 2>/dev/null || true
+fi
+
 # --- the answers -------------------------------------------------------------------
 # shellcheck disable=SC2086 # one pid a word
 wait $pending 2>/dev/null
