@@ -20,7 +20,7 @@ pub(super) fn knobs_overlay(f: &mut Frame, app: &App) {
         return;
     };
     let inner = overlay::modal(f, &t, area, "memory knobs");
-    let dim = Style::default().fg(t.dim);
+    let dim = Style::default().fg(t.ink2);
     let mut lines = vec![
         Line::from(Span::styled(
             "  The system governs each memory by these: what it counts as used, how fast",
@@ -36,20 +36,22 @@ pub(super) fn knobs_overlay(f: &mut Frame, app: &App) {
         let selected = i == app.knob_selected;
         let now = knob_value(knob, &app.knob_draft);
         let was = knob_value(knob, &app.policy);
-        let marker = if selected { "› " } else { "  " };
+        let marker = if selected { "▸ " } else { "  " };
         let key_style = if selected {
-            Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
+            Style::default().fg(t.ink).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(t.ink)
+            Style::default().fg(t.ink2)
         };
         let mut spans = vec![
             Span::styled(format!("{marker}{:<24}", knob.key), key_style),
-            Span::styled(format!("{now:>7}"), Style::default().fg(t.value)),
+            Span::styled(format!("{now:>7}"), Style::default().fg(t.ink)),
         ];
         if now != was {
+            // A value being turned is the one thing here that is not yet
+            // what the server has: the accent.
             spans.push(Span::styled(
                 format!("  (was {was})"),
-                Style::default().fg(t.warning),
+                Style::default().fg(t.accent),
             ));
         } else if selected {
             spans.push(Span::styled(format!("  {}", knob.help), dim));

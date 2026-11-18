@@ -489,13 +489,13 @@ fn the_knobs_panel_turns_a_knob_behind_a_confirm() -> anyhow::Result<()> {
 #[test]
 fn theme_layout_focus_cycle_and_wrap() -> anyhow::Result<()> {
     let mut app = demo_app();
-    assert_eq!(app.theme().name, "shadow");
+    assert_eq!(app.theme().name, "night");
     app.cycle_theme();
-    assert_eq!(app.theme().name, "ember");
+    assert_eq!(app.theme().name, "mist");
     app.cycle_theme();
     assert_eq!(app.theme().name, "mono");
     app.cycle_theme();
-    assert_eq!(app.theme().name, "shadow", "theme wraps");
+    assert_eq!(app.theme().name, "night", "theme wraps");
 
     assert_eq!(app.layout, LayoutMode::Focused);
     app.cycle_layout();
@@ -714,18 +714,15 @@ fn shadows_focus_shows_the_penumbra() -> anyhow::Result<()> {
 }
 
 // The footer shows the active theme, and `t` cycles to the next palette,
-// which the footer reflects (shadow -> ember).
+// which the footer reflects (night -> mist).
 #[test]
 fn cycling_theme_updates_the_footer() -> anyhow::Result<()> {
     let mut app = demo_app();
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
-    assert!(
-        text.contains("theme:shadow"),
-        "default theme shown:\n{text}"
-    );
+    assert!(text.contains("theme:night"), "default theme shown:\n{text}");
     app.cycle_theme();
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
-    assert!(text.contains("theme:ember"), "cycled theme shown:\n{text}");
+    assert!(text.contains("theme:mist"), "cycled theme shown:\n{text}");
     Ok(())
 }
 
@@ -777,7 +774,7 @@ fn a_standing_experts_training_reads_by_its_scope() -> anyhow::Result<()> {
     app.focus = Focus::Shadows;
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
-        text.contains("✦ code · 0.42 → 0.91"),
+        text.contains("● code · 0.42 → 0.91"),
         "the list row names the scope and the change:\n{text}"
     );
     assert!(text.contains("standing expert's training"), "titled as one");
@@ -814,7 +811,7 @@ fn a_repository_scope_leaves_room_in_the_lists() -> anyhow::Result<()> {
     app.focus = Focus::Shadows;
     let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
     assert!(
-        text.contains("✦ orders-service-backend · 0.68"),
+        text.contains("● orders-service-backend · 0.68"),
         "the repository's name and the reading fit:\n{text}"
     );
 
@@ -872,7 +869,7 @@ fn an_open_boundary_shows_the_task_it_missed() -> anyhow::Result<()> {
 }
 
 // The gate summary lists only boundaries that gate routing: an open one,
-// listed with the stop glyph, would read as a gate.
+// listed there, would read as a gate.
 #[test]
 fn the_gate_summary_lists_no_open_boundary() -> anyhow::Result<()> {
     let mut app = demo_app();
@@ -882,7 +879,10 @@ fn the_gate_summary_lists_no_open_boundary() -> anyhow::Result<()> {
         text.contains("1 (0 actionable)"),
         "counted, none actionable:\n{text}"
     );
-    assert!(!text.contains('⛔'), "no stop glyph for it:\n{text}");
+    assert!(
+        !text.contains("Run the test suite"),
+        "the open one is not listed:\n{text}"
+    );
     Ok(())
 }
 

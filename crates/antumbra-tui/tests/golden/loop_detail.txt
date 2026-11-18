@@ -4,17 +4,17 @@
 │state      score                                                        │
 │                                                                        │
 │lifecycle                                                               │
-│  ✓ grow                                                                │
-│  ✓ explore                                                             │
+│  ● grow                                                                │
+│  ● explore                                                             │
 │  ◉ score       verifiers + critic produce reward signals               │
-│  · decide                                                              │
-│  · consolidate                                                         │
+│  ○ decide                                                              │
+│  ○ consolidate                                                         │
 │                                                                        │
 │running · x requests a graceful halt                                    │
 │                                                                        │
 │evaluations  ·  2 for this run                                          │
-│  pass    expert  expert:arith-specialist                               │
-│  FAIL    shadow  shadow:g4                                             │
+│  ● pass    expert  expert:arith-specialist                             │
+│  ▲ FAIL    shadow  shadow:g4                                           │
 │                                                                        │
 │                                                                        │
 │                                                                        │

@@ -4,11 +4,11 @@
   1 population  ·  2 memory  ·  3 loop  ·  4 evals  ·  5 sovereign
   fitness █████▍ 0.90  frozen ██████ 1.00  graduated ────── 0.00  gating ────── 0.00  memory ████▊─ 0.79
 ╭ evaluations · 4 runs · 2 regressions ────────────────────────────────────────────────────────────────────────────────╮
-│  subject                                   kind     task           status   fingerprint                              │
-│▌ expert:arith-specialist                   expert   task:arith     FAIL     ffffffff                                 │
-│  expert:arith-specialist                   expert   task:arith     pass     a1b2c3d4                                 │
-│  shadow:g3                                 shadow   task:arith     FAIL     n/a                                      │
-│  router                                    router   task:arith     running  n/a                                      │
+│  subject                                  kind     task           status     fingerprint                             │
+│▸ expert:arith-specialist                  expert   task:arith     ▲ FAIL     ffffffff                                │
+│  expert:arith-specialist                  expert   task:arith     ● pass     a1b2c3d4                                │
+│  shadow:g3                                shadow   task:arith     ▲ FAIL     n/a                                     │
+│  router                                   router   task:arith     ○ running  n/a                                     │
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
@@ -33,4 +33,4 @@
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- q  quit   ↑↓  select   tab  focus:umbra   []  page:evals   t  theme:shadow   ±  cap:144   r  reload   ?  help   :  pale
+ q  quit   ↑↓  select   tab  focus:umbra   []  page:evals   t  theme:night   ±  cap:144   r  reload   ?  help   :  palet

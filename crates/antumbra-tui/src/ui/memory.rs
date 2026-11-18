@@ -17,9 +17,9 @@ use ratatui::Frame;
 use antumbra_core::{scope_of_evidence, EdgeType, GitProvenance, MemoryNetwork, Scope};
 
 use crate::app::App;
-use crate::theme::Theme;
+use crate::theme::{Theme, Tone};
 
-use super::{clip, gauge_row, heading, kv, panel};
+use super::{clip, gauge_row, heading, kv, panel, state_row};
 
 /// The three networks and where their clusters anchor on the canvas.
 const ANCHORS: [(MemoryNetwork, (f64, f64)); 3] = [
@@ -46,15 +46,16 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     detail(f, app, cols[1]);
 }
 
-/// Color an edge by its kind: contradiction/supersession (the retire signal)
-/// stand out; reference/follows/caused are quieter.
+/// Color an edge by its kind. A contradiction is the one that says something
+/// is wrong, so it takes the danger colour; a supersession, which retires a
+/// memory, takes the accent; reference/follows/caused are quieter, in
+/// strengths of the ink. The detail panel names each edge's kind beside it.
 fn edge_color(t: &Theme, e: EdgeType) -> Color {
     match e {
-        EdgeType::Contradicts => t.alert,
-        EdgeType::Supersedes => t.warning,
-        EdgeType::Caused => t.value,
-        EdgeType::Follows => t.accent,
-        EdgeType::References => t.dim,
+        EdgeType::Contradicts => t.danger,
+        EdgeType::Supersedes => t.accent,
+        EdgeType::Caused | EdgeType::Follows => t.ink2,
+        EdgeType::References => t.ink3,
     }
 }
 
@@ -63,10 +64,12 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let block = panel(
         &t,
-        Span::styled(" penumbra · memory networks ", Style::default().fg(t.ink)),
+        Span::styled(" penumbra · memory networks ", Style::default().fg(t.ink2)),
     );
     let canvas = Canvas::default()
         .block(block)
+        // A canvas resets its cells' background unless told the page's.
+        .background_color(t.ground)
         .marker(app.canvas_marker())
         .x_bounds([-100.0, 100.0])
         .y_bounds([-100.0, 100.0])
@@ -136,7 +139,7 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
                     ay - 30.0,
                     Span::styled(
                         net.as_str(),
-                        Style::default().fg(t.dim).add_modifier(Modifier::BOLD),
+                        Style::default().fg(t.ink2).add_modifier(Modifier::BOLD),
                     ),
                 );
             }
@@ -148,7 +151,7 @@ fn graph(f: &mut Frame, app: &App, area: Rect) {
 fn group<'a>(t: &Theme, label: String) -> Line<'a> {
     Line::from(Span::styled(
         label,
-        Style::default().fg(t.dim).add_modifier(Modifier::BOLD),
+        Style::default().fg(t.ink2).add_modifier(Modifier::BOLD),
     ))
 }
 
@@ -168,16 +171,16 @@ fn anchor_lines<'a>(t: &Theme, evidence: &[String], app: &App, w: usize) -> Opti
         lines.push(kv(t, "branch", &clip(branch, room)));
     }
     let scope = scope_of_evidence(evidence, &app.git);
-    let color = match scope {
-        Scope::InScope => t.accent,
-        Scope::OtherBranch | Scope::OtherRepo => t.warning,
-        Scope::Orphaned => t.alert,
-        Scope::Unknown => t.dim,
+    // Learned here is in force; learned elsewhere is open to doubt; an
+    // anchor whose branch is gone has failed; one that cannot be told is set
+    // aside.
+    let tone = match scope {
+        Scope::InScope => Tone::Settled,
+        Scope::OtherBranch | Scope::OtherRepo => Tone::Open,
+        Scope::Orphaned => Tone::Failed,
+        Scope::Unknown => Tone::Ended,
     };
-    lines.push(Line::from(vec![
-        Span::styled(format!("{:<11}", "scope"), Style::default().fg(t.dim)),
-        Span::styled(scope.as_str(), Style::default().fg(color)),
-    ]));
+    lines.push(state_row(t, "scope", tone, scope.as_str()));
     Some(lines)
 }
 
@@ -222,14 +225,14 @@ fn ago(d: chrono::Duration) -> String {
 /// The selected trace: its fields, evidence, and the edges touching it.
 fn detail(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
-    let block = panel(&t, Span::styled(" memory ", Style::default().fg(t.ink)));
+    let block = panel(&t, Span::styled(" memory ", Style::default().fg(t.ink2)));
     let inner = block.inner(area);
     f.render_widget(block, area);
     let Some(m) = app.selected_memory() else {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "penumbra is empty; no memory traces",
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink3),
             ))),
             inner,
         );
@@ -243,8 +246,8 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
         Line::from(""),
         kv(&t, "network", m.network.as_str()),
         kv(&t, "status", m.status.as_str()),
-        gauge_row(&t, "strength", strength, t.fitness(strength, 1.0)),
-        gauge_row(&t, "confidence", m.confidence, t.fitness(m.confidence, 1.0)),
+        gauge_row(&t, "strength", strength, t.accent),
+        gauge_row(&t, "confidence", m.confidence, t.accent),
         kv(&t, "reinforce", &m.reinforcement.to_string()),
         kv(&t, "volatile", if m.volatile { "yes" } else { "no" }),
     ];
@@ -266,7 +269,7 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
         for ev in &m.evidence {
             lines.push(Line::from(Span::styled(
                 format!("  · {}", clip(ev, w.saturating_sub(4))),
-                Style::default().fg(t.value),
+                Style::default().fg(t.ink),
             )));
         }
     }
@@ -282,14 +285,14 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
             e.from_id.as_str()
         };
         lines.push(Line::from(vec![
-            Span::styled(format!("  {arrow} "), Style::default().fg(t.dim)),
+            Span::styled(format!("  {arrow} "), Style::default().fg(t.ink2)),
             Span::styled(
                 format!("{:<12}", e.edge_type.as_str()),
                 Style::default().fg(edge_color(&t, e.edge_type)),
             ),
             Span::styled(
                 clip(other, w.saturating_sub(17)),
-                Style::default().fg(t.ink),
+                Style::default().fg(t.ink2),
             ),
         ]));
     }

@@ -1,13 +1,13 @@
 //! The console chrome: the header wordmark/status line and the footer keybar.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Tabs};
 use ratatui::Frame;
 
 use crate::app::{App, Focus, Page};
-use crate::theme::{rgb, Theme};
+use crate::theme::Theme;
 
 use super::{gauge_spans, panel, pulse};
 
@@ -15,25 +15,25 @@ use super::{gauge_spans, panel, pulse};
 /// ratios (fitness / frozen / graduated / gating / memory), shown on every page.
 pub(super) fn metrics(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
-    // Each metric gets a distinct accent so the strip reads at a glance.
-    let colors = [t.fitness(1.0, 1.0), t.value, t.success, t.warning, t.accent];
+    // Every gauge fills in the one accent, as the dashboard's meters do: the
+    // label says which is which.
     let mut spans = Vec::new();
-    for ((label, value), color) in app.dashboard_metrics().into_iter().zip(colors) {
-        cell(&mut spans, &t, label, value, color);
+    for (label, value) in app.dashboard_metrics() {
+        cell(&mut spans, &t, label, value);
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// One `label ▆▆▆▍ 0.73` gauge cell appended to the strip.
-fn cell(spans: &mut Vec<Span<'static>>, t: &Theme, label: &str, value: f32, color: Color) {
+fn cell(spans: &mut Vec<Span<'static>>, t: &Theme, label: &str, value: f32) {
     spans.push(Span::styled(
         format!("  {label} "),
-        Style::default().fg(t.dim),
+        Style::default().fg(t.ink2),
     ));
-    spans.extend(gauge_spans(t, value, 6, color));
+    spans.extend(gauge_spans(t, value, 6, t.accent));
     spans.push(Span::styled(
         format!(" {value:.2}"),
-        Style::default().fg(t.value),
+        Style::default().fg(t.ink),
     ));
 }
 
@@ -47,13 +47,11 @@ pub(super) fn tabs(f: &mut Frame, app: &App, area: Rect) {
         .collect();
     let tabs = Tabs::new(titles)
         .select(app.page.index())
-        .style(Style::default().fg(t.dim))
-        .highlight_style(
-            Style::default()
-                .fg(t.accent)
-                .add_modifier(Modifier::BOLD | Modifier::REVERSED),
-        )
-        .divider(Span::styled("·", Style::default().fg(t.dim)));
+        .style(Style::default().fg(t.ink2))
+        // The active tab as the dashboard marks a chosen segment: the soft
+        // accent behind it, its name at full strength.
+        .highlight_style(t.selected().fg(t.ink))
+        .divider(Span::styled("·", Style::default().fg(t.line)));
     f.render_widget(tabs, area);
 }
 
@@ -63,21 +61,15 @@ pub(super) fn header(f: &mut Frame, app: &App, area: Rect) {
     let mut spans = Vec::new();
     for k in 0..3 {
         let g = 0.5 + 0.5 * pulse(app.clock_ms, 700.0, k as f64 * 1.3);
-        spans.push(Span::styled("◆", Style::default().fg(rgb(t.core, g))));
+        spans.push(Span::styled("◆", Style::default().fg(t.glow(g))));
     }
     spans.push(Span::styled(
         "  ANTUMBRA",
-        Style::default().fg(t.text).add_modifier(Modifier::BOLD),
+        Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
     ));
     // A throwaway `--demo` store gets a badge so the operator knows nothing persists.
     if app.demo {
-        spans.push(Span::styled(
-            "  DEMO ",
-            Style::default()
-                .fg(Color::Black)
-                .bg(t.warning)
-                .add_modifier(Modifier::BOLD),
-        ));
+        spans.push(Span::styled("  DEMO ", t.chip_primary(false)));
     }
     let gen = app
         .experts
@@ -91,7 +83,7 @@ pub(super) fn header(f: &mut Frame, app: &App, area: Rect) {
             app.experts.len(),
             gen
         ),
-        Style::default().fg(t.ink),
+        Style::default().fg(t.ink2),
     ));
     // Live frame-rate readout (the cap is set in the footer with `±`; `idle`
     // marks the eased rate after a still spell) and the active layout (`l`).
@@ -102,7 +94,7 @@ pub(super) fn header(f: &mut Frame, app: &App, area: Rect) {
             if app.idle { " idle" } else { "" },
             app.layout.name()
         ),
-        Style::default().fg(t.dim),
+        Style::default().fg(t.ink3),
     ));
     // Live event-stream indicator (`e` opens the stream).
     if !app.events.is_empty() {
@@ -127,8 +119,8 @@ pub(super) fn footer(f: &mut Frame, app: &App, area: Rect) {
         Focus::Boundaries => "antumbra",
     };
     let actionable = app.boundaries.iter().filter(|b| b.is_actionable()).count();
-    let key = |s: &'static str| Span::styled(s, Style::default().fg(Color::Black).bg(t.ink));
-    let lbl = |s: String| Span::styled(s, Style::default().fg(t.ink));
+    let key = |s: &'static str| Span::styled(s, t.chip());
+    let lbl = |s: String| Span::styled(s, Style::default().fg(t.ink2));
     let line = Line::from(vec![
         key(" q "),
         lbl(" quit  ".into()),
@@ -159,7 +151,7 @@ pub(super) fn footer(f: &mut Frame, app: &App, area: Rect) {
                 app.shadows.len(),
                 app.boundaries.len()
             ),
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         ),
     ]);
     f.render_widget(Paragraph::new(line), area);

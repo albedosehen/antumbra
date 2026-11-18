@@ -33,4 +33,4 @@
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- q  quit   ↑↓  select   tab  focus:umbra   []  page:loop   t  theme:shadow   ±  cap:144   r  reload   ?  help   :  palet
+ q  quit   ↑↓  select   tab  focus:umbra   []  page:loop   t  theme:night   ±  cap:144   r  reload   ?  help   :  palett

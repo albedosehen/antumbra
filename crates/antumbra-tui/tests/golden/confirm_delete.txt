@@ -1,6 +1,6 @@
 ╭ confirm ───────────────────────────────────────────────╮
-│Delete boundary "run `npm install`" ?                   │
+│  Delete boundary "run `npm install`" ?                 │
 │                                                        │
-│y   confirm      n   cancel                             │
+│   y   confirm      n   cancel                          │
 │                                                        │
 ╰────────────────────────────────────────────────────────╯

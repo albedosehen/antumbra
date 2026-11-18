@@ -77,6 +77,17 @@ pub struct Args {
         global = true
     )]
     render: render::RenderMode,
+    /// The palette to open in: `night` (the dashboard's dark palette),
+    /// `mist` (its light one, for a light terminal) or `mono` (greys on the
+    /// terminal's own background). `t` cycles them while the console runs.
+    #[arg(
+        long,
+        env = "ANTUMBRA_THEME",
+        default_value = theme::NIGHT.name,
+        value_parser = clap::builder::PossibleValuesParser::new(theme::ALL.map(|t| t.name)),
+        global = true
+    )]
+    theme: String,
     /// Show a seeded demo population held in memory instead of reading the
     /// server, so the console can be explored before anything is set up.
     /// Nothing persists.
@@ -160,6 +171,7 @@ pub async fn run(args: Args) -> Result<()> {
             let mut app = App::load(&backend)
                 .await
                 .with_context(|| backend.unreachable())?;
+            app.theme_idx = theme::Theme::index_of(&args.theme);
             app.set_page(match page.as_str() {
                 "memory" => app::Page::Memory,
                 "loop" => app::Page::Loop,
@@ -220,6 +232,7 @@ pub async fn run(args: Args) -> Result<()> {
         .await
         .with_context(|| backend.unreachable())?;
     app.demo = args.demo;
+    app.theme_idx = theme::Theme::index_of(&args.theme);
     // Capture the terminal window now, while it's focused, so the follow tracks
     // this window between monitors rather than re-reading focus each tick.
     app.capture_window();

@@ -12,9 +12,11 @@ use crate::scroll;
 
 use antumbra_core::behavior;
 
+use crate::theme::Tone;
+
 use super::{
-    boundary_row, clip, context_fields, gauge_row, heading, kv, panel, panel_focused, shadow_color,
-    shadow_row,
+    boundary_row, boundary_tone, clip, context_fields, gauge_row, heading, kv, panel,
+    panel_focused, shadow_row, shadow_tone, state_line, state_row,
 };
 
 /// The selected expert's detail plus the gate summary (the umbra focus).
@@ -26,12 +28,7 @@ pub(super) fn detail(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     if let Some(e) = app.selected_expert() {
         lines.push(heading(&t, e.name.clone()));
-        lines.push(gauge_row(
-            &t,
-            "fitness",
-            e.fitness,
-            t.fitness(e.fitness, 1.0),
-        ));
+        lines.push(gauge_row(&t, "fitness", e.fitness, t.accent));
         lines.push(kv(&t, "frozen", if e.is_frozen() { "yes" } else { "no" }));
         lines.push(kv(&t, "generation", &e.generation.0.to_string()));
         lines.push(kv(&t, "base", &e.base_model));
@@ -43,7 +40,7 @@ pub(super) fn detail(f: &mut Frame, app: &App, area: Rect) {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 desc.to_string(),
-                Style::default().fg(t.ink),
+                Style::default().fg(t.ink2),
             )));
         }
         if let Some(ex) = e
@@ -54,20 +51,20 @@ pub(super) fn detail(f: &mut Frame, app: &App, area: Rect) {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 format!("{} learned exemplars", ex.len()),
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink2),
             )));
         }
     } else {
         lines.push(Line::from(Span::styled(
             "(no experts yet; grow some with `antumbra train`/`teach`)",
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         )));
     }
     f.render_widget(
         Paragraph::new(lines)
             .block(panel(
                 &t,
-                Span::styled(" expert ", Style::default().fg(t.ink)),
+                Span::styled(" expert ", Style::default().fg(t.ink2)),
             ))
             .wrap(Wrap { trim: true }),
         rows[0],
@@ -97,16 +94,17 @@ pub(super) fn detail(f: &mut Frame, app: &App, area: Rect) {
     // inert, and listed here it would read as a gate.
     for b in app.boundaries.iter().filter(|b| b.is_actionable()).take(3) {
         let feat = b.governing_features.first().cloned().unwrap_or_default();
-        g.push(Line::from(Span::styled(
-            format!("  ⛔ {} · {}", b.behavior, feat),
-            Style::default().fg(t.alert),
-        )));
+        g.push(state_line(
+            &t,
+            Tone::Settled,
+            format!("{} · {}", b.behavior, feat),
+        ));
     }
     f.render_widget(
         Paragraph::new(g)
             .block(panel(
                 &t,
-                Span::styled(" gate ", Style::default().fg(t.ink)),
+                Span::styled(" gate ", Style::default().fg(t.ink2)),
             ))
             .wrap(Wrap { trim: true }),
         rows[1],
@@ -124,14 +122,11 @@ pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
     if app.boundaries.is_empty() {
         lines.push(Line::from(Span::styled(
             "(no boundaries yet; the antumbra is empty)",
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         )));
     } else {
         for b in &app.boundaries {
-            lines.push(Line::from(Span::styled(
-                boundary_row(b),
-                Style::default().fg(if b.is_actionable() { t.alert } else { t.dim }),
-            )));
+            lines.push(boundary_row(&t, b));
         }
     }
     scroll::list(
@@ -142,7 +137,7 @@ pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
             &t,
             Span::styled(
                 format!(" boundaries · {} ", app.boundaries.len()),
-                Style::default().fg(t.ink),
+                Style::default().fg(t.ink2),
             ),
         ),
         lines,
@@ -156,15 +151,12 @@ pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
         let width = (rows[1].width as usize).saturating_sub(2);
         let room = width.saturating_sub(11);
         d.push(heading(&t, clip(&b.behavior, width)));
-        let (status, sc) = if b.is_actionable() {
-            ("actionable · gates routing", t.alert)
+        let status = if b.is_actionable() {
+            "actionable · gates routing"
         } else {
-            ("open · recorded, inert", t.dim)
+            "open · recorded, inert"
         };
-        d.push(Line::from(vec![
-            Span::styled(format!("{:<11}", "status"), Style::default().fg(t.dim)),
-            Span::styled(status.to_string(), Style::default().fg(sc)),
-        ]));
+        d.push(state_row(&t, "status", boundary_tone(b), status));
         if !b.governing_features.is_empty() {
             d.push(kv(&t, "feature", &b.governing_features.join(", ")));
         }
@@ -198,14 +190,14 @@ pub(super) fn boundaries(f: &mut Frame, app: &App, area: Rect) {
     } else {
         d.push(Line::from(Span::styled(
             "(select a boundary with ↑↓)",
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         )));
     }
     f.render_widget(
         Paragraph::new(d)
             .block(panel(
                 &t,
-                Span::styled(" scope ", Style::default().fg(t.ink)),
+                Span::styled(" scope ", Style::default().fg(t.ink2)),
             ))
             .wrap(Wrap { trim: true }),
         rows[1],
@@ -228,14 +220,11 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
     if app.shadows.is_empty() {
         lines.push(Line::from(Span::styled(
             "(no shadows yet; the penumbra is quiet)",
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         )));
     } else {
         for s in &app.shadows {
-            lines.push(Line::from(Span::styled(
-                shadow_row(s),
-                Style::default().fg(shadow_color(&t, s.status.as_str())),
-            )));
+            lines.push(shadow_row(&t, s));
         }
     }
     scroll::list(
@@ -246,7 +235,7 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
             &t,
             Span::styled(
                 format!(" shadows · {} ", app.shadows.len()),
-                Style::default().fg(t.ink),
+                Style::default().fg(t.ink2),
             ),
         ),
         lines,
@@ -265,13 +254,12 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
             None => s.id.as_str().to_string(),
         };
         d.push(heading(&t, clip(&title, width)));
-        d.push(Line::from(vec![
-            Span::styled(format!("{:<11}", "status"), Style::default().fg(t.dim)),
-            Span::styled(
-                s.status.as_str().to_string(),
-                Style::default().fg(shadow_color(&t, s.status.as_str())),
-            ),
-        ]));
+        d.push(state_row(
+            &t,
+            "status",
+            shadow_tone(s.status.as_str()),
+            s.status.as_str(),
+        ));
         let last = s.reward_curve.last().copied().unwrap_or(0.0);
         if kept {
             // The held-out pass rate before training and after: the base
@@ -282,22 +270,22 @@ pub(super) fn shadows(f: &mut Frame, app: &App, area: Rect) {
                 _ => "not recorded".into(),
             };
             d.push(kv(&t, "base", &base));
-            d.push(gauge_row(&t, "trained", last, t.fitness(last, 1.0)));
+            d.push(gauge_row(&t, "trained", last, t.accent));
         } else {
             d.push(kv(&t, "generation", &s.generation.0.to_string()));
-            d.push(gauge_row(&t, "final reward", last, t.fitness(last, 1.0)));
+            d.push(gauge_row(&t, "final reward", last, t.accent));
         }
     } else {
         d.push(Line::from(Span::styled(
             "(select a shadow with ↑↓)",
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         )));
     }
     f.render_widget(
         Paragraph::new(d)
             .block(panel(
                 &t,
-                Span::styled(" training ", Style::default().fg(t.ink)),
+                Span::styled(" training ", Style::default().fg(t.ink2)),
             ))
             .wrap(Wrap { trim: true }),
         rows[1],
@@ -321,12 +309,12 @@ fn reward_chart(f: &mut Frame, app: &App, area: Rect, curve: &[f32], kept: bool)
     } else {
         " reward · over steps "
     };
-    let block = panel(&t, Span::styled(title, Style::default().fg(t.ink)));
+    let block = panel(&t, Span::styled(title, Style::default().fg(t.ink2)));
     if curve.is_empty() {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "(no reward signal yet)",
-                Style::default().fg(t.dim),
+                Style::default().fg(t.ink3),
             )))
             .block(block),
             area,
@@ -346,14 +334,17 @@ fn reward_chart(f: &mut Frame, app: &App, area: Rect, curve: &[f32], kept: bool)
         .data(&data)];
     let chart = Chart::new(datasets)
         .block(block)
+        // A chart draws on a canvas, which resets its cells' background
+        // unless told the page's.
+        .style(Style::default().bg(t.ground))
         .x_axis(
             Axis::default()
-                .style(Style::default().fg(t.dim))
+                .style(Style::default().fg(t.line))
                 .bounds([0.0, last]),
         )
         .y_axis(
             Axis::default()
-                .style(Style::default().fg(t.dim))
+                .style(Style::default().fg(t.ink3))
                 .bounds([0.0, 1.0])
                 .labels(["0.0", "1.0"]),
         );
@@ -385,18 +376,13 @@ fn umbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
     let mut lines: Vec<Line> = Vec::new();
     if let Some(e) = app.selected_expert() {
         lines.push(heading(&t, e.name.clone()));
-        lines.push(gauge_row(
-            &t,
-            "fitness",
-            e.fitness,
-            t.fitness(e.fitness, 1.0),
-        ));
+        lines.push(gauge_row(&t, "fitness", e.fitness, t.accent));
         lines.push(kv(&t, "frozen", if e.is_frozen() { "yes" } else { "no" }));
         lines.push(kv(&t, "generation", &e.generation.0.to_string()));
     } else {
         lines.push(Line::from(Span::styled(
             "(no experts yet)",
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         )));
     }
     f.render_widget(
@@ -413,18 +399,10 @@ fn penumbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
     let lines: Vec<Line> = if app.shadows.is_empty() {
         vec![Line::from(Span::styled(
             "(penumbra quiet)",
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         ))]
     } else {
-        app.shadows
-            .iter()
-            .map(|s| {
-                Line::from(Span::styled(
-                    shadow_row(s),
-                    Style::default().fg(shadow_color(&t, s.status.as_str())),
-                ))
-            })
-            .collect()
+        app.shadows.iter().map(|s| shadow_row(&t, s)).collect()
     };
     let selected = (focused && !app.shadows.is_empty()).then_some(app.selected_shadow);
     scroll::list(
@@ -443,18 +421,10 @@ fn antumbra_panel(f: &mut Frame, app: &App, area: Rect, focused: bool) {
     let lines: Vec<Line> = if app.boundaries.is_empty() {
         vec![Line::from(Span::styled(
             "(antumbra empty)",
-            Style::default().fg(t.dim),
+            Style::default().fg(t.ink3),
         ))]
     } else {
-        app.boundaries
-            .iter()
-            .map(|b| {
-                Line::from(Span::styled(
-                    boundary_row(b),
-                    Style::default().fg(if b.is_actionable() { t.alert } else { t.dim }),
-                ))
-            })
-            .collect()
+        app.boundaries.iter().map(|b| boundary_row(&t, b)).collect()
     };
     let selected = (focused && !app.boundaries.is_empty()).then_some(app.selected_boundary);
     scroll::list(

@@ -1,5 +1,5 @@
 ╭ boundaries · 1 ─────────────────────────╮
-│▸ ⛔  run `npm install`                   │
+│▸ ● run `npm install`                    │
 │                                         │
 │                                         │
 │                                         │
@@ -21,7 +21,7 @@
 ╰─────────────────────────────────────────╯
 ╭ scope ──────────────────────────────────╮
 │run `npm install`                        │
-│status     actionable · gates routing    │
+│status     ● actionable · gates routing  │
 │feature    runtime                       │
 │grain      Project                       │
 │confidence █████████▋── 0.80             │

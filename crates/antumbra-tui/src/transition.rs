@@ -11,10 +11,6 @@ use tachyonfx::{fx, Effect, EffectTimer, Interpolation};
 
 use crate::theme::Theme;
 
-/// The dark terminal background the console is designed against (the color a
-/// wash settles out of).
-const BG: ratatui::style::Color = ratatui::style::Color::Rgb(12, 14, 18);
-
 /// Which region of the frame an effect plays over.
 pub enum Scope {
     /// The right detail column (a focus or theme change).
@@ -69,12 +65,14 @@ pub fn focus_switch() -> Pending {
     )
 }
 
-/// Theme cycled (`t`): a brief wash of the new accent settles into the palette.
+/// Theme cycled (`t`): a brief wash of the new accent settles into the
+/// palette, out of the new theme's ground.
 pub fn theme_wash(theme: &Theme) -> Pending {
+    let (r, g, b) = theme.ground_rgb();
     (
         fx::fade_from(
             theme.accent,
-            BG,
+            ratatui::style::Color::Rgb(r as u8, g as u8, b as u8),
             EffectTimer::from((220u32, Interpolation::SineOut)),
         ),
         Scope::Detail,
@@ -105,7 +103,7 @@ mod tests {
     #[test]
     fn each_transition_targets_the_right_scope() -> anyhow::Result<()> {
         assert!(matches!(focus_switch().1, Scope::Detail));
-        assert!(matches!(theme_wash(&theme::SHADOW).1, Scope::Detail));
+        assert!(matches!(theme_wash(&theme::NIGHT).1, Scope::Detail));
         assert!(matches!(layout_switch().1, Scope::Body));
         assert!(matches!(overlay_open().1, Scope::Overlay));
         Ok(())

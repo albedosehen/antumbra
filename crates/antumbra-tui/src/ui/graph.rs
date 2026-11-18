@@ -10,17 +10,21 @@ use ratatui::widgets::canvas::{Canvas, Line as CanvasLine};
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::theme::rgb;
 
 use super::{panel, pulse};
 
 pub(super) fn graph(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
-    let block = panel(&t, Span::styled(" population ", Style::default().fg(t.ink)));
+    let block = panel(
+        &t,
+        Span::styled(" population ", Style::default().fg(t.ink2)),
+    );
     // Ease the whole graph in over the first 0.8s (intro reveal).
     let intro = (app.clock_ms / 800.0).min(1.0);
     let canvas = Canvas::default()
         .block(block)
+        // A canvas resets its cells' background unless told the page's.
+        .background_color(t.ground)
         .marker(app.canvas_marker())
         .x_bounds([-100.0, 100.0])
         .y_bounds([-100.0, 100.0])
@@ -62,13 +66,13 @@ pub(super) fn graph(f: &mut Frame, app: &App, area: Rect) {
                     y1: 0.0,
                     x2: ex,
                     y2: ey,
-                    color: rgb(t.core, 0.10 + 0.18 * front),
+                    color: t.glow(0.10 + 0.18 * front),
                 });
                 let tt = (app.clock_ms * 0.0006 + i as f64 * 0.37) % 1.0;
                 ctx.print(
                     ex * tt,
                     ey * tt,
-                    Span::styled("·", Style::default().fg(rgb(t.core, 0.4 + 0.5 * front))),
+                    Span::styled("·", Style::default().fg(t.glow(0.4 + 0.5 * front))),
                 );
 
                 // A short fading trail behind the node along its orbit.
@@ -94,7 +98,7 @@ pub(super) fn graph(f: &mut Frame, app: &App, area: Rect) {
                     "○"
                 };
                 let col = if selected {
-                    rgb(t.core, intro)
+                    t.glow(intro)
                 } else {
                     t.fitness(e.fitness, glow)
                 };
@@ -102,7 +106,7 @@ pub(super) fn graph(f: &mut Frame, app: &App, area: Rect) {
                 ctx.print(
                     ex + 4.0,
                     ey,
-                    Span::styled(e.name.clone(), Style::default().fg(t.ink)),
+                    Span::styled(e.name.clone(), Style::default().fg(t.ink2)),
                 );
             }
 
@@ -123,16 +127,12 @@ pub(super) fn graph(f: &mut Frame, app: &App, area: Rect) {
                     y1,
                     x2,
                     y2,
-                    color: rgb(t.core, 0.35 + 0.45 * g),
+                    color: t.glow(0.35 + 0.45 * g),
                 });
             }
             for (k, (x, y)) in core.iter().enumerate() {
                 let g = (0.55 + 0.45 * pulse(app.clock_ms, 700.0, k as f64 * 1.3)) * intro;
-                ctx.print(
-                    *x,
-                    *y,
-                    Span::styled("◆", Style::default().fg(rgb(t.core, g))),
-                );
+                ctx.print(*x, *y, Span::styled("◆", Style::default().fg(t.glow(g))));
             }
         });
     f.render_widget(canvas, area);

@@ -681,3 +681,4 @@ fn golden_focused_boundaries_panel() -> anyhow::Result<()> {
 }
 
 mod behavior;
+mod look;

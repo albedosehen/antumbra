@@ -7,9 +7,9 @@
 │  ··········░░░░░░░░░░▒▒▒▒▒▒▒▒▒▓▓▓▓▓▓▓▓▓▓█████████▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▒░│
 │                                                                      │
 │self-routing  (each centroid routed → should pick itself)             │
-│  arith-specialist      → arith-specialist       99%  ✓               │
-│  string-specialist     → string-specialist      99%  ✓               │
-│  json-shaper           → json-shaper            99%  ✓               │
+│  arith-specialist      → arith-specialist       99%  ●               │
+│  string-specialist     → string-specialist      99%  ●               │
+│  json-shaper           → json-shaper            99%  ●               │
 │                                                                      │
 │                                                                      │
 │                                                                      │

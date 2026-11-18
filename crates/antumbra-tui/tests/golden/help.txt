@@ -10,7 +10,7 @@
 │  [ ] 1-4 switch page: population/memory/loop/evals   │
 │  l       cycle layout: focused/dashboard/graph/table │
 │  s       sort the population table (fitness/name/gen)│
-│  t       cycle theme: shadow / ember / mono          │
+│  t       cycle theme: night / mist / mono            │
 │                                                      │
 │frame rate                                            │
 │  + -     pin the cap to a refresh rate               │

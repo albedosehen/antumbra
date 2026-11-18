@@ -30,14 +30,15 @@ pub struct Event {
 }
 
 impl EventKind {
-    /// The glyph shown beside the event.
+    /// The glyph shown beside the event: a shape from the blocks every
+    /// monospace font carries, the same shapes a state is drawn with.
     pub fn glyph(self) -> &'static str {
         match self {
-            EventKind::Spawn => "✷",
-            EventKind::Graduate => "✦",
+            EventKind::Spawn => "+",
+            EventKind::Graduate => "●",
             EventKind::Prune => "×",
-            EventKind::Freeze => "❄",
-            EventKind::Boundary => "⛔",
+            EventKind::Freeze => "■",
+            EventKind::Boundary => "◆",
             EventKind::System => "·",
         }
     }
@@ -61,6 +62,32 @@ mod tests {
             EventKind::System,
         ] {
             assert!(!kind.glyph().is_empty(), "{kind:?} has a glyph");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_glyph_is_one_column_in_any_terminal_font() -> anyhow::Result<()> {
+        // ASCII, Latin-1, or the geometric shapes: no emoji, which is two
+        // columns in some terminals and a missing-glyph box in others.
+        for kind in [
+            EventKind::Spawn,
+            EventKind::Graduate,
+            EventKind::Prune,
+            EventKind::Freeze,
+            EventKind::Boundary,
+            EventKind::System,
+        ] {
+            let glyph = kind.glyph();
+            let mut chars = glyph.chars();
+            let (Some(c), None) = (chars.next(), chars.next()) else {
+                anyhow::bail!("{kind:?}: `{glyph}` is not one character");
+            };
+            let code = u32::from(c);
+            assert!(
+                code < 0x100 || (0x25A0..=0x25FF).contains(&code),
+                "{kind:?}: `{glyph}` (U+{code:04X}) is outside the safe blocks"
+            );
         }
         Ok(())
     }
