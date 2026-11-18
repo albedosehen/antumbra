@@ -23,8 +23,17 @@
 //!   handshake the agent first sent, and asks again. The agent sees one
 //!   answer, a little late.
 //!
+//! Two ways of speaking MCP are carried. An agent that opens a session
+//! (`initialize`, then requests that ride it) is given one, kept, and reopened
+//! as above. An agent that speaks the 2026-07-28 revision opens none: it asks
+//! `server/discover`, and every request after says for itself which revision
+//! it speaks. Over HTTP that revision wants the same said in headers, so a
+//! proxy can route a request without reading it; [`described`] writes them
+//! from the request. The server answers both ways, an agent picks one.
+//!
 //! Not carried: what the server sends unasked on its `GET` stream, which today
-//! is a log line when another session changes a memory.
+//! is a log line when another session changes a memory; and `Mcp-Param-*`
+//! headers, which a tool asks for in its schema and none of the server's do.
 //!
 //! The exchange ([`Bridge`]) is written against "send this message to the
 //! endpoint" ([`Endpoint`]), so it is tested with no socket. [`HttpEndpoint`]
@@ -34,6 +43,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use base64::Engine;
 use clap::Args;
 use serde_json::{json, Value};
 
@@ -135,13 +145,75 @@ fn asks(message: &Value) -> bool {
     method_of(message).is_some() && message.get("id").is_some_and(|id| !id.is_null())
 }
 
-/// Whether `message` is handled before the next one is read. The handshake and
-/// everything that is not a request are: a notification is taken at once, and
-/// the order they reach the server in is the order the agent sent them. Every
-/// other request runs beside the rest, so a slow tool call does not hold up a
-/// quick one.
+/// Whether `message` opens the connection: a session's handshake, or the
+/// question an agent that keeps no session asks first. Its answer is the one
+/// that carries the server's instructions.
+fn opens(message: &Value) -> bool {
+    matches!(method_of(message), Some("initialize" | "server/discover"))
+}
+
+/// Whether `message` is handled before the next one is read. What opens the
+/// connection and everything that is not a request are: a notification is
+/// taken at once, and the order they reach the server in is the order the
+/// agent sent them. Every other request runs beside the rest, so a slow tool
+/// call does not hold up a quick one.
 pub fn takes_its_turn(message: &Value) -> bool {
-    !asks(message) || method_of(message) == Some("initialize")
+    !asks(message) || opens(message)
+}
+
+/// The revision from which a request over HTTP is described in its headers.
+const DESCRIBED_FROM: &str = "2026-07-28";
+
+/// Where a request names the revision it speaks.
+const SPOKEN: &str = "/params/_meta/io.modelcontextprotocol~1protocolVersion";
+
+/// A value as an `Mcp-*` header carries it: as it is, or wrapped in Base64
+/// when it would not survive as a header (a leading or trailing blank, a
+/// character outside printable ASCII, or text that already looks wrapped).
+fn header_value(value: &str) -> String {
+    let wrapped = value.starts_with("=?base64?") && value.ends_with("?=");
+    let edges = value.starts_with([' ', '\t']) || value.ends_with([' ', '\t']);
+    let plain = value.chars().all(|c| (' '..='~').contains(&c));
+    if value.is_empty() || (plain && !edges && !wrapped) {
+        value.to_string()
+    } else {
+        format!(
+            "=?base64?{}?=",
+            base64::engine::general_purpose::STANDARD.encode(value)
+        )
+    }
+}
+
+/// The headers that describe `message` to the server and to anything on the
+/// way, when the message says which revision it speaks: that revision, and
+/// from 2026-07-28 its method and the name it is about (a tool's, a prompt's,
+/// a resource's address, a task's id). A message that names no revision rides
+/// a session, and has none of these.
+pub fn described(message: &Value) -> Vec<(&'static str, String)> {
+    let Some(spoken) = message.pointer(SPOKEN).and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    let mut headers = vec![("mcp-protocol-version", spoken.to_string())];
+    let Some(method) = method_of(message) else {
+        return headers;
+    };
+    if spoken < DESCRIBED_FROM {
+        return headers;
+    }
+    headers.push(("mcp-method", method.to_string()));
+    let named_by = match method {
+        "tools/call" | "prompts/get" => Some("name"),
+        "resources/read" | "resources/subscribe" | "resources/unsubscribe" => Some("uri"),
+        "tasks/get" | "tasks/update" | "tasks/cancel" => Some("taskId"),
+        _ => None,
+    };
+    let name = named_by
+        .and_then(|key| message.pointer(&format!("/params/{key}")))
+        .and_then(Value::as_str);
+    if let Some(name) = name {
+        headers.push(("mcp-name", header_value(name)));
+    }
+    headers
 }
 
 impl<E: Endpoint, W: Write> Bridge<E, W> {
@@ -253,14 +325,17 @@ impl<E: Endpoint, W: Write> Bridge<E, W> {
     }
 
     /// An answer as the agent gets it: the server's, with the protocol noted
-    /// and [`INSTRUCTIONS`] added when it is the handshake's and gives none.
+    /// and [`INSTRUCTIONS`] added when it answers what opened the connection
+    /// and gives none.
     fn passed_on(&self, asked: &Value, mut answer: Value) -> Value {
-        if method_of(asked) != Some("initialize") || answer.get("id") != asked.get("id") {
+        if !opens(asked) || answer.get("id") != asked.get("id") {
             return answer;
         }
         let Some(result) = answer.get_mut("result").and_then(Value::as_object_mut) else {
             return answer;
         };
+        // A session's handshake settles the revision its requests are sent
+        // under. An agent that keeps no session says it in each request.
         if let Some(protocol) = result.get("protocolVersion").and_then(Value::as_str) {
             held(&self.link).protocol = Some(protocol.to_string());
         }
@@ -417,8 +492,15 @@ impl Endpoint for HttpEndpoint {
         if let Some(session) = session {
             request = request.header("mcp-session-id", session);
         }
-        if let Some(protocol) = protocol {
-            request = request.header("mcp-protocol-version", protocol);
+        // What the message says of itself wins over what a session settled.
+        let described = described(message);
+        if described.is_empty() {
+            if let Some(protocol) = protocol {
+                request = request.header("mcp-protocol-version", protocol);
+            }
+        }
+        for (name, value) in &described {
+            request = request.header(*name, value);
         }
         if let Some(host) = &self.reach.host {
             request = request.header(DEVICE_HEADER, host);

@@ -510,3 +510,143 @@ fn no_token_is_an_error_before_anything_is_sent() -> anyhow::Result<()> {
     assert!(problem.to_string().contains("no token in"), "{problem}");
     Ok(())
 }
+
+/// A request as an agent that keeps no session sends it: it says for itself
+/// which revision it speaks. Recorded from goose 1.60.
+fn modern(id: u64, method: &str, mut params: Value) -> Value {
+    if let Some(params) = params.as_object_mut() {
+        params.insert(
+            "_meta".into(),
+            json!({
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientInfo": { "name": "goose-cli", "version": "1.60.1" },
+                "io.modelcontextprotocol/clientCapabilities": {},
+            }),
+        );
+    }
+    json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })
+}
+
+#[test]
+fn a_request_that_says_its_revision_is_described_in_its_headers() {
+    let discover = described(&modern(0, "server/discover", json!({})));
+    assert_eq!(
+        discover,
+        vec![
+            ("mcp-protocol-version", "2026-07-28".to_string()),
+            ("mcp-method", "server/discover".to_string()),
+        ]
+    );
+    let call = described(&modern(
+        2,
+        "tools/call",
+        json!({ "name": "recall_memories", "arguments": { "query": "x" } }),
+    ));
+    assert_eq!(
+        call,
+        vec![
+            ("mcp-protocol-version", "2026-07-28".to_string()),
+            ("mcp-method", "tools/call".to_string()),
+            ("mcp-name", "recall_memories".to_string()),
+        ]
+    );
+    let read = described(&modern(
+        3,
+        "resources/read",
+        json!({ "uri": "relic://a b" }),
+    ));
+    assert_eq!(read[2], ("mcp-name", "relic://a b".to_string()));
+    // A request that rides a session names no revision, and has none.
+    assert!(described(&list(1)).is_empty());
+    // An earlier revision named in a request is said, and no more.
+    let earlier = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list",
+        "params": { "_meta": { "io.modelcontextprotocol/protocolVersion": "2025-11-25" } } });
+    assert_eq!(
+        described(&earlier),
+        vec![("mcp-protocol-version", "2025-11-25".to_string())]
+    );
+}
+
+#[test]
+fn a_name_that_would_not_survive_as_a_header_is_wrapped() {
+    assert_eq!(header_value("recall_memories"), "recall_memories");
+    assert_eq!(header_value(""), "");
+    // "caf\u{e9}" in Base64, as the server unwraps it.
+    assert_eq!(header_value("caf\u{e9}"), "=?base64?Y2Fmw6k=?=");
+    assert_eq!(header_value(" padded"), "=?base64?IHBhZGRlZA==?=");
+    assert_eq!(header_value("line\nbreak"), "=?base64?bGluZQpicmVhaw==?=");
+    // Text that already looks wrapped is wrapped, so it is read back as itself.
+    assert!(header_value("=?base64?eA==?=").starts_with("=?base64?PT9iYXNlNjQ"));
+}
+
+#[test]
+fn an_agent_that_keeps_no_session_is_carried_and_given_the_instructions() -> anyhow::Result<()> {
+    let discovered = json!({ "jsonrpc": "2.0", "id": 0, "result": {
+        "resultType": "complete", "supportedVersions": ["2025-11-25", "2026-07-28"],
+        "capabilities": { "tools": {} }, "ttlMs": 0, "cacheScope": "private" } });
+    let endpoint = Scripted::default()
+        .then(vec![discovered], taken(None))
+        .then(vec![tools(1)], taken(None));
+    let out = Written::default();
+    let bridge = Bridge::new(endpoint.clone(), out.clone());
+    let discover = modern(0, "server/discover", json!({}));
+    assert!(takes_its_turn(&discover));
+    bridge.take(discover);
+    bridge.take(modern(1, "tools/list", json!({})));
+
+    // No session is opened, kept or sent.
+    for seen in endpoint.seen() {
+        assert_eq!((seen.1, seen.2), (None, None));
+    }
+    let written = out.messages()?;
+    assert_eq!(written[0]["result"]["instructions"], json!(INSTRUCTIONS));
+    assert_eq!(
+        written[0]["result"]["supportedVersions"],
+        json!(["2025-11-25", "2026-07-28"])
+    );
+    assert_eq!(written[1], tools(1));
+    Ok(())
+}
+
+#[test]
+fn the_endpoint_sends_what_a_request_says_of_itself() -> anyhow::Result<()> {
+    let answer =
+        "data: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"resultType\":\"complete\"}}\n\n";
+    let (url, served) = serve(vec![
+        response("200 OK", "text/event-stream", "", answer),
+        response("200 OK", "text/event-stream", "", answer),
+    ])?;
+    let home = Scratch::new("bridge-modern")?;
+    let token_file = home.path().join("token.txt");
+    std::fs::write(&token_file, "tok-123")?;
+    let endpoint = HttpEndpoint::new(
+        Reach {
+            url,
+            workspace: None,
+            token_given: None,
+            token_file,
+            host: None,
+        },
+        Some("goose"),
+    );
+    let call = modern(
+        2,
+        "tools/call",
+        json!({ "name": "recall_memories", "arguments": {} }),
+    );
+    endpoint.send(&call, None, None, &mut |_| {})?;
+    // A session's revision is not sent over what the request says of itself.
+    endpoint.send(&call, None, Some("2025-06-18"), &mut |_| {})?;
+    let requests = served
+        .join()
+        .map_err(|_| anyhow::anyhow!("the server thread panicked"))??;
+    for request in &requests {
+        let head = request.to_lowercase();
+        assert!(head.contains("mcp-protocol-version: 2026-07-28"), "{head}");
+        assert!(head.contains("mcp-method: tools/call"), "{head}");
+        assert!(head.contains("mcp-name: recall_memories"), "{head}");
+        assert!(!head.contains("mcp-session-id:"), "{head}");
+        assert_eq!(head.matches("mcp-protocol-version:").count(), 1, "{head}");
+    }
+    Ok(())
+}
