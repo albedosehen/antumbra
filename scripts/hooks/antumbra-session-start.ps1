@@ -343,7 +343,10 @@ if ($commit) {
 # oversized bootstrap is a truncated one that says nothing about it. What must
 # survive goes first; memories follow, best first, while they fit, and the rest
 # are counted so the agent knows to recall them.
+# ANTUMBRA_CONTEXT_LIMIT sets it lower, for an agent that takes less: Codex
+# moves a hook's context to a file well before 10,000 characters.
 $limit = 9500
+if ($env:ANTUMBRA_CONTEXT_LIMIT -match '^\d+$') { $limit = [Math]::Max(1000, [int]$env:ANTUMBRA_CONTEXT_LIMIT) }
 $sep   = "`n`n---`n`n"
 $head  = "# Antumbra session bootstrap (host=$hostId)`n`n"
 $head += $handoffs
@@ -360,7 +363,7 @@ foreach ($entry in $entries) {
 }
 $memText = if ($entries.Count -eq 0) { '[Antumbra bootstrap empty / unreachable -- starting cold.]' } else { $kept -join $sep }
 if ($omitted -gt 0) {
-    $memText += "${sep}[$omitted more recalled but left out to stay under the 10,000-character limit on hook context; use recall_memories for them.]"
+    $memText += "${sep}[$omitted more recalled but left out to stay under the limit on hook context; use recall_memories for them.]"
 }
 
 $additionalContext = "$head$memText"

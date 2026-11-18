@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 pub mod bridge;
+pub mod codex;
 pub mod gemini;
 pub mod hook;
 
@@ -29,17 +30,20 @@ pub mod hook;
 pub enum Agent {
     /// Gemini CLI.
     Gemini,
+    /// Codex.
+    Codex,
 }
 
 impl Agent {
     /// Every agent, in the order setup connects them.
-    pub const ALL: [Agent; 1] = [Agent::Gemini];
+    pub const ALL: [Agent; 2] = [Agent::Gemini, Agent::Codex];
 
     /// The name it is chosen by (`--agent`), recorded under, and named to the
     /// server with.
     pub fn name(self) -> &'static str {
         match self {
             Agent::Gemini => "gemini",
+            Agent::Codex => "codex",
         }
     }
 
@@ -47,6 +51,7 @@ impl Agent {
     pub fn title(self) -> &'static str {
         match self {
             Agent::Gemini => "Gemini CLI",
+            Agent::Codex => "Codex",
         }
     }
 
@@ -54,6 +59,7 @@ impl Agent {
     pub fn program(self) -> &'static str {
         match self {
             Agent::Gemini => "gemini",
+            Agent::Codex => "codex",
         }
     }
 
@@ -123,6 +129,9 @@ pub struct Ground<'a> {
     /// The value of an environment variable, or nothing: an agent's own
     /// variable for where its config lives.
     pub env: &'a dyn Fn(&str) -> Option<String>,
+    /// Where a program is on the PATH, or nothing: how an agent is found,
+    /// and how its own command is run.
+    pub find: &'a dyn Fn(&str) -> Option<PathBuf>,
 }
 
 /// Where connecting an agent says what it did, as setup's other steps do.
@@ -131,6 +140,7 @@ pub trait Report {
     fn dry_run(&self) -> bool;
     fn ok(&self, said: &str);
     fn would(&self, said: &str);
+    fn warn(&self, said: &str);
     fn info(&self, said: &str);
 }
 
@@ -233,12 +243,13 @@ fn kept(dir: &Path, files: &[Kept], what: &str) -> Vec<Finding> {
     found
 }
 
-/// Whether `agent` is on this machine: its program is on the PATH (`found`
-/// says), or its config directory is there.
-pub fn present(agent: Agent, ground: &Ground<'_>, found: impl Fn(&str) -> bool) -> bool {
-    found(agent.program())
+/// Whether `agent` is on this machine: its program is on the PATH, or its
+/// config directory is there.
+pub fn present(agent: Agent, ground: &Ground<'_>) -> bool {
+    (ground.find)(agent.program()).is_some()
         || match agent {
             Agent::Gemini => gemini::home(ground).is_dir(),
+            Agent::Codex => codex::home(ground).is_dir(),
         }
 }
 
@@ -247,6 +258,7 @@ pub fn present(agent: Agent, ground: &Ground<'_>, found: impl Fn(&str) -> bool) 
 pub fn connect(agent: Agent, ground: &Ground<'_>, report: &dyn Report) -> anyhow::Result<()> {
     match agent {
         Agent::Gemini => gemini::connect(ground, report),
+        Agent::Codex => codex::connect(ground, report),
     }
 }
 
@@ -254,6 +266,7 @@ pub fn connect(agent: Agent, ground: &Ground<'_>, report: &dyn Report) -> anyhow
 pub fn check(agent: Agent, ground: &Ground<'_>) -> Vec<Finding> {
     match agent {
         Agent::Gemini => gemini::check(ground),
+        Agent::Codex => codex::check(ground),
     }
 }
 
@@ -379,8 +392,36 @@ pub(crate) mod scratch {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use std::cell::RefCell;
+
     use super::*;
+
+    /// A report that keeps what it was told, each line under the way it was
+    /// said.
+    #[derive(Default)]
+    pub struct Told {
+        pub dry_run: bool,
+        pub said: RefCell<Vec<String>>,
+    }
+
+    impl Report for Told {
+        fn dry_run(&self) -> bool {
+            self.dry_run
+        }
+        fn ok(&self, said: &str) {
+            self.said.borrow_mut().push(format!("ok {said}"));
+        }
+        fn would(&self, said: &str) {
+            self.said.borrow_mut().push(format!("would {said}"));
+        }
+        fn warn(&self, said: &str) {
+            self.said.borrow_mut().push(format!("warn {said}"));
+        }
+        fn info(&self, said: &str) {
+            self.said.borrow_mut().push(format!("info {said}"));
+        }
+    }
 
     fn home_with(state: &str) -> anyhow::Result<scratch::Scratch> {
         let scratch = scratch::Scratch::new("reach")?;

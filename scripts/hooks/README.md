@@ -34,6 +34,7 @@ ANTUMBRA_SESSION_BUDGET_SEC=8          # the session bootstrap's whole wall-cloc
 ANTUMBRA_CAPTURE_EVERY_SECS=600        # the least time between two capture nudges at a turn's end; 0 nudges every turn
 ANTUMBRA_CAPTURE_NUDGE=block           # answer a due nudge with a block, for an agent that does not read Stop feedback (Claude Code before 2.1.163); the agent shows a block to its user as a hook problem
 ANTUMBRA_CAPTURE_REMINDER=brief        # the nudge in a few lines, for an agent that shows it to its user as well as to its model; `antumbra hook` sets it
+ANTUMBRA_CONTEXT_LIMIT=9500            # the most characters the bootstrap is; `antumbra hook` sets it lower for an agent that takes less than Claude Code (Codex: 7000)
 ANTUMBRA_BRIEF=0                       # the bootstrap leaves out the sovereign-mode block, and keeps none of its rules; `antumbra hook` sets it, since the block is about Claude Code
 ```
 

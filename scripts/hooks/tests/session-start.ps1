@@ -164,6 +164,14 @@ Check 'leaves some out' ($omitted -gt 0)
 $briefAt = $ctx.IndexOf('Sovereign mode')
 Check 'says what is different about the session before any memory' (($briefAt -ge 0) -and ($briefAt -lt $ctx.IndexOf('M1:x')))
 
+Write-Output 'for an agent that takes less'
+$env:ANTUMBRA_CONTEXT_LIMIT = '4000'
+$ctx = Get-Context $large $stub
+Remove-Item Env:ANTUMBRA_CONTEXT_LIMIT
+Check "stays under the limit it was given ($($ctx.Length))" ($ctx.Length -le 4000)
+Check 'keeps the best memory' $ctx.Contains('M1:x')
+Check 'says it left some out' $ctx.Contains('more recalled but left out')
+
 Write-Output 'a small recall'
 $ctx = Get-Context $small $stub
 Check 'keeps everything' $ctx.Contains('second small')

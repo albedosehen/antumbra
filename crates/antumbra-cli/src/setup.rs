@@ -83,7 +83,7 @@ pub struct Common {
     /// Leave Claude Code alone: no hooks, no MCP server, no settings.
     #[arg(long)]
     pub no_claude: bool,
-    /// The agents to connect, by name: claude, gemini, or all. Give it more
+    /// The agents to connect, by name: claude, gemini, codex, or all. Give it more
     /// than once, or with commas. Without it: Claude Code, and every other
     /// agent found on this machine.
     #[arg(long = "agent", value_delimiter = ',', value_name = "NAME")]
@@ -175,6 +175,9 @@ impl agents::Report for Steps {
     }
     fn would(&self, said: &str) {
         Steps::would(self, said);
+    }
+    fn warn(&self, said: &str) {
+        Steps::warn(self, said);
     }
     fn info(&self, said: &str) {
         Steps::info(self, said);
@@ -1082,10 +1085,12 @@ fn finish(
     steps: &Steps,
 ) -> anyhow::Result<()> {
     let env = |name: &str| std::env::var(name).ok();
+    let find = |name: &str| find_program(name);
     let ground = agents::Ground {
         home,
         antumbra: agents::Program::this(find_program("antumbra").is_some()),
         env: &env,
+        find: &find,
     };
     let chosen = chosen(common, &ground)?;
     let mut connected: Vec<&str> = Vec::new();
@@ -1210,9 +1215,7 @@ fn chosen(common: &Common, ground: &agents::Ground<'_>) -> anyhow::Result<Chosen
             claude: true,
             others: Agent::ALL
                 .into_iter()
-                .filter(|agent| {
-                    agents::present(*agent, ground, |program| find_program(program).is_some())
-                })
+                .filter(|agent| agents::present(*agent, ground))
                 .collect(),
         },
     };
@@ -1400,6 +1403,7 @@ fn connect_claude(
         ],
         env_default: vec![("ANTUMBRA_HOST_ID".into(), host_id())],
         auto_memory_off,
+        file: "settings.json",
     };
     let wired = settings::wire(&text, &wiring)?;
     // A hook wired by hand somewhere else is worth a word; setup's own, from an
@@ -1877,10 +1881,12 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
             }
         }
         let env = |name: &str| std::env::var(name).ok();
+        let find = |name: &str| find_program(name);
         let ground = agents::Ground {
             home: &home,
             antumbra: agents::Program::this(find_program("antumbra").is_some()),
             env: &env,
+            find: &find,
         };
         for agent in others {
             for finding in agents::check(agent, &ground) {
@@ -2194,7 +2200,7 @@ mod tests {
         };
         let said = problem.to_string();
         assert!(said.contains("--agent cursor: no such agent"), "{said}");
-        assert!(said.contains("claude, gemini"), "{said}");
+        assert!(said.contains("claude, gemini, codex"), "{said}");
         Ok(())
     }
 

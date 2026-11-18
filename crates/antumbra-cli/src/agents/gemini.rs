@@ -145,37 +145,18 @@ pub fn check(ground: &Ground<'_>) -> Vec<Finding> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-
     use serde_json::Value;
 
     use super::*;
     use crate::agents::scratch::Scratch;
+    use crate::agents::tests::Told;
     use crate::agents::Program;
 
-    /// A report that keeps what it was told.
-    #[derive(Default)]
-    struct Told {
-        dry_run: bool,
-        said: RefCell<Vec<String>>,
-    }
-
-    impl Report for Told {
-        fn dry_run(&self) -> bool {
-            self.dry_run
-        }
-        fn ok(&self, said: &str) {
-            self.said.borrow_mut().push(format!("ok {said}"));
-        }
-        fn would(&self, said: &str) {
-            self.said.borrow_mut().push(format!("would {said}"));
-        }
-        fn info(&self, said: &str) {
-            self.said.borrow_mut().push(format!("info {said}"));
-        }
-    }
-
     fn nothing(_: &str) -> Option<String> {
+        None
+    }
+
+    fn nowhere(_: &str) -> Option<PathBuf> {
         None
     }
 
@@ -186,6 +167,7 @@ mod tests {
             home: home.path(),
             antumbra: Program::Named,
             env: &nothing,
+            find: &nowhere,
         };
         let files = files(&ground);
         let manifest: Value = serde_json::from_str(&files[0].text)?;
@@ -220,6 +202,7 @@ mod tests {
             home: home.path(),
             antumbra: Program::At(at.clone()),
             env: &nothing,
+            find: &nowhere,
         };
         let files = files(&ground);
         let manifest: Value = serde_json::from_str(&files[0].text)?;
@@ -250,6 +233,7 @@ mod tests {
             home: home.path(),
             antumbra: Program::Named,
             env: &nothing,
+            find: &nowhere,
         };
         let dir = home
             .path()
@@ -314,6 +298,7 @@ mod tests {
             home: home.path(),
             antumbra: Program::Named,
             env: &env,
+            find: &nowhere,
         };
         assert_eq!(
             extension(&ground),
