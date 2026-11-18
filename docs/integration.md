@@ -185,8 +185,9 @@ Claude Code is given the server's address and a helper that reads the token from
 - **A server that restarted costs the agent nothing.** When the server no longer knows the session, the bridge opens another with the handshake the agent first sent, and asks again.
 - **Instructions.** When the server's handshake gives none, the bridge adds a paragraph on when to recall and what to store, which an agent places in its system prompt. It is what keeps an agent recalling and storing where its hooks do not run.
 - It names this machine to the server (`X-Antumbra-Host`), so what the agent writes is stamped as written from here.
+- **Both ways of speaking MCP are carried.** An agent that opens a session (`initialize`) is given one. An agent on the 2026-07-28 revision opens none: it asks `server/discover`, and each request says which revision it speaks. Over HTTP that revision wants the same said in headers (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`), which the bridge writes from the request. goose speaks this one.
 
-`ANTUMBRA_URL` (or `--surface`), `ANTUMBRA_TOKEN`, `ANTUMBRA_TOKEN_FILE` (or `--token-file`) and `ANTUMBRA_HOST_ID` win over what setup recorded, as they do in the hooks. `ANTUMBRA_BRIDGE_PATIENCE_SECS` (600) bounds one call. Not carried: what the server sends unasked, which today is a log line when another session changes a memory.
+`ANTUMBRA_URL` (or `--surface`), `ANTUMBRA_TOKEN`, `ANTUMBRA_TOKEN_FILE` (or `--token-file`) and `ANTUMBRA_HOST_ID` win over what setup recorded, as they do in the hooks. `ANTUMBRA_BRIDGE_PATIENCE_SECS` (600) bounds one call. Not carried: what the server sends unasked, which today is a log line when another session changes a memory; and `Mcp-Param-*` headers, which a tool asks for in its schema and none of the server's do.
 
 ### One command for every agent's hooks
 
