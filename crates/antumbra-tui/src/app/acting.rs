@@ -296,8 +296,12 @@ impl App {
         self.pending.as_ref().map(|p| match p {
             Pending::PruneShadow(id) => format!("Prune candidate {}?", id.as_str()),
             Pending::GraduateShadow(id) => format!("Graduate candidate {}?", id.as_str()),
-            Pending::FreezeExpert(id, true) => format!("Freeze expert {}?", id.as_str()),
-            Pending::FreezeExpert(id, false) => format!("Thaw expert {}?", id.as_str()),
+            Pending::FreezeExpert(id, true) => {
+                format!("Freeze expert {}?", self.expert_called(id))
+            }
+            Pending::FreezeExpert(id, false) => {
+                format!("Thaw expert {}?", self.expert_called(id))
+            }
             Pending::HaltLoop(run) => format!("Halt {}?", run.as_str()),
             Pending::CancelHalt(run) => format!("Cancel the halt of {}?", run.as_str()),
             Pending::DeleteBoundary(id) => {
@@ -358,11 +362,11 @@ impl App {
                 (ConsoleAction::GraduateShadow { shadow }, said, true)
             }
             Pending::FreezeExpert(expert, true) => {
-                let said = format!("frozen · {}", expert.as_str());
+                let said = format!("frozen · {}", self.expert_called(&expert));
                 (ConsoleAction::FreezeExpert { expert }, said, true)
             }
             Pending::FreezeExpert(expert, false) => {
-                let said = format!("thawed · {}", expert.as_str());
+                let said = format!("thawed · {}", self.expert_called(&expert));
                 (ConsoleAction::ThawExpert { expert }, said, true)
             }
             Pending::DeleteBoundary(boundary) => {

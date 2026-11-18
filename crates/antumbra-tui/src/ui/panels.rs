@@ -13,6 +13,7 @@ use ratatui::Frame;
 use crate::app::{App, Focus};
 use crate::scroll;
 use crate::theme::Tone;
+use crate::words;
 
 use antumbra_core::behavior;
 
@@ -33,12 +34,18 @@ fn expert_detail(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
     let mut lines: Vec<Line> = Vec::new();
     if let Some(e) = app.selected_expert() {
-        lines.push(heading(&t, e.name.clone()));
+        let room = (area.width as usize).saturating_sub(13);
+        lines.push(heading(&t, words::expert_name(e)));
+        lines.push(kv(&t, "kind", words::expert_kind(e)));
+        // A standing expert is named by its scope in brief; here it is whole.
+        if let Some(scope) = e.standing_scope() {
+            lines.push(kv(&t, "scope", &clip(scope, room)));
+        }
         lines.push(gauge_row(&t, "fitness", e.fitness, t.accent));
         let (tone, state) = expert_state(e);
         lines.push(state_row(&t, "state", tone, state));
         lines.push(kv(&t, "generation", &e.generation.0.to_string()));
-        lines.push(kv(&t, "base model", &e.base_model));
+        lines.push(kv(&t, "base model", &clip(&e.base_model, room)));
         if let Some(desc) = e
             .capability_card
             .get("description")
@@ -400,7 +407,7 @@ fn expert_summary(f: &mut Frame, app: &App, area: Rect, focused: bool) {
     let t = app.theme();
     let mut lines: Vec<Line> = Vec::new();
     if let Some(e) = app.selected_expert() {
-        lines.push(heading(&t, e.name.clone()));
+        lines.push(heading(&t, words::expert_name(e)));
         lines.push(gauge_row(&t, "fitness", e.fitness, t.accent));
         let (tone, state) = expert_state(e);
         lines.push(state_row(&t, "state", tone, state));

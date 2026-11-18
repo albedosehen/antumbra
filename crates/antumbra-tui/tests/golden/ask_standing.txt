@@ -1,0 +1,12 @@
+╭ Ask · which expert takes a task? ────────────────────────────────────────╮
+│task › Which expert for orders?▏                                          │
+│                                                                          │
+│  No expert is routed to it: it goes to your agent.                       │
+│  Why: no learned router yet, and none of your private experts is         │
+│       close to this task                                                 │
+│                                                                          │
+│  Standing experts, in every answer here (orders):                        │
+│  ● everywhere                  every repository                          │
+│  ● orders                      github.com/acme/orders                    │
+│  and 2 more, for other repositories                                      │
+╰──────────────────────────────────────────────────────────────────────────╯

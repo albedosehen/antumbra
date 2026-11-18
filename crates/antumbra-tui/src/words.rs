@@ -10,6 +10,8 @@
 //! [`caption`] is the sentence under the tabs; [`GLOSSARY`] is the list the
 //! help ends with.
 
+use antumbra_core::Expert;
+
 use crate::app::{App, Focus, Page};
 
 /// A word the console uses, and what it means in a line or two.
@@ -27,6 +29,13 @@ pub const GLOSSARY: &[Word] = &[
         means: &[
             "a small model trained from your own verified work,",
             "to do one kind of task",
+        ],
+    },
+    Word {
+        term: "standing",
+        means: &[
+            "a standing expert is not sent tasks: it shapes every",
+            "answer in its scope, a repository or everywhere",
         ],
     },
     Word {
@@ -135,6 +144,39 @@ pub const OPERATOR_ONLY: &str = "Only an operator's token reads this: it belongs
 /// What a read-only console says when asked to act.
 pub const READ_ONLY: &str =
     "Read-only: acting needs an operator's token (antumbra-mcp --mint-token --operator).";
+
+/// A scope in brief: a repository's, such as `github.com/acme/orders`, by the
+/// repository's name, the last part of its path; any other, such as
+/// `everywhere`, as it is.
+pub fn scope_name(scope: &str) -> &str {
+    scope
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(scope)
+}
+
+/// An expert's name as the console shows it. A standing expert's stored name
+/// is its id, some forty characters of prefix before the one part that tells
+/// it from the next, so a list of them is a column of identical rows; it is
+/// named by its scope instead, the repository's name or `everywhere`. Any
+/// other expert has a name of its own.
+pub fn expert_name(e: &Expert) -> String {
+    match e.standing_scope() {
+        Some(scope) => scope_name(scope).to_string(),
+        None => e.name.clone(),
+    }
+}
+
+/// What kind of expert `e` is, in a word: `standing`, which shapes every
+/// answer in its scope, or `routed`, which is sent the tasks it covers.
+pub fn expert_kind(e: &Expert) -> &'static str {
+    if e.standing_scope().is_some() {
+        "standing"
+    } else {
+        "routed"
+    }
+}
 
 /// A memory's kind, as its network and what that holds.
 pub fn network(network: &str) -> &'static str {

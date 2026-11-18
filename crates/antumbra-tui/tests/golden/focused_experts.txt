@@ -1,12 +1,12 @@
 ╭ Expert ────────────────────────────────────────╮
 │arith-specialist                                │
+│kind       routed                               │
 │fitness    ██████████▊─ 0.90                    │
 │state      ● frozen                             │
 │generation 0                                    │
 │base model base                                 │
 │                                                │
 │learned from 2 examples                         │
-│                                                │
 │                                                │
 │                                                │
 │                                                │

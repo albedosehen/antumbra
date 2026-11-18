@@ -146,7 +146,12 @@ fn experts(f: &mut Frame, app: &App, t: &Theme, area: Rect, block: Block) {
     let rows: Vec<Row> = app.experts[first..last]
         .iter()
         .map(|e| {
-            let mut fit = gauge_spans(t, e.fitness, 8, t.accent);
+            // The meter goes before a name is cut: narrow, the figure alone.
+            let mut fit = if wide {
+                gauge_spans(t, e.fitness, 8, t.accent)
+            } else {
+                Vec::new()
+            };
             fit.push(Span::styled(
                 format!(" {:.2}", e.fitness),
                 Style::default().fg(t.ink),
@@ -157,7 +162,7 @@ fn experts(f: &mut Frame, app: &App, t: &Theme, area: Rect, block: Block) {
                 (Tone::Open, "open")
             };
             let mut cells = vec![Cell::from(Span::styled(
-                e.name.clone(),
+                crate::words::expert_name(e),
                 Style::default().fg(t.ink),
             ))];
             if wide {
@@ -193,10 +198,10 @@ fn experts(f: &mut Frame, app: &App, t: &Theme, area: Rect, block: Block) {
         )
     } else {
         (
-            &["EXPERT", "FITNESS", "STATE"],
+            &["EXPERT", " FIT", "STATE"],
             &[
                 Constraint::Min(12),
-                Constraint::Length(13),
+                Constraint::Length(5),
                 Constraint::Length(8),
             ],
         )

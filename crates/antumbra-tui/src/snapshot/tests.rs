@@ -183,6 +183,7 @@ fn demo_app() -> App {
         reads_failing: false,
         ask_query: String::new(),
         ask_result: None,
+        ask_reason: None,
         real_embedder: false,
         ev_experts: std::collections::HashMap::new(),
         ev_shadows: std::collections::HashMap::new(),
@@ -682,4 +683,5 @@ mod behavior;
 mod keys;
 mod lists;
 mod look;
+mod standing;
 mod wording;

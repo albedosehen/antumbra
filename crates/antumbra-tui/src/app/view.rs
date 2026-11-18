@@ -73,7 +73,7 @@ impl App {
             Focus::Experts => self
                 .experts
                 .iter()
-                .map(|e| Cow::Borrowed(e.name.as_str()))
+                .map(|e| Cow::Owned(crate::words::expert_name(e)))
                 .collect(),
             Focus::Shadows => self
                 .shadows
@@ -199,7 +199,8 @@ impl App {
             .map(|e| e.id.as_str().to_string());
         match self.sort {
             SortKey::Fitness => self.experts.sort_by(|a, b| b.fitness.total_cmp(&a.fitness)),
-            SortKey::Name => self.experts.sort_by(|a, b| a.name.cmp(&b.name)),
+            // By the name shown, so the list reads in the order it is in.
+            SortKey::Name => self.experts.sort_by_cached_key(crate::words::expert_name),
             SortKey::Generation => self
                 .experts
                 .sort_by_key(|e| std::cmp::Reverse(e.generation.0)),

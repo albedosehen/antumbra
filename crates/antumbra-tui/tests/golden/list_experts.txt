@@ -3,11 +3,11 @@
  Experts: small models trained from your own verified work, each for one kind of task.
 ╭  Experts 3 │ Candidates 2 │ Boundaries 2  ─────────────────────────╮╭ Expert ────────────────────────────────────────╮
 │  EXPERT                       GEN FITNESS       STATE    VISIBLE TO││arith-specialist                                │
-│▸ arith-specialist             0   ███████▍ 0.92 ● frozen shared    ││fitness    ███████████─ 0.92                    │
-│  datetime-specialist          1   ██████▌─ 0.81 ● frozen shared    ││state      ● frozen                             │
-│  json-shaper                  2   ████▍─── 0.55 ○ open   shared    ││generation 0                                    │
+│▸ arith-specialist             0   ███████▍ 0.92 ● frozen shared    ││kind       routed                               │
+│  datetime-specialist          1   ██████▌─ 0.81 ● frozen shared    ││fitness    ███████████─ 0.92                    │
+│  json-shaper                  2   ████▍─── 0.55 ○ open   shared    ││state      ● frozen                             │
+│                                                                    ││generation 0                                    │
 │                                                                    ││base model Qwen2.5-Coder-1.5B                   │
-│                                                                    ││                                                │
 │                                                                    ││                                                │
 │                                                                    ││                                                │
 │                                                                    ││                                                │
