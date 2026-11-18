@@ -2,9 +2,9 @@
   1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent  ·  6 Services
  Training: what the server is teaching your experts, and the loop that grows new ones when it is run.
 ╭ Standing experts 2 · taught by the server ─────────────────────────────────────────────────────────────────────────────────────╮
-│EXPERT                                        TRAINE ACCEPTE PROPOSED LAST TRAINED STATE                                        │
-│everywhere                                    1      0       0        3d ago       ● up to date                                 │
-│orders                                        0      1       0        -            ○ trained at the server's next pass          │
+│EXPERT                                       TRAINED ACCEPTED PROPOSED LAST TRAINED STATE                                       │
+│everywhere                                   1       0        0        3d ago       ● up to date                                │
+│orders                                       0       1        0        -            ○ trained at the server's next pass         │
 │A proposed behavior that can be taught is accepted after 24 hours. K changes the wait.                                          │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ Training loop ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮

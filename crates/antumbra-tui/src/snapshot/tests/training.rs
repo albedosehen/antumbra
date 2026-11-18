@@ -80,6 +80,19 @@ fn the_training_page_says_what_the_server_is_teaching_and_what_it_does_next() ->
         text.contains("A proposed behavior that can be taught is accepted after 24 hours."),
         "{text}"
     );
+    // Every heading is whole, and a short terminal still lists every expert.
+    assert!(
+        text.contains("TRAINED") && text.contains("ACCEPTED") && text.contains("PROPOSED"),
+        "{text}"
+    );
+    let short = to_text(&render(&mut app, 130, 16, 1600.0)?);
+    for scope in ["everywhere", "orders", "billing"] {
+        assert!(
+            row(&short, &[scope, "○"]) || row(&short, &[scope, "●"]),
+            "{scope}:
+{short}"
+        );
+    }
     // The loop a person runs is under it, and says a standing expert needs none.
     assert!(text.contains("No training loop has run yet: "), "{text}");
     assert!(text.contains("A standing expert needs none"), "{text}");

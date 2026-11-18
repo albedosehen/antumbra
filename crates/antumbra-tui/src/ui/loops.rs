@@ -65,13 +65,15 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
         training_loop(f, app, area);
         return;
     }
-    // Its rows, a heading, a note and the border; never more than it leaves
-    // the loop room beside.
+    // Its rows, a heading, a note and the border. The loop under it keeps
+    // the rows its pipeline needs, or, with no run, the few its one sentence
+    // does, so a short terminal still lists the experts.
+    let kept = if app.loop_heads.is_empty() { 4 } else { 10 };
     let wanted = u16::try_from(app.standing.len())
         .unwrap_or(u16::MAX)
         .saturating_add(4);
     let parts = Layout::vertical([
-        Constraint::Length(wanted.min(area.height.saturating_sub(6))),
+        Constraint::Length(wanted.min(area.height.saturating_sub(kept))),
         Constraint::Min(0),
     ])
     .split(area);
@@ -174,8 +176,8 @@ fn standing(f: &mut Frame, app: &App, area: Rect) {
     .style(Style::default().fg(t.ink2).add_modifier(Modifier::BOLD));
     let widths = [
         Constraint::Min(14),
-        Constraint::Length(6),
         Constraint::Length(7),
+        Constraint::Length(8),
         Constraint::Length(8),
         Constraint::Length(12),
         Constraint::Min(34),
