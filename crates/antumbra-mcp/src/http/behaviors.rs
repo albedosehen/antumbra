@@ -118,7 +118,10 @@ mod keeper {
     use antumbra_core::behavior::tuning;
     use antumbra_core::{Memory, TenantId, UserId};
     use antumbra_serve::behave;
-    use antumbra_store::repo::{behavior_tuning, compartment, device, expert, memory};
+    use antumbra_store::repo::{
+        behavior as store_behavior, behavior_tuning, compartment, device, expert, memory,
+        memory_policy,
+    };
 
     use super::{plan_user, Failed, Need, ScopePlan};
     use crate::http::HttpState;
@@ -131,6 +134,8 @@ mod keeper {
     /// What a pass did.
     #[derive(Debug, Default)]
     struct Tally {
+        /// Proposed behaviors accepted for their user after they had waited.
+        accepted: usize,
         trained: usize,
         refused: usize,
         dropped: usize,
@@ -166,9 +171,10 @@ mod keeper {
             loop {
                 let clock = Instant::now();
                 match pass(&state, &mut failed).await {
-                    Ok(t) if t.trained + t.refused + t.dropped + t.tuned > 0 => eprintln!(
-                        "antumbra-mcp: standing experts, pass in {:.0}s: {} trained, {} refused, {} dropped, {} audited, {} tuned",
+                    Ok(t) if t.accepted + t.trained + t.refused + t.dropped + t.tuned > 0 => eprintln!(
+                        "antumbra-mcp: standing experts, pass in {:.0}s: {} accepted, {} trained, {} refused, {} dropped, {} audited, {} tuned",
                         clock.elapsed().as_secs_f32(),
+                        t.accepted,
                         t.trained,
                         t.refused,
                         t.dropped,
@@ -260,6 +266,49 @@ mod keeper {
         Ok(())
     }
 
+    /// Accept, for `user`, each proposed behavior that has waited as long as
+    /// their workspace sets, and hand back their behaviors as they then are.
+    /// Accepting was the one step of the path from a behavior to an expert
+    /// that waited on a person, and a proposed behavior nobody gets round to
+    /// is never taught. The user can still retire what was accepted, and a
+    /// wait of 0 leaves accepting to them alone.
+    async fn accept_waited(
+        state: &HttpState,
+        tenant: &TenantId,
+        user: &UserId,
+        compartment: &antumbra_core::CompartmentId,
+        memories: Vec<Memory>,
+        tally: &mut Tally,
+    ) -> Result<Vec<Memory>> {
+        let _guard = state.auth.lock().await;
+        state.store.signin_root().await?;
+        let hours = memory_policy::get(&state.store, tenant)
+            .await?
+            .accept_after_hours;
+        let wait = chrono::Duration::minutes((f64::from(hours) * 60.0).round() as i64);
+        let now = chrono::Utc::now();
+        let due: Vec<String> = memories
+            .iter()
+            .filter(|m| antumbra_core::behavior::due_for_acceptance(m, wait, now))
+            .map(|m| m.id.as_str().to_string())
+            .collect();
+        if due.is_empty() {
+            return Ok(memories);
+        }
+        let mut accepted = 0;
+        for id in &due {
+            if store_behavior::accept_waited(&state.store, tenant, user, id).await? {
+                accepted += 1;
+            }
+        }
+        tally.accepted += accepted;
+        eprintln!(
+            "antumbra-mcp: standing experts, {}: accepted {accepted} behavior(s) that had waited {hours} hours",
+            user.as_str()
+        );
+        Ok(memory::list_by_compartment(&state.store, tenant, compartment).await?)
+    }
+
     /// See to one user's scopes. Returns the behaviors read for the user, for
     /// the workspace's reading; none when another node trains for them.
     async fn user(
@@ -290,6 +339,7 @@ mod keeper {
         if !here {
             return Ok(Vec::new());
         }
+        let memories = accept_waited(state, tenant, user, compartment, memories, tally).await?;
         let scopes = plan_user(&memories, &experts, failed, tenant.as_str(), user.as_str());
         for ScopePlan {
             scope,

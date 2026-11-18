@@ -824,6 +824,29 @@ pub fn learnable(memories: &[Memory], scope: &str) -> Vec<(Memory, Spec)> {
         .collect()
 }
 
+/// The evidence on a behavior the server accepted for its user, after it had
+/// waited as long as the workspace sets: what tells it from one the user
+/// accepted themselves.
+pub const ACCEPTED_BY_SERVER: &str = "behavior-accepted-by:server";
+
+/// Whether `m` is a proposed behavior that has waited long enough for the
+/// server to accept it: proposed, with nothing that keeps it from training
+/// ([`Spec::problems`]), and untouched for `wait`. Recording it again, or any
+/// other change to it, starts the wait over. A wait of nothing is never: only
+/// the user accepts.
+pub fn due_for_acceptance(
+    m: &Memory,
+    wait: chrono::Duration,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    if wait <= chrono::Duration::zero() {
+        return false;
+    }
+    State::of(&m.evidence).is_some_and(|state| state.status == Status::Proposed)
+        && spec_of(&m.content).is_some_and(|spec| spec.problems().is_empty())
+        && now - m.updated_at >= wait
+}
+
 /// The scopes a user's behaviors or standing experts are in, everywhere
 /// first: each one an expert may have to be trained, retrained, or dropped
 /// for.

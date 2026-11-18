@@ -491,6 +491,7 @@ fn a_behavior_with_nothing_wrong_and_no_training_matches_the_output_schema() -> 
         last_training: None,
         last_audit: None,
         missed: None,
+        accepted_by_server: false,
     };
     assert_required_keys_present(&view)?;
     Ok(())
@@ -697,5 +698,58 @@ async fn a_behavior_cites_the_memories_it_came_from_and_they_are_no_longer_candi
         after.scanned, 2,
         "the memory and the behavior itself were read, and neither is offered"
     );
+    Ok(())
+}
+
+// A proposed behavior accepted on the server's word, after it waited: its
+// status moves, the note of who accepted it is kept, and it is done once.
+#[tokio::test]
+async fn a_behavior_the_server_accepts_is_accepted_once_and_says_who_did() -> anyhow::Result<()> {
+    use antumbra_store::repo::behavior::accept_waited;
+    let store = mem_store().await?;
+    let s = server_for(&store, "user:test");
+    let id = record_id(&s, branch_rule(None, false)).await?;
+    let (tenant, user) = (TenantId::new("ws:test"), UserId::new("user:test"));
+    assert_eq!(list(&s, Some("proposed")).await?.len(), 1);
+    assert!(accept_waited(&store, &tenant, &user, &id).await?);
+    assert_eq!(list(&s, Some("accepted")).await?.len(), 1);
+    // The list says the server accepted it, and says so of no other.
+    let said = |s: &McpServer| {
+        let s = s.clone();
+        async move {
+            let out = s
+                .list_behaviors(Parameters(ListBehaviorsParams {
+                    status: None,
+                    scope: None,
+                }))
+                .await?;
+            anyhow::Ok(
+                out.0
+                    .behaviors
+                    .iter()
+                    .map(|b| b.accepted_by_server)
+                    .collect::<Vec<bool>>(),
+            )
+        }
+    };
+    assert_eq!(said(&s).await?, vec![true]);
+    let by_hand = record_id(&s, branch_rule(Some(id.clone()), true)).await?;
+    anyhow::ensure!(by_hand != id, "a second behavior was recorded");
+    assert!(said(&s).await?.contains(&false));
+    let Some(m) = memory::get(&store, &tenant, &MemoryId::new(id.clone())).await? else {
+        anyhow::bail!("the behavior is gone");
+    };
+    assert!(
+        m.evidence
+            .iter()
+            .any(|e| e == antumbra_core::behavior::ACCEPTED_BY_SERVER),
+        "{:?}",
+        m.evidence
+    );
+    // It is no longer proposed, so there is nothing to accept again; and
+    // another user's is never this one's to accept.
+    assert!(!accept_waited(&store, &tenant, &user, &id).await?);
+    let other = record_id(&server_for(&store, "user:else"), branch_rule(None, false)).await?;
+    assert!(!accept_waited(&store, &tenant, &user, &other).await?);
     Ok(())
 }

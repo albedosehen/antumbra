@@ -108,6 +108,10 @@ pub struct MemoryPolicy {
     pub pass_over_weight: f32,
     /// How much strength moves recall's order, from 0 (relevance alone) to 1.
     pub strength_weight: f32,
+    /// Hours a proposed behavior waits for its user before the server
+    /// accepts it for them, on the node that trains. 0: only the user
+    /// accepts.
+    pub accept_after_hours: f32,
 }
 
 impl Default for MemoryPolicy {
@@ -124,6 +128,7 @@ impl Default for MemoryPolicy {
             max_links: 3,
             pass_over_weight: 0.1,
             strength_weight: 0.25,
+            accept_after_hours: 24.0,
         }
     }
 }
@@ -240,6 +245,15 @@ pub const KNOBS: &[Knob] = &[
         step: 0.05,
         get: |p| p.strength_weight,
         set: |p, v| p.strength_weight = v,
+    },
+    Knob {
+        key: "accept_after_hours",
+        help: "hours a proposed behavior waits before the server accepts it for you (0: only you accept)",
+        min: 0.0,
+        max: 720.0,
+        step: 6.0,
+        get: |p| p.accept_after_hours,
+        set: |p, v| p.accept_after_hours = v,
     },
 ];
 

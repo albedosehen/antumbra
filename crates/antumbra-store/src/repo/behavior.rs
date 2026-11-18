@@ -110,6 +110,31 @@ pub async fn record(
     Ok(Recorded { id, superseded })
 }
 
+/// Accept one of the user's proposed behaviors on the server's word, after
+/// it waited: its status, and a note of who accepted it, so a list can tell
+/// it from one the user accepted. False when `id` is not a proposed behavior
+/// in their behavior compartment, which is also what it is once accepted.
+pub async fn accept_waited(
+    store: &Store,
+    tenant: &TenantId,
+    user: &UserId,
+    id: &str,
+) -> Result<bool> {
+    let compartment = behavior::compartment_id(tenant, user);
+    let found = memory::get(store, tenant, &MemoryId::new(id))
+        .await?
+        .filter(|m| m.compartment.as_ref() == Some(&compartment))
+        .filter(|m| State::of(&m.evidence).is_some_and(|s| s.status == Status::Proposed));
+    let Some(mut m) = found else {
+        return Ok(false);
+    };
+    behavior::set_status(&mut m.evidence, Status::Accepted);
+    m.evidence.push(behavior::ACCEPTED_BY_SERVER.to_string());
+    m.updated_at = Utc::now();
+    memory::upsert(store, &m).await?;
+    Ok(true)
+}
+
 /// Set one of the user's behaviors to `status`. `None` when `id` is not a
 /// behavior in their behavior compartment.
 pub async fn set_status(
