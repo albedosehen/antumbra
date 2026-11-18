@@ -492,6 +492,7 @@ impl App {
             &self.experts,
             &self.shadows,
             self.policy.accept_after_hours,
+            self.policy.behaviors_per_expert,
             chrono::Utc::now(),
         );
         // Each selection back on what it was on; one whose item is gone

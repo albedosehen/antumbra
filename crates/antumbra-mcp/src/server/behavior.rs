@@ -9,6 +9,8 @@
 use super::*;
 use antumbra_core::behavior::{self, Example, Spec, State, Status};
 use antumbra_store::repo::behavior as store_behavior;
+use antumbra_store::repo::memory_policy;
+use std::collections::HashSet;
 
 /// The most behaviors one answer lists, newest first.
 const MAX_LISTED: usize = 200;
@@ -175,6 +177,16 @@ pub(super) struct BehaviorView {
     /// changed, 0 for never). False for one you accepted yourself, and for
     /// one that is not accepted. Retire it if it should not be taught.
     pub(super) accepted_by_server: bool,
+    /// Whether it is accepted and waits for room: its scope's expert is
+    /// taught at most `behaviors_per_expert` behaviors, and the set is full.
+    /// It is taught when one leaves the set, or the workspace raises the
+    /// number.
+    pub(super) waiting_for_room: bool,
+    /// Whether the base model already follows it, by its scope's last
+    /// training, so it is left out of the set: there is nothing to teach,
+    /// and teaching it beside many others is how an expert ends up worse at
+    /// it than the base.
+    pub(super) followed_by_base: bool,
 }
 
 /// A held-out task a behavior was missed on, and the expert's answer.
@@ -297,7 +309,7 @@ impl McpServer {
 
     /// The user's behaviors.
     #[tool(
-        description = "List your behaviors, newest first: each rule with its scope, status (proposed, accepted, trained, retired), check patterns, how many examples and violations back it, and `problems` when something keeps it from being taught. A proposed one that can be taught is accepted by the server once it has waited as long as the workspace sets (a day unless changed), and says so under `accepted_by_server`. One its last training did not learn says, under `missed`, a held-out task and what the expert answered instead. Filter by `status` or `scope`."
+        description = "List your behaviors, newest first: each rule with its scope, status (proposed, accepted, trained, retired), check patterns, how many examples and violations back it, and `problems` when something keeps it from being taught. A proposed one that can be taught is accepted by the server once it has waited as long as the workspace sets (a day unless changed), and says so under `accepted_by_server`. One its last training did not learn says, under `missed`, a held-out task and what the expert answered instead. A scope's expert is taught at most the workspace's `behaviors_per_expert`: an accepted one with no room says so under `waiting_for_room`, and one the base model already follows, left out of training, under `followed_by_base`. Filter by `status` or `scope`."
     )]
     pub(super) async fn list_behaviors(
         &self,
@@ -319,6 +331,28 @@ impl McpServer {
             .await
             .map_err(err)?;
         all.sort_by_key(|m| std::cmp::Reverse(m.updated_at));
+        // What each scope's expert is taught, as the keeper chooses it.
+        let most = memory_policy::get(&self.store, &self.tenant)
+            .await
+            .map_or(behavior::MOST_PER_EXPERT, |p| {
+                p.behaviors_per_expert.round().max(1.0) as usize
+            });
+        let (mut waiting, mut followed) = (HashSet::new(), HashSet::new());
+        for scope in behavior::scopes(&all, &[]) {
+            let taught = behavior::taught(&all, &scope, most);
+            waiting.extend(
+                taught
+                    .waiting
+                    .iter()
+                    .map(|(m, _)| m.id.as_str().to_string()),
+            );
+            followed.extend(
+                taught
+                    .followed
+                    .iter()
+                    .map(|(m, _)| m.id.as_str().to_string()),
+            );
+        }
         let behaviors = all
             .iter()
             .filter_map(|m| {
@@ -335,6 +369,8 @@ impl McpServer {
                 last_training: behavior::training(&m.evidence).map(|t| t.describe()),
                 last_audit: behavior::audits(&m.evidence).last().map(|a| a.describe()),
                 accepted_by_server: m.evidence.iter().any(|e| e == behavior::ACCEPTED_BY_SERVER),
+                waiting_for_room: waiting.contains(m.id.as_str()),
+                followed_by_base: followed.contains(m.id.as_str()),
                 missed: behavior::missed::of(&m.evidence).map(|x| MissedView {
                     task: x.task,
                     answer: x.answer,

@@ -5,7 +5,7 @@
 │EXPERT                                       TRAINED ACCEPTED PROPOSED LAST TRAINED STATE                                       │
 │everywhere                                   1       0        0        3d ago       ● up to date                                │
 │orders                                       0       1        0        -            ○ trained at the server's next pass         │
-│A proposed behavior that can be taught is accepted after 24 hours. K changes the wait.                                          │
+│A proposed behavior that can be taught is accepted after 24 hours, and an expert is taught at most 10. K changes both.          │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ Training loop ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │No training loop has run yet: `antumbra train` runs one over a corpus, by hand. A standing expert needs none: the server trains │

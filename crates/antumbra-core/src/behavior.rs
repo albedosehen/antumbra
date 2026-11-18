@@ -804,7 +804,83 @@ pub fn sources(evidence: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// What the standing expert for `scope` is taught: the behaviors accepted,
+/// The rate every behavior's held-out tasks must reach to count as learned,
+/// and so the rate at which the base model is taken to follow a behavior
+/// already. Admission reads it (`antumbra_train::behave::MIN_RATE`).
+pub const LEARNED_AT: f32 = 0.6;
+
+/// The most behaviors one standing expert is taught, unless the workspace
+/// says otherwise (`MemoryPolicy::behaviors_per_expert`). Nine were learned
+/// together at the default recipe and 32 were refused (ADR-0027's
+/// measurement), so the default is about where it is known to work.
+pub const MOST_PER_EXPERT: usize = 10;
+
+/// Whether the base model already follows the behavior whose evidence this
+/// is, by its scope's last training: it passed at least [`LEARNED_AT`] of its
+/// held-out tasks before any training. Such a behavior has nothing to teach,
+/// and in a crowded set it is the one the expert is dragged below the base
+/// on, which refuses the whole set.
+pub fn followed_by_base(evidence: &[String]) -> bool {
+    training(evidence).is_some_and(|t| t.base >= LEARNED_AT)
+}
+
+/// What a scope's standing expert is taught, and what is left out of it.
+#[derive(Debug, Clone, Default)]
+pub struct Taught {
+    /// The set taught: what the expert holds, then what fits beside it.
+    pub set: Vec<(Memory, Spec)>,
+    /// Accepted behaviors with no room in the set, oldest first.
+    pub waiting: Vec<(Memory, Spec)>,
+    /// Behaviors the base model already follows, left out.
+    pub followed: Vec<(Memory, Spec)>,
+}
+
+/// What the standing expert for `scope` is taught, at most `most`
+/// behaviors: every one it was trained on and still in force first, since a
+/// set that dropped one would unteach it; then accepted ones never taught,
+/// oldest first; then accepted ones taught before and missed, so a behavior
+/// that was not learned gives its room to one not yet tried. A behavior the
+/// base model already follows is left out ([`followed_by_base`]).
+///
+/// The set grows by at most `most` less what the expert already holds, so a
+/// scope whose expert holds `most` or more stops growing: what it accepts
+/// waits for a scope taught by more than one expert.
+pub fn taught(memories: &[Memory], scope: &str, most: usize) -> Taught {
+    let mut out = Taught::default();
+    let mut trained = Vec::new();
+    let mut fresh = Vec::new();
+    let mut missed = Vec::new();
+    for (m, spec) in learnable(memories, scope) {
+        if followed_by_base(&m.evidence) {
+            out.followed.push((m, spec));
+            continue;
+        }
+        match State::of(&m.evidence).map(|s| s.status) {
+            Some(Status::Trained) => trained.push((m, spec)),
+            _ if training(&m.evidence).is_none() => fresh.push((m, spec)),
+            _ => missed.push((m, spec)),
+        }
+    }
+    let oldest = |a: &(Memory, Spec), b: &(Memory, Spec)| {
+        a.0.created_at
+            .cmp(&b.0.created_at)
+            .then_with(|| a.0.id.as_str().cmp(b.0.id.as_str()))
+    };
+    fresh.sort_by(oldest);
+    missed.sort_by(oldest);
+    let room = most.saturating_sub(trained.len());
+    out.set = trained;
+    for (i, b) in fresh.into_iter().chain(missed).enumerate() {
+        if i < room {
+            out.set.push(b);
+        } else {
+            out.waiting.push(b);
+        }
+    }
+    out
+}
+
+/// What the standing expert for `scope` could be taught: the behaviors accepted,
 /// or trained before and still in force, each with its spec. Retired and
 /// proposed ones are left out, and so is one that could not be recorded
 /// today ([`Spec::problems`]), such as one recorded with three examples before

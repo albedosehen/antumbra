@@ -18,6 +18,11 @@
 //! behaviors, the ones it did not learn, records the set it was trained on,
 //! and is in step until that set changes.
 //!
+//! A scope's set has a ceiling, the workspace's `behaviors_per_expert`: past
+//! it, accepted behaviors wait for room rather than crowd a set the expert
+//! cannot learn (`behavior::taught`). A behavior the base model already
+//! follows is left out of the set.
+//!
 //! Database work runs in owner mode under the auth lock, a step at a time;
 //! training runs outside it.
 
@@ -68,22 +73,29 @@ pub(super) type Failed = HashMap<(String, String, String), String>;
 pub(super) struct ScopePlan {
     pub scope: String,
     pub taught: Vec<(Memory, Spec)>,
+    /// Accepted behaviors with no room in the set.
+    pub waiting: usize,
     pub expert: Option<Expert>,
     pub need: Need,
 }
 
-/// Each scope of one user and what it needs.
+/// Each scope of one user and what it needs, no set larger than `most`.
 pub(super) fn plan_user(
     memories: &[Memory],
     experts: &[Expert],
     failed: &Failed,
     tenant: &str,
     user: &str,
+    most: usize,
 ) -> Vec<ScopePlan> {
     behavior::scopes(memories, experts)
         .into_iter()
         .map(|scope| {
-            let taught = behavior::learnable(memories, &scope);
+            let behavior::Taught {
+                set: taught,
+                waiting,
+                ..
+            } = behavior::taught(memories, &scope, most);
             let expert = experts
                 .iter()
                 .find(|e| e.standing_scope() == Some(scope.as_str()))
@@ -93,6 +105,7 @@ pub(super) fn plan_user(
             ScopePlan {
                 scope,
                 taught,
+                waiting: waiting.len(),
                 expert,
                 need,
             }
@@ -319,9 +332,14 @@ mod keeper {
         failed: &mut Failed,
         tally: &mut Tally,
     ) -> Result<Vec<Memory>> {
-        let (memories, experts, here) = {
+        let (memories, experts, here, most) = {
             let _guard = state.auth.lock().await;
             state.store.signin_root().await?;
+            let most = memory_policy::get(&state.store, tenant)
+                .await?
+                .behaviors_per_expert
+                .round()
+                .max(1.0) as usize;
             let memories = memory::list_by_compartment(&state.store, tenant, compartment).await?;
             let experts: Vec<antumbra_core::Expert> = expert::list(&state.store)
                 .await?
@@ -334,16 +352,24 @@ mod keeper {
                 .ok()
                 .flatten()
                 .is_none_or(|g| g.host == state.host);
-            (memories, experts, here)
+            (memories, experts, here, most)
         };
         if !here {
             return Ok(Vec::new());
         }
         let memories = accept_waited(state, tenant, user, compartment, memories, tally).await?;
-        let scopes = plan_user(&memories, &experts, failed, tenant.as_str(), user.as_str());
+        let scopes = plan_user(
+            &memories,
+            &experts,
+            failed,
+            tenant.as_str(),
+            user.as_str(),
+            most,
+        );
         for ScopePlan {
             scope,
             taught,
+            waiting,
             expert: current,
             need,
         } in scopes
@@ -383,6 +409,13 @@ mod keeper {
                     }
                 }
                 Need::Train(print) => {
+                    if waiting > 0 {
+                        eprintln!(
+                            "antumbra-mcp: standing experts, {}:{scope}: teaching {} behavior(s), {waiting} more wait for room (behaviors_per_expert {most})",
+                            user.as_str(),
+                            taught.len()
+                        );
+                    }
                     let plan = behave::Plan {
                         tenant: tenant.clone(),
                         user: user.clone(),
