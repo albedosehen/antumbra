@@ -1,6 +1,6 @@
  ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                 ● live
   1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent  ·  6 Services
- Training: the loop that finds weak spots, trains candidates, checks them and admits the winners.
+ Training: what the server is teaching your experts, and the loop that grows new ones when it is run.
 ╭ Training loop ───────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                                      │
 │  generation 4    ·    run:demo    ·    stage score                                                                   │
