@@ -158,7 +158,7 @@ In the console, press `?` for the keymap and `c` for the "connect your agent" pa
 
 ### 7. Connect your coding agent
 
-This is the point of Antumbra: your agent (Claude Code, Cursor, any MCP client) reads and writes Antumbra over its lifecycle. Set these in the agent's environment:
+This is the point of Antumbra: your agent reads and writes Antumbra over its lifecycle. `antumbra setup` does this step for Claude Code, Gemini CLI, Codex, GitHub Copilot CLI, goose and OpenCode, each in its own way; [Using Antumbra](integration.md#agents-other-than-claude-code) says what it writes for each. By hand, for Claude Code, set these in the agent's environment:
 
 ```
 ANTUMBRA_URL=http://127.0.0.1:8081
