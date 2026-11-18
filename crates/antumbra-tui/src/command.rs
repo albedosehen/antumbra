@@ -21,6 +21,8 @@ pub enum Action {
     Knobs,
     Gate,
     Ask,
+    /// Let the Services page's walk go further.
+    Hops,
     // What is on screen.
     Page(Page),
     /// The next page (`1`) or the one before (`-1`), wrapping.
@@ -86,6 +88,7 @@ pub const COMMANDS: &[Command] = &[
     command("Go to Training", "3", Action::Page(Page::Loop)),
     command("Go to Evaluations", "4", Action::Page(Page::Evals)),
     command("Go to Agent", "5", Action::Page(Page::Sovereign)),
+    command("Go to Services", "6", Action::Page(Page::Services)),
     command("Show the experts", "", Action::Focus(Focus::Experts)),
     command("Show the candidates", "", Action::Focus(Focus::Shadows)),
     command("Show the boundaries", "", Action::Focus(Focus::Boundaries)),

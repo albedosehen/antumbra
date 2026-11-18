@@ -110,16 +110,19 @@ pub enum Page {
     /// A coding agent with its feature flags off: the rules, and which skills
     /// are used. Read-only.
     Sovereign,
+    /// What depends on what, and what a change to a service reaches.
+    Services,
 }
 
 impl Page {
     /// Every page, in tab order.
-    pub const ALL: [Page; 5] = [
+    pub const ALL: [Page; 6] = [
         Page::Population,
         Page::Memory,
         Page::Loop,
         Page::Evals,
         Page::Sovereign,
+        Page::Services,
     ];
 
     /// The tab's label: what the page holds, in the dashboard's words.
@@ -130,6 +133,7 @@ impl Page {
             Page::Loop => "Training",
             Page::Evals => "Evaluations",
             Page::Sovereign => "Agent",
+            Page::Services => "Services",
         }
     }
 
@@ -247,6 +251,17 @@ pub struct App {
     /// What the last ask's task is near, of the user's own: their standing
     /// experts and what they have taught.
     pub ask_near: crate::backend::Near,
+    /// The services the workspace's dependency claims name, read from the
+    /// memories that hold them.
+    pub services: crate::services::Services,
+    /// The service the Services page's walk starts from: its place among the
+    /// services' names.
+    pub selected_service: usize,
+    /// How far the walk goes, in hops.
+    pub service_hops: u32,
+    /// Which way it goes: to what depends on the service, or to what the
+    /// service depends on.
+    pub service_direction: antumbra_core::depgraph::Direction,
     /// Whether a server answers the ask, embedding the task with its own
     /// model. When false, the ask uses the demo's stand-in embedder and says
     /// so.
@@ -351,6 +366,10 @@ impl App {
             ask_result: None,
             ask_reason: None,
             ask_near: crate::backend::Near::default(),
+            services: crate::services::Services::default(),
+            selected_service: 0,
+            service_hops: 3,
+            service_direction: antumbra_core::depgraph::Direction::Dependents,
             real_embedder: false,
             ev_experts: HashMap::new(),
             ev_shadows: HashMap::new(),
@@ -388,6 +407,8 @@ impl App {
         // on its expert, which at the first read is whichever came first from
         // the store; the Memory page lists kind after kind.
         app.selected = 0;
+        // The Services page opens on the service the most depend on.
+        app.selected_service = app.services.most_depended_on();
         if let Some(&first) = app.listed_memories().first() {
             app.selected_memory = first;
         }
@@ -444,6 +465,7 @@ impl App {
         self.shadows = snap.shadows;
         self.memories = snap.memories;
         self.sovereign = crate::sovereign::View::from_memories(&self.memories);
+        self.services = crate::services::Services::read(&self.memories, chrono::Utc::now());
         self.edges = snap.edges;
         self.usage = snap
             .usage
@@ -606,6 +628,7 @@ impl App {
             Page::Population => {}
             Page::Evals if !self.evals.is_empty() => {}
             Page::Loop if !self.loop_heads.is_empty() => {}
+            Page::Services if !self.services.is_empty() => {}
             _ => return,
         }
         self.mode = Mode::Detail;
@@ -659,6 +682,45 @@ impl App {
     pub fn ask_backspace(&mut self) {
         self.ask_query.pop();
         self.forget_ask();
+    }
+
+    /// The service the Services page's walk starts from.
+    pub fn selected_service_name(&self) -> Option<&str> {
+        self.services
+            .names
+            .get(self.selected_service)
+            .map(String::as_str)
+    }
+
+    /// What a change to the selected service reaches, or what it needs, as
+    /// far as the walk is set to go.
+    pub fn service_reach(&self) -> Vec<antumbra_core::depgraph::Reached> {
+        self.selected_service_name()
+            .map_or_else(Vec::new, |origin| {
+                self.services.reach(
+                    origin,
+                    self.service_direction,
+                    self.service_hops,
+                    chrono::Utc::now(),
+                )
+            })
+    }
+
+    /// Let the walk go further: one hop, three, six, and round again.
+    pub fn cycle_hops(&mut self) {
+        let hops = crate::services::HOPS;
+        let at = hops.iter().position(|h| *h == self.service_hops);
+        self.service_hops = hops[at.map_or(0, |i| (i + 1) % hops.len())];
+    }
+
+    /// Turn the walk round: from what depends on the service to what it
+    /// depends on, and back.
+    pub fn turn_walk(&mut self) {
+        use antumbra_core::depgraph::Direction;
+        self.service_direction = match self.service_direction {
+            Direction::Dependents => Direction::Dependencies,
+            Direction::Dependencies => Direction::Dependents,
+        };
     }
 
     /// Drop what the last ask came to: it answered another task.

@@ -185,6 +185,10 @@ fn demo_app() -> App {
         ask_result: None,
         ask_reason: None,
         ask_near: crate::backend::Near::default(),
+        services: crate::services::Services::default(),
+        selected_service: 0,
+        service_hops: 3,
+        service_direction: antumbra_core::depgraph::Direction::Dependents,
         real_embedder: false,
         ev_experts: std::collections::HashMap::new(),
         ev_shadows: std::collections::HashMap::new(),
@@ -214,6 +218,15 @@ fn demo_app() -> App {
         },
         should_quit: false,
     }
+}
+
+/// Give `app` the example services: eight of them, with claims that are
+/// declared, observed and claimed, and the page opened on the one the most
+/// depend on. The claims are not added to its memories, so the Memory page's
+/// frames stay what they were.
+fn with_services(app: &mut App) {
+    app.services = crate::services::Services::read(&crate::services::tests::ledger(), Utc::now());
+    app.selected_service = app.services.most_depended_on();
 }
 
 fn graduated_shadow() -> Shadow {
@@ -685,5 +698,6 @@ mod keys;
 mod lists;
 mod look;
 mod runs;
+mod services;
 mod standing;
 mod wording;

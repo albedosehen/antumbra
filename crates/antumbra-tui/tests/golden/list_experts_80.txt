@@ -1,5 +1,5 @@
  ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                         ● live
-  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent  ·  6 S
  Experts: small models trained from your own verified work, each for one kind …
 ╭  Experts 3 │ Candidates 2 │ Boundaries 2  ─╮╭ Expert ────────────────────────╮
 │  EXPERT                       FIT  STATE   ││arith-specialist                │

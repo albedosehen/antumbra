@@ -33,6 +33,7 @@ pub(crate) const PAGES: &Names<Page> = &[
     (Page::Loop, "training", Some("loop")),
     (Page::Evals, "evaluations", Some("evals")),
     (Page::Sovereign, "agent", Some("sovereign")),
+    (Page::Services, "services", None),
 ];
 
 pub(crate) const LAYOUTS: &Names<LayoutMode> = &[

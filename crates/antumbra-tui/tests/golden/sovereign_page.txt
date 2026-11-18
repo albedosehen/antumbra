@@ -1,5 +1,5 @@
  ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                 ● live
-  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent  ·  6 Services
  Agent: the rules your coding agent is given in place of its vendor's feature flags, and the skills it uses.
 ╭ Rules · 3 ─────────────────────────────────────────╮╭ Skills · 3 · least recently used first ────────────────────────╮
 │The claude-code rules in this compartment were      ││  SKILL                        WORKSPACE        USES  LAST USED │
@@ -33,4 +33,4 @@
 │                                                    ││                                                                │
 ╰────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────╯
 
- ↑↓  move   /  find   1-5  pages   a  ask   :  commands   ?  help   q  quit
+ ↑↓  move   /  find   1-6  pages   a  ask   :  commands   ?  help   q  quit

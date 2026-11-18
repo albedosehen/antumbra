@@ -14,10 +14,12 @@ mod events;
 mod here;
 mod keys;
 mod named;
+mod netgraph;
 mod overlay;
 mod pacing;
 mod render;
 mod scroll;
+mod services;
 mod settings;
 mod snapshot;
 mod sovereign;
@@ -114,8 +116,8 @@ enum Command {
         #[arg(long, default_value_t = 1600.0)]
         at_ms: f64,
         /// Top-level page to render: population, memory, training, evaluations,
-        /// or agent (their former names, loop, evals and sovereign, are taken
-        /// too).
+        /// agent, or services (the former names loop, evals and sovereign are
+        /// taken too).
         #[arg(long, default_value = "population")]
         page: String,
         /// The population page's layout: list, dashboard, graph, or table

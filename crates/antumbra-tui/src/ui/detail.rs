@@ -427,6 +427,75 @@ pub(super) fn shadow_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>
     (format!("Candidate · {}", shadow_name(s)), l)
 }
 
+/// Everything recorded about the selected service: each pair it is on either
+/// end of with every claim behind the pair (its source, what it is, how much
+/// it is believed now, how often it was seen and when, and the file that
+/// declares it), then everything the walk from it reaches.
+pub(super) fn service_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
+    use crate::services::short;
+    let Some(service) = app.selected_service_name() else {
+        return (
+            "Service".into(),
+            vec![Line::from(Span::styled(
+                "No service is selected.",
+                Style::default().fg(t.ink3),
+            ))],
+        );
+    };
+    let now = chrono::Utc::now();
+    let mut l = vec![heading(t, service.to_string())];
+    for (label, depends) in [("Depends on", true), ("Depended on by", false)] {
+        let pairs: Vec<_> = app
+            .services
+            .pairs_of(service)
+            .filter(|pair| (pair.from == service) == depends)
+            .collect();
+        l.push(Line::from(""));
+        l.push(section(t, &format!("{label} · {}", pairs.len())));
+        for pair in pairs {
+            let other = if depends { &pair.to } else { &pair.from };
+            l.push(Line::from(vec![
+                Span::styled(other.clone(), Style::default().fg(t.ink)),
+                Span::styled(format!("  {:.2}", pair.weight), Style::default().fg(t.ink2)),
+            ]));
+            for edge in &pair.edges {
+                let mut says = format!("  {} · {:.2}", edge.source.as_str(), edge.weight(now));
+                if let Some(detail) = &edge.detail {
+                    says.push_str(&format!(" · {detail}"));
+                }
+                if edge.reinforcement > 0 {
+                    says.push_str(&format!(" · seen {}×", edge.reinforcement + 1));
+                }
+                says.push_str(&format!(" · last seen {}", since(edge.last_seen)));
+                l.push(Line::from(Span::styled(says, Style::default().fg(t.ink2))));
+                if let Some(anchor) = &edge.anchor {
+                    let commit: String = anchor.commit.chars().take(7).collect();
+                    let mut at = format!("    {} @ {commit}", anchor.repo);
+                    if let Some(path) = &anchor.path {
+                        at.push_str(&format!(" · {path}"));
+                    }
+                    l.push(Line::from(Span::styled(at, Style::default().fg(t.ink3))));
+                }
+            }
+        }
+    }
+    let reached = app.service_reach();
+    l.push(Line::from(""));
+    l.push(section(
+        t,
+        &format!(
+            "{} · within {} · {}",
+            super::services::direction_words(app.service_direction),
+            super::services::hops_words(app.service_hops),
+            reached.len()
+        ),
+    ));
+    for r in &reached {
+        l.extend(super::services::reached_rows(t, r, service, 68));
+    }
+    (format!("Service · {}", short(service)), l)
+}
+
 pub(super) fn boundary_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) {
     let Some(b) = app.selected_boundary() else {
         return (

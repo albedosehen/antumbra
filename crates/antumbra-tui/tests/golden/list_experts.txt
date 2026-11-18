@@ -1,5 +1,5 @@
  ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                 ● live
-  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent  ·  6 Services
  Experts: small models trained from your own verified work, each for one kind of task.
 ╭  Experts 3 │ Candidates 2 │ Boundaries 2  ─────────────────────────╮╭ Expert ────────────────────────────────────────╮
 │  EXPERT                       GEN FITNESS       STATE    VISIBLE TO││arith-specialist                                │
@@ -33,4 +33,4 @@
 │                                                                    ││                                                │
 ╰────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
 
- ↑↓  move   enter  details   tab  next list   /  find   x  thaw   1-5  pages   :  commands   ?  help   q  quit
+ ↑↓  move   enter  details   tab  next list   /  find   x  thaw   1-6  pages   :  commands   ?  help   q  quit

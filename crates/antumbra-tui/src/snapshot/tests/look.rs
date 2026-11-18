@@ -14,6 +14,7 @@ fn full_app(theme: &Theme) -> App {
     app.theme_idx = Theme::index_of(theme.name);
     app.shadows = vec![graduated_shadow(), kept_shadow()];
     app.boundaries = vec![actionable_boundary(), missed_boundary()];
+    with_services(&mut app);
     app.demo = true;
     app
 }

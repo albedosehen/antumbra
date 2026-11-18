@@ -131,6 +131,9 @@ pub fn caption(app: &App) -> &'static str {
         Page::Sovereign => {
             "Agent: the rules your coding agent is given in place of its vendor's feature flags, and the skills it uses."
         }
+        Page::Services => {
+            "Services: what depends on what. Pick a service to see what a change to it reaches, and what says so."
+        }
     }
 }
 

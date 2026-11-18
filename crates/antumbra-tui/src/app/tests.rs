@@ -14,7 +14,7 @@ fn every_page_has_a_number_key_and_no_key_reaches_past_the_last() -> anyhow::Res
     let keys: Vec<char> = Page::ALL.iter().filter_map(|page| page.key()).collect();
     assert_eq!(
         keys,
-        vec!['1', '2', '3', '4', '5'],
+        vec!['1', '2', '3', '4', '5', '6'],
         "one key a page, in order"
     );
     // The tab the key selects is the tab the bar numbers it as.
