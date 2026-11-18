@@ -218,6 +218,16 @@ pub enum ClaudeAction {
 }
 
 #[derive(Subcommand)]
+pub enum McpAction {
+    /// Carry an agent's MCP connection to the server set up on this
+    /// machine, over standard input and output. The token is read from its
+    /// file for each request, so it is in no agent's config; a plain
+    /// http:// address works where an agent would refuse one; and a server
+    /// that restarted is given a new session without the agent noticing.
+    Bridge(crate::agents::bridge::BridgeArgs),
+}
+
+#[derive(Subcommand)]
 pub enum Command {
     /// Set Antumbra up for Claude Code in one command: on this machine
     /// (`setup local`), against a hosted workspace (`setup hosted <url>`),
@@ -231,6 +241,13 @@ pub enum Command {
     Claude {
         #[command(subcommand)]
         action: ClaudeAction,
+    },
+    /// The server's MCP endpoint for an agent that runs a command: Gemini
+    /// CLI, Codex, OpenCode, goose and Copilot CLI are wired to it by
+    /// `antumbra setup`.
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
     },
     /// The operator console: a live view of the population, the memory and
     /// the loop, read from the Antumbra server with the hooks' address and

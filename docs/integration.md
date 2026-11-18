@@ -170,6 +170,24 @@ PDF takes a browser engine, so the server hands the page to a [Gotenberg](https:
 
 ---
 
+## Agents other than Claude Code
+
+### The MCP bridge
+
+Claude Code is given the server's address and a helper that reads the token from its file for each connection. An agent without such a helper would need the token in its own config file, or in the environment of every shell it is started from. `antumbra mcp bridge` is the server's MCP endpoint as a command instead: the agent runs it and talks over its pipes, and the bridge carries each message to the server set up on this machine (`~/.antumbra/setup.json`), with the token read from `~/.antumbra/token.txt` for that request.
+
+```json
+{ "command": "antumbra", "args": ["mcp", "bridge", "--agent", "<name>"] }
+```
+
+- **No token in the agent's config.** A token replaced on disk is the one the next call presents, with the agent still running.
+- **A plain `http://` address works.** Whether the token may travel to an address was setup's decision (`--allow-http`), and it is not made again by each agent.
+- **A server that restarted costs the agent nothing.** When the server no longer knows the session, the bridge opens another with the handshake the agent first sent, and asks again.
+- **Instructions.** When the server's handshake gives none, the bridge adds a paragraph on when to recall and what to store, which an agent places in its system prompt. It is what keeps an agent recalling and storing where its hooks do not run.
+- It names this machine to the server (`X-Antumbra-Host`), so what the agent writes is stamped as written from here.
+
+`ANTUMBRA_URL` (or `--surface`), `ANTUMBRA_TOKEN`, `ANTUMBRA_TOKEN_FILE` (or `--token-file`) and `ANTUMBRA_HOST_ID` win over what setup recorded, as they do in the hooks. `ANTUMBRA_BRIDGE_PATIENCE_SECS` (600) bounds one call. Not carried: what the server sends unasked, which today is a log line when another session changes a memory.
+
 ## Leaving work for another of your machines
 
 A session can leave a note for a session on another of your machines: "rerun this on the GPU box", "check the dashboard after the deploy". The agent calls `leave_handoff` with the text (its first line is the title) and `for_host`, the machine's host name, or nothing for whichever of your machines starts a session next. A session that starts there opens with the count and a line for each handoff waiting for it, ahead of recalled memories, and keeps hearing about one until a session calls `complete_handoff`; after that it is no longer announced but `handoffs` with `include_done` still shows it. The machine's name is `ANTUMBRA_HOST_ID`, the same one the bootstrap prints in its first line, so set it on each machine. Each session start also names the machine to the server (`register_device`), so `devices` lists every one of your machines with when it was last seen. That includes a laptop whose agent talks to a hosted server and runs no server of its own. A machine named that way is a memory node: the server cannot see its hardware, and a machine that trains runs `antumbra-mcp` itself, which registers it with what it can do. Handoffs are yours alone: they live in your own `handoff` compartment, and no other user's session sees them. It is a note, not remote control: nothing runs on the other machine until a session there decides to.
