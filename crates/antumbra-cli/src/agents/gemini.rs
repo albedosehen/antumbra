@@ -276,13 +276,24 @@ mod tests {
             again.said
         );
 
-        // A file edited in place is said, with what to do.
+        // A file edited in place, or written by an earlier build, is said
+        // with what to do. It still works, so it does not fail the check.
         std::fs::write(dir.join("hooks").join("hooks.json"), "{}")?;
         let found = check(&ground);
         assert!(
             found.iter().any(|f| f.fix.is_some()
+                && f.works
                 && f.said.contains("hooks/hooks.json")
                 && f.said.contains("differs")),
+            "{found:?}"
+        );
+        // One that is gone does.
+        std::fs::remove_file(dir.join("gemini-extension.json"))?;
+        let found = check(&ground);
+        assert!(
+            found
+                .iter()
+                .any(|f| !f.works && f.said.contains("gemini-extension.json missing")),
             "{found:?}"
         );
         Ok(())
