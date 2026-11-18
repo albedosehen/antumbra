@@ -281,7 +281,7 @@ The Services page (`6`) draws the workspace's dependency claims as a graph and s
 
 The console reads `GET /console/snapshot` and acts with `POST /console/action`, both with the bearer token. Neither is an MCP tool, so no agent is offered them.
 
-Two more say what the doctor knows to the agent. The session-start hook opens with `antumbra claude brief` ([hooks](../scripts/hooks/README.md)), and `antumbra claude remember` keeps the same rules as `world` memories in a `claude-code` compartment of your own: volatile, so they never train an expert, and safe to run again.
+Two more say what the doctor knows to the agent. The session-start hook opens with `antumbra claude brief` ([hooks](../scripts/hooks/README.md)), and `antumbra claude remember` keeps the same rules as `world` memories in a `claude-code` compartment of your own: volatile, so they never train an expert, and safe to run again. The session-start hook runs it for you, detached, in the mode the rules are for, and `antumbra setup` wires the two hooks that count which skills are used, so the console's Agent page fills without a command being typed.
 
 ## Who can recall a document
 

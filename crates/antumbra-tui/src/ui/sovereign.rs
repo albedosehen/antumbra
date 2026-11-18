@@ -30,10 +30,20 @@ fn rules(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let note = view
-        .checked
-        .as_deref()
-        .unwrap_or("No rules kept yet: `antumbra claude remember` writes one.");
+    // With none kept, a sentence that says who keeps them, and no table: a
+    // heading over no rows reads as a list that failed to load.
+    if view.rules.is_empty() {
+        let why = "No rules kept yet: the session-start hook keeps them the first time a \
+                   session starts with the agent's feature flags off, and `antumbra claude \
+                   remember` keeps them by hand.";
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(why, Style::default().fg(t.ink3))))
+                .wrap(Wrap { trim: true }),
+            inner,
+        );
+        return;
+    }
+    let note = view.checked.as_deref().unwrap_or_default();
     let parts = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
@@ -82,7 +92,7 @@ fn skills(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(block, area);
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "No skill use counted yet: the hooks count one with `antumbra claude skill-used`.",
+                "No skill use counted yet: `antumbra setup` wires the two hooks that count it, and a skill is counted the next time one is used.",
                 Style::default().fg(t.ink3),
             )))
             .wrap(Wrap { trim: true }),

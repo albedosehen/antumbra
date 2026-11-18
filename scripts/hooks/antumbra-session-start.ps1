@@ -202,6 +202,33 @@ if ($binPath) {
     } catch { $brief = '' }
 }
 
+# --- keep the rules this mode runs by (fail-open, detached) ----------------------
+# What `antumbra claude brief` just said is also kept as memories, in a
+# `claude-code` compartment of the user's own: the console's Agent page lists
+# them, and an agent can recall why a feature is missing. `antumbra claude
+# remember` does that, and was a command for a person to run, which nobody
+# did. It is safe every session: a rule already kept is left, and a changed one
+# is stored and the old text penalized. Only in the mode the rules are for,
+# which is when the brief says anything. Detached, like the merges, so it never
+# delays the session. Off with ANTUMBRA_REMEMBER=0. Its last output is in
+# ~/.antumbra/remember.log, or wherever ANTUMBRA_REMEMBER_LOG names.
+if ($brief -and $env:ANTUMBRA_REMEMBER -ne '0' -and $binPath) {
+    try {
+        $env:ANTUMBRA_URL = $url
+        if ($token) { $env:ANTUMBRA_TOKEN = $token }
+        $log = if ($env:ANTUMBRA_REMEMBER_LOG) { $env:ANTUMBRA_REMEMBER_LOG } else { Join-Path $HOME '.antumbra/remember.log' }
+        $logDir = Split-Path -Parent $log
+        if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
+        # Started as the merges' report is, holding none of this hook's handles.
+        if ($env:OS -eq 'Windows_NT') {
+            Start-Process -FilePath 'cmd.exe' -WindowStyle Hidden `
+                -ArgumentList "/d /s /c `"`"$bin`" claude remember >`"$log`" 2>&1`"" | Out-Null
+        } else {
+            & sh -c '"$0" claude remember </dev/null >"$1" 2>&1 &' $bin $log
+        }
+    } catch { }
+}
+
 # --- the answers -------------------------------------------------------------------
 $handoffs = ''
 $resp = Receive-Call $handoffsCall

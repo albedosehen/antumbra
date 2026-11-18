@@ -1129,6 +1129,46 @@ fn platform_hooks() -> Vec<(&'static str, &'static str, u32)> {
     ]
 }
 
+/// The two hooks that count which skills are used. A skill is used two ways
+/// and each hook sees one: the agent calls the `Skill` tool, or a person
+/// types `/name`, which never touches the tool. Both run `antumbra claude
+/// skill-used`, which reads the hook's input itself, so there is no script
+/// and nothing differs between shells. It never fails and never speaks, and
+/// it is not waited for. Counting was a snippet for a person to paste into
+/// their settings, which nobody did.
+fn skill_hooks() -> Vec<settings::Hook> {
+    let command = format!("{} claude skill-used", antumbra_command());
+    [
+        ("PostToolUse", Some("Skill")),
+        ("UserPromptExpansion", None),
+    ]
+    .into_iter()
+    .map(|(event, tool)| settings::Hook {
+        event,
+        script: SKILL_USED,
+        command: command.clone(),
+        timeout: 10,
+        tool,
+        waits: false,
+    })
+    .collect()
+}
+
+/// The words that name the skill counter in a hook's command.
+const SKILL_USED: &str = "claude skill-used";
+
+/// How a hook runs this program: by its name where that is on the path,
+/// which survives an upgrade that moves it, else by where it is now.
+fn antumbra_command() -> String {
+    if find_program("antumbra").is_some() {
+        return "antumbra".to_string();
+    }
+    match std::env::current_exe() {
+        Ok(path) => format!("\"{}\"", path.display()),
+        Err(_) => "antumbra".to_string(),
+    }
+}
+
 fn headers_helper_name() -> &'static str {
     if cfg!(windows) {
         "antumbra-mcp-headers.ps1"
@@ -1198,12 +1238,10 @@ fn connect_claude(
     let wiring = settings::Wiring {
         hooks: platform_hooks()
             .into_iter()
-            .map(|(event, script, timeout)| settings::Hook {
-                event,
-                script,
-                command: script_command(&dir.join(script)),
-                timeout,
+            .map(|(event, script, timeout)| {
+                settings::Hook::script(event, script, script_command(&dir.join(script)), timeout)
             })
+            .chain(skill_hooks())
             .collect(),
         env: vec![
             ("ANTUMBRA_URL".into(), url.to_string()),
