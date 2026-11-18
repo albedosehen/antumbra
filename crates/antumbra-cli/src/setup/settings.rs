@@ -501,6 +501,148 @@ pub fn wire(text: &str, wiring: &Wiring) -> anyhow::Result<Wired> {
     Ok(wired)
 }
 
+/// `value` as it is written into a file whose entries sit at `indent` and
+/// step in by `unit`: laid out as `serde_json` prints it, with each of its
+/// two-space steps made the file's own.
+fn rendered(value: &Value, indent: &str, unit: &str) -> String {
+    // A value built from JSON always prints; the fallback is its compact form.
+    let pretty = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
+    let mut lines = pretty.lines();
+    let mut out = lines.next().unwrap_or_default().to_string();
+    for line in lines {
+        let body = line.trim_start_matches(' ');
+        let steps = (line.len() - body.len()) / 2;
+        out.push('\n');
+        out.push_str(indent);
+        out.push_str(&unit.repeat(steps));
+        out.push_str(body);
+    }
+    out
+}
+
+/// How far an entry at `indent` steps in from its container's own line at
+/// `own`: the file's indentation, or two spaces when that cannot be told.
+fn step<'a>(indent: &'a str, own: &str) -> &'a str {
+    indent
+        .strip_prefix(own)
+        .filter(|unit| !unit.is_empty())
+        .unwrap_or("  ")
+}
+
+/// `text` (a JSON object, or empty for none) with `key`, in the object
+/// `path` leads to, holding `value`; nothing when it already does. Objects on
+/// the way that are not there are made. As with [`wire`], the text is edited
+/// by insertion, and the result is re-read: it must be the original with that
+/// one value set and nothing else changed, or it is an error and nothing is
+/// to be written. `file` names the file in what is said.
+pub fn put(
+    text: &str,
+    file: &str,
+    path: &[&str],
+    key: &str,
+    value: &Value,
+) -> anyhow::Result<Option<String>> {
+    let original_text = if text.trim().is_empty() { "{}\n" } else { text };
+    let original: Value = serde_json::from_str(original_text).map_err(|e| {
+        anyhow::anyhow!(
+            "{file} is not valid JSON ({e}); fix it or move it aside, then run setup again"
+        )
+    })?;
+    if !original.is_object() {
+        anyhow::bail!("{file} does not hold a JSON object");
+    }
+    // What the file should come to hold.
+    let mut expected = original.clone();
+    {
+        let mut at = &mut expected;
+        for segment in path {
+            let Some(object) = at.as_object_mut() else {
+                anyhow::bail!("{file}'s {segment} is under something that is not an object");
+            };
+            at = object
+                .entry((*segment).to_string())
+                .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        }
+        let Some(object) = at.as_object_mut() else {
+            anyhow::bail!("{file}'s {} is not an object", path.join("."));
+        };
+        if object.get(key) == Some(value) {
+            return Ok(None);
+        }
+        object.insert(key.to_string(), value.clone());
+    }
+
+    let mut text = original_text.to_string();
+    let mut open = root_open(&text)?;
+    let mut rest = path;
+    loop {
+        let (found, close) = members(&text, open)?;
+        let first = first_at(&found);
+        let indent = entry_indent(&text, open, first);
+        let unit = step(&indent, &indent_at(&text, open)).to_string();
+        match rest.split_first() {
+            // On the way: into the object, when it is there.
+            Some((segment, deeper)) => match find(&found, segment) {
+                Some(member) if text.as_bytes()[member.start] == b'{' => {
+                    open = member.start;
+                    rest = deeper;
+                }
+                Some(_) => anyhow::bail!("{file}'s {segment} is not an object"),
+                None => {
+                    // Not there: the rest of the way, and the value, as one entry.
+                    let mut inner = Value::Object(serde_json::Map::from_iter([(
+                        key.to_string(),
+                        value.clone(),
+                    )]));
+                    for name in deeper.iter().rev() {
+                        inner = Value::Object(serde_json::Map::from_iter([(
+                            (*name).to_string(),
+                            inner,
+                        )]));
+                    }
+                    let entry = format!(
+                        "{}: {}",
+                        Value::String((*segment).to_string()),
+                        rendered(&inner, &indent, &unit)
+                    );
+                    text = insert_first(&text, open, close, first, &entry);
+                    break;
+                }
+            },
+            // There: the value, replaced or put first.
+            None => {
+                match find(&found, key) {
+                    Some(member) => {
+                        let line = indent_at(&text, member.at);
+                        text = format!(
+                            "{}{}{}",
+                            &text[..member.start],
+                            rendered(value, &line, &unit),
+                            &text[member.end..]
+                        );
+                    }
+                    None => {
+                        let entry = format!(
+                            "{}: {}",
+                            Value::String(key.to_string()),
+                            rendered(value, &indent, &unit)
+                        );
+                        text = insert_first(&text, open, close, first, &entry);
+                    }
+                }
+                break;
+            }
+        }
+    }
+    let edited: Value = serde_json::from_str(&text).map_err(|e| {
+        anyhow::anyhow!("the edit to {file} did not produce valid JSON ({e}); nothing was written")
+    })?;
+    if edited != expected {
+        anyhow::bail!("the edit to {file} changed more than it was for; nothing was written");
+    }
+    Ok(Some(text))
+}
+
 /// One hook's matcher, written the way people write it by hand: the tool it
 /// is for, when it is for one, then `type`, `command`, `timeout`, and
 /// `async` for one that is not waited for. `indent` is the line it starts on.
@@ -609,6 +751,97 @@ mod tests {
 
     fn parsed(text: &str) -> anyhow::Result<Value> {
         Ok(serde_json::from_str(text)?)
+    }
+
+    #[test]
+    fn a_value_is_put_where_it_belongs_and_nothing_else_moves() -> anyhow::Result<()> {
+        let server = serde_json::json!({ "type": "local", "command": "antumbra", "args": ["mcp", "bridge"] });
+        // No file: the whole way is made.
+        let made = put("", "mcp-config.json", &["mcpServers"], "antumbra", &server)?
+            .ok_or_else(|| anyhow::anyhow!("an empty file was left empty"))?;
+        assert_eq!(parsed(&made)?["mcpServers"]["antumbra"], server);
+
+        // Beside a person's own server, in a file laid out their way.
+        let theirs = "{\n    \"mcpServers\": {\n        \"context7\": { \"type\": \"local\", \"command\": \"npx\" }\n    },\n    \"note\": \"mine\"\n}\n";
+        let added = put(
+            theirs,
+            "mcp-config.json",
+            &["mcpServers"],
+            "antumbra",
+            &server,
+        )?
+        .ok_or_else(|| anyhow::anyhow!("nothing was added"))?;
+        let v = parsed(&added)?;
+        assert_eq!(v["mcpServers"]["antumbra"], server);
+        assert_eq!(v["mcpServers"]["context7"]["command"], "npx");
+        assert_eq!(v["note"], "mine");
+        // Their own lines are where they were, byte for byte.
+        assert!(
+            added.contains("        \"context7\": { \"type\": \"local\", \"command\": \"npx\" }")
+        );
+        assert!(added.ends_with("    \"note\": \"mine\"\n}\n"));
+        // The entry is laid out at the file's own indentation.
+        assert!(
+            added.contains("\n        \"antumbra\": {\n            \"args\": ["),
+            "{added}"
+        );
+
+        // Already there: nothing to write.
+        assert_eq!(
+            put(
+                &added,
+                "mcp-config.json",
+                &["mcpServers"],
+                "antumbra",
+                &server
+            )?,
+            None
+        );
+
+        // There with another value: replaced, and only it.
+        let moved = serde_json::json!({ "type": "local", "command": "/opt/antumbra", "args": ["mcp", "bridge"] });
+        let replaced = put(
+            &added,
+            "mcp-config.json",
+            &["mcpServers"],
+            "antumbra",
+            &moved,
+        )?
+        .ok_or_else(|| anyhow::anyhow!("a changed value was left"))?;
+        let v = parsed(&replaced)?;
+        assert_eq!(v["mcpServers"]["antumbra"]["command"], "/opt/antumbra");
+        assert_eq!(v["mcpServers"]["context7"]["command"], "npx");
+
+        // At the root, with no way to go.
+        let root = put("{ \"a\": 1 }", "x.json", &[], "b", &serde_json::json!(true))?
+            .ok_or_else(|| anyhow::anyhow!("nothing was added at the root"))?;
+        assert_eq!(parsed(&root)?, serde_json::json!({ "a": 1, "b": true }));
+        Ok(())
+    }
+
+    #[test]
+    fn a_file_that_cannot_take_the_value_is_refused_by_name() -> anyhow::Result<()> {
+        let server = serde_json::json!({});
+        for (text, says) in [
+            ("{ not json", "mcp-config.json is not valid JSON"),
+            ("[]", "mcp-config.json does not hold a JSON object"),
+            (
+                "{ \"mcpServers\": [] }",
+                "mcp-config.json's mcpServers is not an object",
+            ),
+        ] {
+            let Err(problem) = put(
+                text,
+                "mcp-config.json",
+                &["mcpServers"],
+                "antumbra",
+                &server,
+            ) else {
+                anyhow::bail!("{text:?} was edited");
+            };
+            assert!(problem.to_string().contains(says), "{problem}");
+        }
+        Ok(())
     }
 
     #[test]

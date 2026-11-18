@@ -310,3 +310,106 @@ fn codex_is_given_a_smaller_bootstrap_and_gemini_the_whole_one() {
     assert_eq!(limit(Agent::Codex).as_deref(), Some("7000"));
     assert_eq!(limit(Agent::Gemini), None);
 }
+
+/// Lines of a Copilot CLI 1.0 session's event log, as one was recorded, cut
+/// to what is read.
+const COPILOT_EVENTS: &str = concat!(
+    r#"{"type":"user.message","data":{"content":"Say hello."},"id":"1","timestamp":"t","parentId":null}"#,
+    "\n",
+    r#"{"type":"assistant.message","data":{"messageId":"m1","model":"gpt","content":"First answer.","toolRequests":[]},"id":"2","timestamp":"t","parentId":"1"}"#,
+    "\n",
+    r#"{"type":"assistant.turn_end","data":{"turnId":"0"},"id":"3","timestamp":"t","parentId":"2"}"#,
+    "\n",
+    r#"{"type":"assistant.message","data":{"messageId":"m2","model":"gpt","content":"It builds with bun.","toolRequests":[]},"id":"4","timestamp":"t","parentId":"3"}"#,
+    "\n",
+    r#"{"type":"hook.start","data":{"hookType":"agentStop","input":{"sessionId":"s"}},"id":"5","timestamp":"t","parentId":"4"}"#,
+    "\n",
+);
+
+#[test]
+fn copilots_last_answer_is_read_from_its_event_log() {
+    assert_eq!(
+        last_in_events(COPILOT_EVENTS).as_deref(),
+        Some("It builds with bun.")
+    );
+    // A first line cut in two, as the end of a long log starts with, is
+    // passed over.
+    let cut = format!("ssage\",\"data\":{{\"content\":\"lost\"}}}}\n{COPILOT_EVENTS}");
+    assert_eq!(last_in_events(&cut).as_deref(), Some("It builds with bun."));
+    // A log in a shape this does not know says nothing, and that is all.
+    assert_eq!(last_in_events(""), None);
+    assert_eq!(
+        last_in_events("{\"type\":\"assistant.message\",\"data\":{}}\n"),
+        None
+    );
+    assert_eq!(last_in_events("not json\n"), None);
+}
+
+#[test]
+fn copilot_is_heard_in_its_own_names_and_answered_in_its_own_shape() -> anyhow::Result<()> {
+    // What Copilot CLI 1.0 hands `agentStop`, as it was recorded from one.
+    let stop = json!({
+        "sessionId": "5b8043e9-514d-4193-af43-dc98b702296f",
+        "timestamp": 1_795_018_354_785_u64,
+        "cwd": "/home/me/work",
+        "transcriptPath": "/home/me/.copilot/session-state/5b8043e9/events.jsonl",
+        "stopReason": "end_turn",
+        "stop_hook_active": false,
+    });
+    let heard = heard(Agent::Copilot, Event::Stop, &stop);
+    assert_eq!(heard["session_id"], "5b8043e9-514d-4193-af43-dc98b702296f");
+    assert_eq!(
+        heard["transcript_path"],
+        "/home/me/.copilot/session-state/5b8043e9/events.jsonl"
+    );
+    assert_eq!(heard["stop_hook_active"], false);
+    // It gives the log and not the answer; the answer is read from the log.
+    assert!(heard.get("last_assistant_message").is_none());
+
+    let parsed = |text: Option<String>| -> anyhow::Result<Value> {
+        let text = text.ok_or_else(|| anyhow::anyhow!("nothing was answered"))?;
+        Ok(serde_json::from_str(&text)?)
+    };
+    let context = Said::Context("what is remembered".into());
+    for event in [Event::SessionStart, Event::Prompt] {
+        assert_eq!(
+            parsed(answer(Agent::Copilot, event, &context))?,
+            json!({ "additionalContext": "what is remembered" })
+        );
+    }
+    assert_eq!(
+        parsed(answer(
+            Agent::Copilot,
+            Event::Stop,
+            &Said::Reminder("store what was learned".into())
+        ))?,
+        json!({ "decision": "block", "reason": "store what was learned" })
+    );
+    assert_eq!(answer(Agent::Copilot, Event::Stop, &context), None);
+    Ok(())
+}
+
+#[test]
+fn the_end_of_a_long_log_is_all_that_is_read() -> anyhow::Result<()> {
+    let scratch = Scratch::new("hook-tail")?;
+    let path = scratch.path().join("events.jsonl");
+    let filler = format!(
+        "{}\n",
+        r#"{"type":"tool.execution_complete","data":{"output":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}"#
+    );
+    let mut text = String::from(
+        "{\"type\":\"assistant.message\",\"data\":{\"content\":\"an early answer\"}}\n",
+    );
+    while (text.len() as u64) < TAIL + 4096 {
+        text.push_str(&filler);
+    }
+    text.push_str("{\"type\":\"assistant.message\",\"data\":{\"content\":\"the last answer\"}}\n");
+    std::fs::write(&path, &text)?;
+    let read = tail(&path).ok_or_else(|| anyhow::anyhow!("the log was not read"))?;
+    assert!(read.len() as u64 <= TAIL);
+    assert!(!read.contains("an early answer"));
+    assert_eq!(last_in_events(&read).as_deref(), Some("the last answer"));
+    // No log is no answer, not an error.
+    assert_eq!(tail(&scratch.path().join("gone.jsonl")), None);
+    Ok(())
+}

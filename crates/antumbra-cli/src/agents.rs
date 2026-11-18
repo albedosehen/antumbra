@@ -22,6 +22,7 @@ use serde_json::Value;
 
 pub mod bridge;
 pub mod codex;
+pub mod copilot;
 pub mod gemini;
 pub mod hook;
 
@@ -32,11 +33,13 @@ pub enum Agent {
     Gemini,
     /// Codex.
     Codex,
+    /// GitHub Copilot CLI, and Copilot in VS Code, which reads the same files.
+    Copilot,
 }
 
 impl Agent {
     /// Every agent, in the order setup connects them.
-    pub const ALL: [Agent; 2] = [Agent::Gemini, Agent::Codex];
+    pub const ALL: [Agent; 3] = [Agent::Gemini, Agent::Codex, Agent::Copilot];
 
     /// The name it is chosen by (`--agent`), recorded under, and named to the
     /// server with.
@@ -44,6 +47,7 @@ impl Agent {
         match self {
             Agent::Gemini => "gemini",
             Agent::Codex => "codex",
+            Agent::Copilot => "copilot",
         }
     }
 
@@ -52,6 +56,7 @@ impl Agent {
         match self {
             Agent::Gemini => "Gemini CLI",
             Agent::Codex => "Codex",
+            Agent::Copilot => "Copilot CLI",
         }
     }
 
@@ -60,6 +65,7 @@ impl Agent {
         match self {
             Agent::Gemini => "gemini",
             Agent::Codex => "codex",
+            Agent::Copilot => "copilot",
         }
     }
 
@@ -250,6 +256,7 @@ pub fn present(agent: Agent, ground: &Ground<'_>) -> bool {
         || match agent {
             Agent::Gemini => gemini::home(ground).is_dir(),
             Agent::Codex => codex::home(ground).is_dir(),
+            Agent::Copilot => copilot::home(ground).is_dir(),
         }
 }
 
@@ -259,6 +266,7 @@ pub fn connect(agent: Agent, ground: &Ground<'_>, report: &dyn Report) -> anyhow
     match agent {
         Agent::Gemini => gemini::connect(ground, report),
         Agent::Codex => codex::connect(ground, report),
+        Agent::Copilot => copilot::connect(ground, report),
     }
 }
 
@@ -267,6 +275,7 @@ pub fn check(agent: Agent, ground: &Ground<'_>) -> Vec<Finding> {
     match agent {
         Agent::Gemini => gemini::check(ground),
         Agent::Codex => codex::check(ground),
+        Agent::Copilot => copilot::check(ground),
     }
 }
 

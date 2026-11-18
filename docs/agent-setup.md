@@ -2,7 +2,7 @@
 
 You are setting up Antumbra for the person you are working with. Antumbra gives their coding agent a memory that carries across sessions: it recalls what matters at the start of each session and with each prompt, and stores what was learned at the end. Setup is one command, `antumbra setup`, which you run on their behalf. This guide tells you what to check, what to ask, and how to confirm it worked.
 
-Setup connects Claude Code, and every other agent it knows that it finds on the machine (Gemini CLI, Codex). To connect only some, name them: `--agent gemini`, or `--agent claude,codex`.
+Setup connects Claude Code, and every other agent it knows that it finds on the machine (Gemini CLI, Codex, Copilot CLI). To connect only some, name them: `--agent gemini`, or `--agent claude,codex`.
 
 Antumbra is before 1.0, so the steps can change between releases. If a command here fails in a way this guide does not describe, run `antumbra setup --help` and follow the CLI over this page.
 
@@ -127,6 +127,7 @@ Say this if they ask:
 - `~/.claude/settings.json`: hooks on SessionStart, UserPromptSubmit, Stop and PreCompact; `ANTUMBRA_URL`, `ANTUMBRA_WORKSPACE_ID` and (when absent) `ANTUMBRA_HOST_ID` under `env`; `autoMemoryEnabled: false` when the file did not say (pass `--keep-auto-memory` to skip). A backup sits beside it, `settings.json.antumbra-backup-<time>`.
 - Claude Code's MCP servers: `antumbra`, user scope, reading the token from its file on each connection.
 - Gemini CLI, when it is connected: the extension `~/.gemini/extensions/antumbra` (a manifest and `hooks/hooks.json`). Its `settings.json` is not touched.
+- Copilot CLI, when it is connected: `~/.copilot/hooks/antumbra.json`, and `mcpServers.antumbra` added to `~/.copilot/mcp-config.json`, with a backup beside it, `mcp-config.json.antumbra-backup-<time>`.
 - Codex, when it is connected: `[mcp_servers.antumbra]` in `~/.codex/config.toml`, written by `codex mcp add`, and hooks on SessionStart, UserPromptSubmit and Stop added to `~/.codex/hooks.json`, with a backup beside it, `hooks.json.antumbra-backup-<time>`.
 - The server: this machine is listed among their devices under its `ANTUMBRA_HOST_ID`, as a memory node. Each session start names it again, which keeps "last seen" current. If they want a particular name, set `ANTUMBRA_HOST_ID` in the settings' `env` before running setup, since setup keeps a name that is already there.
 - Local only: the stack's compose file and `.env` in `~/.antumbra/stack/docker` (or `docker/.env` in the clone, when setup ran from one), the containers `antumbra-surrealdb` and `antumbra-mcp` (they restart with Docker), and the database in `~/.antumbra/surrealdb`.
@@ -138,7 +139,7 @@ claude mcp remove antumbra --scope user
 docker compose -f ~/.antumbra/stack/docker/docker-compose.yml down   # local only (from a clone: docker/docker-compose.yml)
 ```
 
-Then restore the settings backup over `~/.claude/settings.json` and delete `~/.antumbra`. For Gemini CLI: `gemini extensions uninstall antumbra`, or delete `~/.gemini/extensions/antumbra`. For Codex: `codex mcp remove antumbra`, and restore the backup over `~/.codex/hooks.json` (or delete the three entries whose command is `antumbra hook codex ...`).
+Then restore the settings backup over `~/.claude/settings.json` and delete `~/.antumbra`. For Gemini CLI: `gemini extensions uninstall antumbra`, or delete `~/.gemini/extensions/antumbra`. For Copilot CLI: delete `~/.copilot/hooks/antumbra.json` and the `antumbra` entry of `~/.copilot/mcp-config.json` (`copilot mcp remove antumbra`). For Codex: `codex mcp remove antumbra`, and restore the backup over `~/.codex/hooks.json` (or delete the three entries whose command is `antumbra hook codex ...`).
 
 ## When something goes wrong
 
