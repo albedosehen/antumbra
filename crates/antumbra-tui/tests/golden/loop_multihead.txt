@@ -31,6 +31,6 @@
 │                                                                                                                      │
 │                                                                                                                      │
 │                                                                                                                      │
-│                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- q  quit   ↑↓  select   tab  focus:umbra   []  page:loop   t  theme:night   ±  cap:144   r  reload   ?  help   :  palett
+
+ ↑↓  move   enter  details   /  find   x  halt   1-5  pages   a  ask   :  commands   ?  help   q  quit

@@ -1,21 +1,21 @@
 //! Operator-console state: the live population (umbra), boundaries (antumbra),
 //! and the learned gate, read through the [`Backend`] and ticked for animation.
 
-use antumbra_core::behavior;
-use antumbra_core::console::Action as ConsoleAction;
 pub use antumbra_core::console::Snapshot;
 use antumbra_core::generational::GenerationHead;
 use antumbra_core::{
-    BoundaryId, EvaluationRun, Expert, ExpertId, FailureBoundary, LearnedRouter, Memory,
-    MemoryEdge, MemoryPolicy, MemoryUse, RunId, Shadow, ShadowId,
+    EvaluationRun, Expert, FailureBoundary, LearnedRouter, Memory, MemoryEdge, MemoryPolicy,
+    MemoryUse, RunId, Shadow,
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::backend::Backend;
 use crate::command::{self, Action, Command};
 use crate::events::{Event, EventKind};
 use crate::theme::Theme;
+
+pub use acting::{Notice, Pending};
 
 /// Which list the navigation keys drive, and which detail panel is shown: one
 /// per region of the cast shadow: the population (umbra), the shadows in training
@@ -45,30 +45,6 @@ pub enum Mode {
     Confirm,
     /// The workspace's memory knobs: read by anyone, turned by an operator.
     Knobs,
-}
-
-/// An operator mutation awaiting a yes/no confirmation.
-pub enum Pending {
-    /// Mark the shadow pruned (collapse it).
-    PruneShadow(ShadowId),
-    /// Mark the shadow graduated (promote it into the population).
-    GraduateShadow(ShadowId),
-    /// Freeze (`true`) or thaw (`false`) the expert.
-    FreezeExpert(ExpertId, bool),
-    /// Delete the boundary from the antumbra.
-    DeleteBoundary(BoundaryId),
-    /// Ask the generational loop to halt gracefully at the next generation.
-    HaltLoop(RunId),
-    /// Replace the workspace's memory knobs with these.
-    SetMemoryPolicy(MemoryPolicy),
-}
-
-impl Pending {
-    /// Whether going ahead takes something away: a shadow collapsed, a
-    /// boundary deleted. The confirm prompt marks the key that does it.
-    pub fn removes(&self) -> bool {
-        matches!(self, Pending::PruneShadow(_) | Pending::DeleteBoundary(_))
-    }
 }
 
 /// How the body arranges its panels: the graph beside a single focused detail
@@ -156,11 +132,12 @@ impl Page {
         }
     }
 
-    /// The tab a number key selects: `1` is the first page. Asked of
+    /// The number key that goes to this page: `1` for the first. Asked of
     /// [`Page::ALL`], so a page added to it cannot be left without its key.
-    pub fn index_for_key(key: char) -> Option<usize> {
-        let number = key.to_digit(10)? as usize;
-        (1..=Page::ALL.len()).contains(&number).then(|| number - 1)
+    pub fn key(self) -> Option<char> {
+        u32::try_from(self.index() + 1)
+            .ok()
+            .and_then(|number| char::from_digit(number, 10))
     }
 
     /// Position in [`Page::ALL`] (the tab index).
@@ -205,8 +182,9 @@ pub struct App {
     pub loop_heads: Vec<GenerationHead>,
     /// Index into `loop_heads` of the run the Loop page is focused on.
     pub selected_loop: usize,
-    /// Whether a graceful halt is pending for the displayed loop run.
-    pub loop_halt_pending: bool,
+    /// The runs with a graceful halt requested that they have not reached
+    /// yet, by run id.
+    pub halts: HashSet<String>,
     /// Recent evaluation runs (newest first), for the Evals page.
     pub evals: Vec<EvaluationRun>,
     /// Index into `evals` of the highlighted run (Evals page).
@@ -242,14 +220,20 @@ pub struct App {
     pub detail_scroll: u16,
     /// An operator mutation awaiting confirmation (used while `mode == Confirm`).
     pub pending: Option<Pending>,
+    /// What the console last did, declined to do, or could not do, for the
+    /// line above the footer.
+    pub notice: Option<Notice>,
+    /// Whether the last read of the server failed, so what is shown may be
+    /// behind.
+    pub reads_failing: bool,
     /// The route-ask query text (used while `mode == Ask`).
     pub ask_query: String,
     /// The gate's routing for the last ask: `(expert name, probability)` best
     /// first, or `Some(empty)` when it escalates. `None` before the first ask.
     pub ask_result: Option<Vec<(String, f32)>>,
-    /// Whether a real embedding endpoint backs the ask (`--embed-url`). When
-    /// false, the ask uses the demo embedder and warns it's only coherent on a
-    /// demo store.
+    /// Whether a server answers the ask, embedding the task with its own
+    /// model. When false, the ask uses the demo's stand-in embedder and says
+    /// so.
     pub real_embedder: bool,
     /// Per-entity fingerprints from the last reload, to diff the next one.
     pub ev_experts: HashMap<String, bool>,
@@ -323,7 +307,7 @@ impl App {
             selected_skill: 0,
             loop_heads: Vec::new(),
             selected_loop: 0,
-            loop_halt_pending: false,
+            halts: HashSet::new(),
             evals: Vec::new(),
             selected_eval: 0,
             router: None,
@@ -342,6 +326,8 @@ impl App {
             events_scroll: 0,
             detail_scroll: 0,
             pending: None,
+            notice: None,
+            reads_failing: false,
             ask_query: String::new(),
             ask_result: None,
             real_embedder: false,
@@ -399,12 +385,11 @@ impl App {
         Ok(())
     }
 
-    /// [`Self::reload`], saying a failure in the event stream rather than
-    /// ending the console: over a network, a missed read is ordinary.
+    /// Read the server again now, saying a failure on the main view rather
+    /// than ending the console: over a network, a missed read is ordinary.
     pub async fn refresh(&mut self, backend: &Backend) {
-        if let Err(e) = self.reload(backend).await {
-            self.operator_event(format!("reload failed · {e:#}"));
-        }
+        let read = backend.snapshot().await;
+        self.read_finished(read);
     }
 
     /// Swap in a freshly loaded [`Snapshot`]: re-run the App-state-dependent expert
@@ -412,6 +397,15 @@ impl App {
     /// Cheap and synchronous, so the run loop can call it the moment an off-thread
     /// load finishes, keeping the periodic refresh off the render thread.
     pub fn apply_snapshot(&mut self, snap: Snapshot) {
+        // Every run's halt from a server that lists them, else the first
+        // run's alone, which is all an older server says. Read before the
+        // snapshot is taken apart.
+        self.halts = snap
+            .loop_heads
+            .iter()
+            .filter(|head| snap.halt_pending(&head.run_id))
+            .map(|head| head.run_id.as_str().to_string())
+            .collect();
         self.experts = snap.experts;
         self.sort_experts();
         self.boundaries = snap.boundaries;
@@ -434,7 +428,6 @@ impl App {
         }
         self.policy = snap.policy;
         self.loop_heads = snap.loop_heads;
-        self.loop_halt_pending = snap.loop_halt_pending;
         self.evals = snap.evals;
         self.router = snap.router;
         self.operator = snap.operator;
@@ -549,218 +542,6 @@ impl App {
         self.ev_shadows = shadows;
         self.ev_boundaries = boundaries;
         self.ev_router = router;
-    }
-
-    /// Record an operator-initiated event in the stream (immediate feedback).
-    pub fn operator_event(&mut self, text: String) {
-        self.push_event(EventKind::System, text);
-    }
-
-    /// Whether this console may act. A read-only one says how to become able.
-    fn may_act(&mut self) -> bool {
-        if !self.operator {
-            self.operator_event(
-                "read-only · acting needs an operator's token (antumbra-mcp --mint-token --operator)"
-                    .into(),
-            );
-        }
-        self.operator
-    }
-
-    /// Stage the operator action for the focused selection (`x`), opening the
-    /// confirm prompt. Prune the focused shadow, or delete the focused boundary.
-    pub fn request_action(&mut self) {
-        if !self.may_act() {
-            return;
-        }
-        // The Loop page's operator action is a graceful halt of the run.
-        if self.page == Page::Loop {
-            if let Some(head) = self.loop_heads.first().filter(|_| !self.loop_halt_pending) {
-                self.pending = Some(Pending::HaltLoop(head.run_id.clone()));
-                self.mode = Mode::Confirm;
-            }
-            return;
-        }
-        // The remaining operator actions target the population regions.
-        if self.page != Page::Population {
-            return;
-        }
-        if self.focus == Focus::Shadows && self.selected_is_kept() {
-            return;
-        }
-        let pending = match self.focus {
-            Focus::Shadows => self
-                .selected_shadow()
-                .filter(|s| s.status.as_str() != "pruned")
-                .map(|s| Pending::PruneShadow(s.id.clone())),
-            Focus::Boundaries => self
-                .selected_boundary()
-                .map(|b| Pending::DeleteBoundary(b.id.clone())),
-            Focus::Experts => None,
-        };
-        if let Some(pending) = pending {
-            self.pending = Some(pending);
-            self.mode = Mode::Confirm;
-        }
-    }
-
-    /// Whether the selected shadow is a standing expert's training, said on
-    /// the event line when it is. Pruning and graduating steer the
-    /// generational loop, which reads them back; the standing-experts keeper
-    /// settles its own trainings and never does, so on one of its shadows
-    /// either would only misstate what is serving.
-    fn selected_is_kept(&mut self) -> bool {
-        let Some(scope) = self
-            .selected_shadow()
-            .and_then(|s| behavior::shadow_scope(&s.id))
-            .map(str::to_owned)
-        else {
-            return false;
-        };
-        self.operator_event(format!(
-            "{scope}: the keeper settles a standing expert's training · freeze the expert to stop it serving"
-        ));
-        true
-    }
-
-    /// Stage graduating the selected shadow (the palette's graduate command):
-    /// promote it into the population, unless it already graduated.
-    pub fn request_graduate(&mut self) {
-        if !self.may_act() || self.selected_is_kept() {
-            return;
-        }
-        if let Some(s) = self
-            .selected_shadow()
-            .filter(|s| s.status.as_str() != "graduated")
-        {
-            self.pending = Some(Pending::GraduateShadow(s.id.clone()));
-            self.mode = Mode::Confirm;
-        }
-    }
-
-    /// Stage freezing the selected expert, or thawing it if already frozen (the
-    /// palette's freeze command toggles on the expert's current state).
-    pub fn request_freeze(&mut self) {
-        if !self.may_act() {
-            return;
-        }
-        if let Some(e) = self.selected_expert() {
-            let freeze = !e.is_frozen();
-            self.pending = Some(Pending::FreezeExpert(e.id.clone(), freeze));
-            self.mode = Mode::Confirm;
-        }
-    }
-
-    /// The confirmation prompt for the staged action, if any.
-    pub fn pending_prompt(&self) -> Option<String> {
-        self.pending.as_ref().map(|p| match p {
-            Pending::PruneShadow(id) => format!("Prune shadow {} ?", id.as_str()),
-            Pending::GraduateShadow(id) => format!("Graduate shadow {} ?", id.as_str()),
-            Pending::FreezeExpert(id, freeze) => {
-                let verb = if *freeze { "Freeze" } else { "Thaw" };
-                format!("{verb} expert {} ?", id.as_str())
-            }
-            Pending::HaltLoop(run) => {
-                format!(
-                    "Halt loop {} ? (stops at the next generation)",
-                    run.as_str()
-                )
-            }
-            Pending::DeleteBoundary(id) => {
-                let behavior = self
-                    .boundaries
-                    .iter()
-                    .find(|b| b.id.as_str() == id.as_str())
-                    .map_or_else(|| id.as_str().to_string(), |b| b.behavior.clone());
-                format!("Delete boundary \"{behavior}\" ?")
-            }
-            Pending::SetMemoryPolicy(policy) => match self.knobs_changed(policy) {
-                1 => format!("Apply {} ?", self.knob_changes(policy)),
-                n => format!("Apply {n} knob changes ?"),
-            },
-        })
-    }
-
-    /// Cancel the staged action.
-    pub fn cancel_action(&mut self) {
-        self.pending = None;
-        self.mode = Mode::Normal;
-    }
-
-    /// Carry out the staged operator action through `backend`, then reload so
-    /// the change (and the event it raises) shows immediately. A refusal or a
-    /// target that is gone is said in the event stream. Returns to the live
-    /// view whether or not anything was staged.
-    pub async fn apply_pending(&mut self, backend: &Backend) {
-        if let Some(pending) = self.pending.take() {
-            let (action, said) = match pending {
-                Pending::PruneShadow(shadow) => (ConsoleAction::PruneShadow { shadow }, None),
-                Pending::GraduateShadow(shadow) => (ConsoleAction::GraduateShadow { shadow }, None),
-                Pending::FreezeExpert(expert, true) => {
-                    (ConsoleAction::FreezeExpert { expert }, None)
-                }
-                Pending::FreezeExpert(expert, false) => {
-                    (ConsoleAction::ThawExpert { expert }, None)
-                }
-                Pending::DeleteBoundary(boundary) => {
-                    let behavior = self
-                        .boundaries
-                        .iter()
-                        .find(|b| b.id.as_str() == boundary.as_str())
-                        .map(|b| format!("boundary removed · {}", b.behavior));
-                    (ConsoleAction::DeleteBoundary { boundary }, behavior)
-                }
-                Pending::HaltLoop(run) => {
-                    let said = format!("halt requested · loop {}", run.as_str());
-                    (ConsoleAction::HaltLoop { run }, Some(said))
-                }
-                Pending::SetMemoryPolicy(policy) => {
-                    let said = format!("memory knobs set · {}", self.knob_changes(&policy));
-                    (ConsoleAction::SetMemoryPolicy { policy }, Some(said))
-                }
-            };
-            self.act(backend, action, said).await;
-        }
-        self.mode = Mode::Normal;
-    }
-
-    /// Cancel a pending loop halt (clear the control back to `Run`), then reload.
-    pub async fn cancel_halt(&mut self, backend: &Backend) {
-        if !self.may_act() {
-            return;
-        }
-        if let Some(run) = self.loop_heads.first().map(|h| h.run_id.clone()) {
-            let said = format!("halt canceled · loop {}", run.as_str());
-            self.act(backend, ConsoleAction::CancelHalt { run }, Some(said))
-                .await;
-        }
-    }
-
-    /// Send `action`, say `said` once it is done, and reload.
-    async fn act(&mut self, backend: &Backend, action: ConsoleAction, said: Option<String>) {
-        match backend.act(action).await {
-            Ok(true) => {
-                if let Some(said) = said {
-                    self.operator_event(said);
-                }
-            }
-            Ok(false) => self.operator_event("not done · it is no longer there".into()),
-            Err(e) => self.operator_event(format!("not done · {e:#}")),
-        }
-        self.refresh(backend).await;
-    }
-
-    /// Record an event at the head of the stream (newest first), capped.
-    fn push_event(&mut self, kind: EventKind, text: String) {
-        self.events.insert(
-            0,
-            Event {
-                at_ms: self.clock_ms,
-                kind,
-                text,
-            },
-        );
-        self.events.truncate(crate::events::MAX_EVENTS);
     }
 
     /// Open the live event-stream overlay.
@@ -949,12 +730,24 @@ impl App {
         }
     }
 
-    /// Toggle the keybinding help overlay.
+    /// Toggle the keybinding help overlay, opened at its top.
     pub fn toggle_help(&mut self) {
         self.mode = match self.mode {
             Mode::Help => Mode::Normal,
             _ => Mode::Help,
         };
+        self.detail_scroll = 0;
+    }
+
+    /// Whether `run` has a halt requested that it has not reached yet.
+    pub fn halt_pending(&self, run: &RunId) -> bool {
+        self.halts.contains(run.as_str())
+    }
+
+    /// Whether the run the Loop page is on has a halt pending.
+    pub fn selected_halt_pending(&self) -> bool {
+        self.selected_loop_head()
+            .is_some_and(|head| self.halt_pending(&head.run_id))
     }
 
     /// Dismiss any overlay, returning to the live view.
@@ -1005,6 +798,7 @@ impl App {
     }
 }
 
+mod acting;
 mod knobs;
 #[cfg(test)]
 mod tests;

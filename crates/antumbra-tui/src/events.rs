@@ -1,8 +1,8 @@
-//! The live event stream: store changes detected by diffing successive reloads,
-//! kept as a capped ring the events overlay shows. A reload runs on a live-query
-//! notification (see [`crate::live`]) so an external write surfaces within a
-//! frame, with a periodic reload every couple of seconds as the fallback, so the
-//! stream fills as the population is trained from another process.
+//! The live event stream: store changes detected by diffing successive reads
+//! of the server, and what the console itself did or was refused, kept as a
+//! capped ring the events overlay shows. The console reads again every few
+//! seconds, so the stream fills as the population is trained from another
+//! process.
 
 /// What kind of change an [`Event`] records; drives its glyph and color.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -19,6 +19,9 @@ pub enum EventKind {
     Boundary,
     /// Connect / router / housekeeping.
     System,
+    /// Something was refused or went wrong: a read that failed, an action
+    /// that was not done.
+    Problem,
 }
 
 /// A single change on the store's timeline.
@@ -40,6 +43,7 @@ impl EventKind {
             EventKind::Freeze => "■",
             EventKind::Boundary => "◆",
             EventKind::System => "·",
+            EventKind::Problem => "▲",
         }
     }
 }
@@ -60,6 +64,7 @@ mod tests {
             EventKind::Freeze,
             EventKind::Boundary,
             EventKind::System,
+            EventKind::Problem,
         ] {
             assert!(!kind.glyph().is_empty(), "{kind:?} has a glyph");
         }
@@ -77,6 +82,7 @@ mod tests {
             EventKind::Freeze,
             EventKind::Boundary,
             EventKind::System,
+            EventKind::Problem,
         ] {
             let glyph = kind.glyph();
             let mut chars = glyph.chars();

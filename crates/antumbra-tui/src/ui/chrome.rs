@@ -1,4 +1,5 @@
-//! The console chrome: the header wordmark/status line and the footer keybar.
+//! The console chrome: the header wordmark/status line, the notice that says
+//! what the console last did, and the footer's keys.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -6,10 +7,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Tabs};
 use ratatui::Frame;
 
-use crate::app::{App, Focus, Page};
-use crate::theme::Theme;
+use crate::app::{App, Page};
+use crate::keys::{self, Binding};
+use crate::theme::{Theme, Tone};
 
-use super::{gauge_spans, panel, pulse};
+use super::{clip, gauge_spans, panel, pulse};
 
 /// The KPI strip: a row of labeled mini-gauges for the substrate's quality
 /// ratios (fitness / frozen / graduated / gating / memory), shown on every page.
@@ -106,53 +108,72 @@ pub(super) fn header(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(Line::from(spans)).block(panel(&t, "")), area);
 }
 
-pub(super) fn footer(f: &mut Frame, app: &App, area: Rect) {
+/// The line above the footer: what the console last did, declined to do, or
+/// could not do, under the shape of how it went. Empty once that has aged out.
+pub(super) fn notice(f: &mut Frame, app: &App, area: Rect) {
     let t = app.theme();
-    let router = if app.router.is_some() {
-        "learned"
+    let Some(notice) = app.current_notice() else {
+        return;
+    };
+    // A refusal or a failure is said in the danger colour; anything else at
+    // full strength.
+    let ink = if notice.tone == Tone::Failed {
+        t.danger
     } else {
-        "heuristic"
+        t.ink
     };
-    let focus = match app.focus {
-        Focus::Experts => "umbra",
-        Focus::Shadows => "penumbra",
-        Focus::Boundaries => "antumbra",
-    };
-    let actionable = app.boundaries.iter().filter(|b| b.is_actionable()).count();
-    let key = |s: &'static str| Span::styled(s, t.chip());
-    let lbl = |s: String| Span::styled(s, Style::default().fg(t.ink2));
+    let room = usize::from(area.width).saturating_sub(4);
     let line = Line::from(vec![
-        key(" q "),
-        lbl(" quit  ".into()),
-        key(" ↑↓ "),
-        lbl(" select  ".into()),
-        key(" tab "),
-        lbl(format!(" focus:{focus}  ")),
-        key(" [] "),
-        lbl(format!(" page:{}  ", app.page.title())),
-        key(" t "),
-        lbl(format!(" theme:{}  ", t.name)),
-        key(" ± "),
-        lbl(format!(
-            " cap:{}{}  ",
-            app.target_fps,
-            if app.auto_fps { " auto" } else { "" }
-        )),
-        key(" r "),
-        lbl(" reload  ".into()),
-        key(" ? "),
-        lbl(" help  ".into()),
-        key(" : "),
-        lbl(" palette  ".into()),
         Span::styled(
-            format!(
-                "   {} umbra · {} penumbra · {} antumbra ({actionable} actionable) · gate {router}",
-                app.experts.len(),
-                app.shadows.len(),
-                app.boundaries.len()
-            ),
-            Style::default().fg(t.ink3),
+            format!(" {} ", notice.tone.glyph()),
+            Style::default().fg(t.tone(notice.tone)),
         ),
+        Span::styled(clip(&notice.text, room), Style::default().fg(ink)),
     ]);
     f.render_widget(Paragraph::new(line), area);
+}
+
+/// The columns a binding takes in the footer: its chip, its hint, and the gap
+/// to the next.
+fn footer_width(b: &Binding) -> usize {
+    b.chip.chars().count() + b.hint.chars().count() + 5
+}
+
+/// The bindings the footer shows in `width` columns, in the order they are
+/// listed: every one with a place in the footer when they fit, else the most
+/// useful, with help and quit kept however narrow the row.
+pub(super) fn footer_bindings(bindings: &[Binding], width: u16) -> Vec<&Binding> {
+    let mut shown: Vec<&Binding> = bindings.iter().filter(|b| b.rank.is_some()).collect();
+    while shown.iter().map(|b| footer_width(b)).sum::<usize>() > usize::from(width) {
+        // The least useful goes first: the highest rank, the later of equals.
+        let Some(drop) = shown
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.rank != Some(keys::KEPT))
+            .max_by_key(|(i, b)| (b.rank, *i))
+            .map(|(i, _)| i)
+        else {
+            break;
+        };
+        shown.remove(drop);
+    }
+    shown
+}
+
+/// The footer: the keys of the view in front, the page's or the overlay's,
+/// each as a chip and a word. It is drawn from the same list the keys are
+/// read from ([`keys::bindings`]), so it cannot offer a key that does nothing
+/// here.
+pub(super) fn footer(f: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme();
+    let bindings = keys::bindings(app);
+    let mut spans = Vec::new();
+    for b in footer_bindings(&bindings, area.width) {
+        spans.push(Span::styled(format!(" {} ", b.chip), t.chip()));
+        spans.push(Span::styled(
+            format!(" {}  ", b.hint),
+            Style::default().fg(t.ink2),
+        ));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }

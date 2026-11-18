@@ -166,9 +166,24 @@ async fn each_action_changes_what_it_names() -> anyhow::Result<()> {
     assert!(thawed.frozen_at.is_none());
 
     assert!(apply(&s, &ws(), &Action::HaltLoop { run: run.clone() }).await?);
-    assert!(everything(&s, &ws()).await?.loop_halt_pending);
+    let halted = everything(&s, &ws()).await?;
+    assert!(halted.loop_halt_pending);
+    assert!(halted.halt_pending(&run));
     assert!(apply(&s, &ws(), &Action::CancelHalt { run: run.clone() }).await?);
-    assert!(!everything(&s, &ws()).await?.loop_halt_pending);
+    let resumed = everything(&s, &ws()).await?;
+    assert!(!resumed.loop_halt_pending);
+    assert!(resumed.halts_pending.is_empty());
+
+    // A halt asked of a second loop is said of that loop, and of no other.
+    let other = RunId::new("run:b");
+    generation::save_head(&s, &GenerationHead::new(other.clone(), Utc::now())).await?;
+    assert!(apply(&s, &ws(), &Action::HaltLoop { run: other.clone() }).await?);
+    let two = everything(&s, &ws()).await?;
+    assert_eq!(two.loop_heads.len(), 2);
+    assert!(two.halt_pending(&other));
+    assert!(!two.halt_pending(&run));
+    assert_eq!(two.halts_pending.len(), 1);
+    assert!(apply(&s, &ws(), &Action::CancelHalt { run: other.clone() }).await?);
 
     assert!(
         apply(

@@ -38,6 +38,54 @@ use crate::theme::{Theme, Tone};
 
 pub use overlays::overlay_area;
 
+/// The frame's rows, top to bottom: the chrome, the page's body, then the two
+/// rows that are never covered or dimmed, what the console last said and the
+/// keys of the view in front.
+pub struct FrameRows {
+    pub header: Rect,
+    pub tabs: Rect,
+    pub metrics: Rect,
+    pub body: Rect,
+    pub notice: Rect,
+    pub footer: Rect,
+}
+
+impl FrameRows {
+    /// Everything above the notice and the footer: where an overlay is drawn,
+    /// and what is dimmed behind it.
+    pub fn stage(&self) -> Rect {
+        Rect {
+            x: self.header.x,
+            y: self.header.y,
+            width: self.header.width,
+            height: self.notice.y.saturating_sub(self.header.y),
+        }
+    }
+}
+
+/// Split `area` into the frame's rows. The one split the renderer, the
+/// overlays and the transitions all read, so none can disagree about where
+/// the body is.
+pub fn frame_rows(area: Rect) -> FrameRows {
+    let rows = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
+    FrameRows {
+        header: rows[0],
+        tabs: rows[1],
+        metrics: rows[2],
+        body: rows[3],
+        notice: rows[4],
+        footer: rows[5],
+    }
+}
+
 pub fn render(f: &mut Frame, app: &App) {
     // Guard the render loop against a degenerately-small terminal: the fixed
     // chrome layout would leave no space for the body and some widgets subtract
@@ -50,26 +98,18 @@ pub fn render(f: &mut Frame, app: &App) {
     // the ground to the terminal paints nothing here.
     let t = app.theme();
     f.render_widget(Block::default().style(t.page()), f.area());
-    let rows = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .split(f.area());
-    chrome::header(f, app, rows[0]);
-    chrome::tabs(f, app, rows[1]);
-    chrome::metrics(f, app, rows[2]);
-    page_body(f, app, rows[3]);
-    chrome::footer(f, app, rows[4]);
+    let rows = frame_rows(f.area());
+    chrome::header(f, app, rows.header);
+    chrome::tabs(f, app, rows.tabs);
+    chrome::metrics(f, app, rows.metrics);
+    page_body(f, app, rows.body);
     // A fresh, empty store would otherwise render as inert panels; the first-run
     // hint explains how to populate it. Only in the live view (not over a modal).
     if app.mode == Mode::Normal && app.is_empty() {
         overlays::first_run_hint(f, app);
     }
     if app.mode != Mode::Normal {
-        overlay::dim_backdrop(f, &t, f.area());
+        overlay::dim_backdrop(f, &t, rows.stage());
         match app.mode {
             Mode::Help => overlays::help_overlay(f, app),
             Mode::Palette => overlays::palette_overlay(f, app),
@@ -84,10 +124,13 @@ pub fn render(f: &mut Frame, app: &App) {
             Mode::Normal => {}
         }
     }
+    // Last, and never dimmed: what the console last did or could not do, and
+    // the keys of whatever is in front, the page or the overlay over it.
+    chrome::notice(f, app, rows.notice);
+    chrome::footer(f, app, rows.footer);
 }
 
-/// Route the body to the active page. `Population` is the live view; the other
-/// pages surface store subsystems and are placeholders until built out.
+/// Route the body to the active page.
 fn page_body(f: &mut Frame, app: &App, area: Rect) {
     match app.page {
         Page::Population => body(f, app, area),

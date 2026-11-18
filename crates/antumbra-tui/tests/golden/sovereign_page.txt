@@ -31,6 +31,6 @@
 │                                                    ││                                                                │
 │                                                    ││                                                                │
 │                                                    ││                                                                │
-│                                                    ││                                                                │
 ╰────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────╯
- q  quit   ↑↓  select   tab  focus:umbra   []  page:sovereign   t  theme:night   ±  cap:144   r  reload   ?  help   :  p
+
+ ↑↓  move   /  find   1-5  pages   a  ask   :  commands   ?  help   q  quit

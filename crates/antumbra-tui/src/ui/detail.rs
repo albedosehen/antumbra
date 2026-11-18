@@ -204,7 +204,7 @@ pub(super) fn loop_detail(app: &App, t: &Theme) -> (String, Vec<Line<'static>>) 
     }
 
     l.push(Line::from(""));
-    if app.loop_halt_pending {
+    if app.halt_pending(&head.run_id) {
         l.push(Line::from(Span::styled(
             "● graceful halt requested; stops at the next generation",
             Style::default().fg(t.accent).add_modifier(Modifier::BOLD),

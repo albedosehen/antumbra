@@ -87,11 +87,18 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
             } else {
                 ("  ", Style::default().fg(t.ink2))
             };
+            // A run with a halt pending says so in the list, so the one that
+            // was halted is found without stepping through them.
+            let halting = if app.halt_pending(&h.run_id) {
+                " · halt requested"
+            } else {
+                ""
+            };
             lines.push(Line::from(vec![
                 Span::styled(marker, Style::default().fg(t.accent)),
                 Span::styled(
                     format!(
-                        "{:<24}  gen {:<4}  {}",
+                        "{:<24}  gen {:<4}  {}{halting}",
                         h.run_id.as_str(),
                         h.generation.0,
                         stage_label(h.state)
@@ -159,7 +166,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
     }
 
     lines.push(Line::from(""));
-    if app.loop_halt_pending {
+    if app.halt_pending(&head.run_id) {
         // A halt asked for is in force until it is reached or canceled: the
         // accent, which marks what is in force, and not the danger colour,
         // which is kept for what failed.
@@ -168,7 +175,7 @@ pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(Span::styled(
-            "    cancel via the palette (loop · cancel a pending halt)",
+            "    x · cancel the halt",
             Style::default().fg(t.ink3),
         )));
     } else {

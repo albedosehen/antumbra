@@ -7,6 +7,8 @@
 //! frames while one is running.
 
 use ratatui::layout::{Constraint, Layout, Rect};
+
+use crate::ui::frame_rows;
 use tachyonfx::{fx, Effect, EffectTimer, Interpolation};
 
 use crate::theme::Theme;
@@ -25,18 +27,10 @@ pub enum Scope {
 /// A queued effect and the part of the frame it animates.
 pub type Pending = (Effect, Scope);
 
-/// The body row, the same chrome split [`crate::ui::render`] uses: a 3-row
-/// header, the 1-row tab strip, the 1-row metric strip, the body, then the
-/// 1-row footer.
+/// The body between the chrome above and the notice and footer below, from
+/// the one split [`crate::ui::render`] uses.
 fn body(frame: Rect) -> Rect {
-    Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .split(frame)[3]
+    frame_rows(frame).body
 }
 
 /// The detail column (right body panel) a focus-switch effect plays over: the

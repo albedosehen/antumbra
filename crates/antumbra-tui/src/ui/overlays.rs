@@ -9,6 +9,7 @@ use ratatui::Frame;
 
 use crate::app::{App, Focus, Mode, Page};
 use crate::events::EventKind;
+use crate::keys::{self, Binding, Group};
 use crate::overlay;
 use crate::scroll;
 use crate::theme::{Theme, Tone};
@@ -18,8 +19,13 @@ use super::{gauge_spans, heading, kv};
 /// The modal box rectangle for the active overlay (the size source the open
 /// animation also targets). `None` in the live view.
 pub fn overlay_area(app: &App, frame: Rect) -> Option<Rect> {
+    // Above the notice and the footer, which stay in view under an overlay.
+    let frame = super::frame_rows(frame).stage();
     match app.mode {
-        Mode::Help => Some(overlay::centered(frame, 56, 29)),
+        Mode::Help => {
+            let rows = u16::try_from(help_rows(app).len()).unwrap_or(u16::MAX);
+            Some(overlay::centered(frame, 76, rows.saturating_add(2)))
+        }
         Mode::Palette => {
             let listed = app.palette_matches().len().max(1) as u16;
             Some(overlay::centered(frame, 56, listed + 4))
@@ -452,6 +458,7 @@ fn event_color(t: &Theme, kind: EventKind) -> Color {
         EventKind::Graduate => t.accent,
         EventKind::Spawn | EventKind::Freeze | EventKind::Boundary => t.ink2,
         EventKind::Prune | EventKind::System => t.ink3,
+        EventKind::Problem => t.danger,
     }
 }
 
@@ -497,59 +504,83 @@ pub(super) fn events_overlay(f: &mut Frame, app: &App) {
     );
 }
 
-/// The keybinding reference, a centered modal over the live view (`?` toggles).
+/// One row of the help: a group's heading, a binding, or the gap between two
+/// groups.
+pub(super) enum HelpRow {
+    Heading(&'static str),
+    Key {
+        /// The keys, the footer's chip first and then any others.
+        keys: String,
+        does: &'static str,
+    },
+    Gap,
+}
+
+/// The help's rows for the page the console is on: every binding of the main
+/// view there ([`keys::page_bindings`]), grouped. The keys take effect from
+/// the same list, so the help cannot name a key that does something else, or
+/// leave one out.
+pub(super) fn help_rows(app: &App) -> Vec<HelpRow> {
+    let bindings = keys::page_bindings(app);
+    let mut rows = Vec::new();
+    for group in Group::ALL {
+        let listed: Vec<&Binding> = bindings.iter().filter(|b| b.group == group).collect();
+        if listed.is_empty() {
+            continue;
+        }
+        if !rows.is_empty() {
+            rows.push(HelpRow::Gap);
+        }
+        rows.push(HelpRow::Heading(group.title()));
+        for b in listed {
+            let keys = if b.also.is_empty() {
+                b.chip.to_string()
+            } else {
+                format!("{}  {}", b.chip, b.also)
+            };
+            rows.push(HelpRow::Key { keys, does: b.does });
+        }
+    }
+    rows.push(HelpRow::Gap);
+    rows.push(HelpRow::Heading("in a panel"));
+    rows.push(HelpRow::Key {
+        keys: "esc".into(),
+        does: "close it; the footer shows its other keys",
+    });
+    rows
+}
+
+/// The key reference (`?`), a centered modal over the live view, for the page
+/// it was opened on. It scrolls where it does not fit.
 pub(super) fn help_overlay(f: &mut Frame, app: &App) {
     let t = app.theme();
     let Some(area) = overlay_area(app, f.area()) else {
         return;
     };
-    let inner = overlay::modal(f, &t, area, "help");
-
-    let group = |label: &str| {
-        Line::from(Span::styled(
-            label.to_string(),
-            Style::default().fg(t.ink2).add_modifier(Modifier::BOLD),
-        ))
-    };
-    let bind = |keys: &str, desc: &str| {
-        Line::from(vec![
-            Span::styled(
-                format!("  {keys:<8}"),
-                Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(desc.to_string(), Style::default().fg(t.ink2)),
-        ])
-    };
-    let lines = vec![
-        group("navigate"),
-        bind("↑↓ jk", "select in the focused list"),
-        bind("enter", "drill into the selected item"),
-        bind("g G", "jump to first / last  (home / end)"),
-        bind("pgup/dn", "move by a page"),
-        bind("tab", "switch focus: umbra / penumbra / antumbra"),
-        Line::from(""),
-        group("view"),
-        bind("[ ] 1-4", "switch page: population/memory/loop/evals"),
-        bind("l", "cycle layout: focused/dashboard/graph/table"),
-        bind("s", "sort the population table (fitness/name/gen)"),
-        bind("t", "cycle theme: night / mist / mono"),
-        Line::from(""),
-        group("frame rate"),
-        bind("+ -", "pin the cap to a refresh rate"),
-        bind("a", "follow the active monitor"),
-        Line::from(""),
-        group("command"),
-        bind("/", "filter the focused list, jump to a match"),
-        bind(":", "command palette (ask · route a task here)"),
-        bind("e", "live event stream of store changes"),
-        bind("c", "connect your agent: hooks + token"),
-        bind("K", "memory knobs: how memories are kept"),
-        bind("x", "prune/graduate · freeze · delete"),
-        bind("r", "reload from the store"),
-        bind("? esc", "close this help"),
-        bind("q", "quit"),
-    ];
-    f.render_widget(Paragraph::new(lines), inner);
+    let inner = overlay::modal(f, &t, area, &format!("help · {}", app.page.title()));
+    let lines: Vec<Line> = help_rows(app)
+        .into_iter()
+        .map(|row| match row {
+            HelpRow::Heading(title) => Line::from(Span::styled(
+                title,
+                Style::default().fg(t.ink2).add_modifier(Modifier::BOLD),
+            )),
+            HelpRow::Key { keys, does } => Line::from(vec![
+                Span::styled(
+                    format!("  {keys:<15}"),
+                    Style::default().fg(t.ink).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(does, Style::default().fg(t.ink2)),
+            ]),
+            HelpRow::Gap => Line::from(""),
+        })
+        .collect();
+    // Clamp the scroll so paging never runs off the end.
+    let max = u16::try_from(lines.len().saturating_sub(usize::from(inner.height))).unwrap_or(0);
+    f.render_widget(
+        Paragraph::new(lines).scroll((app.detail_scroll.min(max), 0)),
+        inner,
+    );
 }
 
 /// The command palette: a query line over a fuzzy-ranked command list (`:` opens).
@@ -604,12 +635,7 @@ pub(super) fn filter_overlay(f: &mut Frame, app: &App) {
     let Some(area) = overlay_area(app, f.area()) else {
         return;
     };
-    let region = match app.focus {
-        Focus::Experts => "umbra",
-        Focus::Shadows => "penumbra",
-        Focus::Boundaries => "antumbra",
-    };
-    let inner = overlay::modal(f, &t, area, &format!("filter {region}"));
+    let inner = overlay::modal(f, &t, area, &format!("find in {}", app.filter_subject()));
     let rows = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(inner);
 
     f.render_widget(

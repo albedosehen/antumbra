@@ -1,31 +1,67 @@
 //! The command palette's vocabulary: the actions it can run and a small
 //! hand-rolled fuzzy matcher (subsequence + gap scoring) that ranks them against
-//! the typed query. Keybindings and the palette both resolve to an [`Action`] the
-//! loop applies in one place.
+//! the typed query. A key ([`crate::keys`]) and the palette both resolve to an
+//! [`Action`], which is carried out in one place ([`crate::drive`]).
 
 use crate::app::{Focus, LayoutMode, Page};
 
-/// Something the console can do, triggered by a key or chosen from the palette.
+/// Something the console can do, asked for by a key or chosen from the
+/// palette. What a few of them mean depends on the view they are asked in:
+/// [`Action::Move`] moves the selection, or scrolls an overlay.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Action {
+    // The console itself.
+    Quit,
     Reload,
-    CycleTheme,
-    CycleSort,
+    Help,
+    Palette,
+    Filter,
+    Events,
+    Connect,
+    Knobs,
+    Gate,
+    Ask,
+    // What is on screen.
     Page(Page),
+    /// The next page (`1`) or the one before (`-1`), wrapping.
+    PageStep(i32),
     Focus(Focus),
+    /// The next list on the population page.
+    FocusNext,
     Layout(LayoutMode),
+    LayoutNext,
+    CycleSort,
+    CycleTheme,
     FpsUp,
     FpsDown,
     FollowMonitor,
-    Ask,
-    Connect,
-    Events,
-    Gate,
+    // The selection, or an overlay's scroll.
+    /// Down (`1`) or up (`-1`) one.
+    Move(i32),
+    First,
+    Last,
+    /// Down (`1`) or up (`-1`) ten.
+    PageMove(i32),
+    /// Enter: open what is selected, run the highlighted command, jump to the
+    /// highlighted match, route the task, or apply the knobs.
+    Submit,
+    // Acting on the selection, each behind a confirm.
+    /// The `x` key: what it does follows from the page and the list.
+    Act,
     GraduateShadow,
     FreezeExpert,
     CancelHalt,
-    Help,
-    Quit,
+    // An overlay.
+    Close,
+    /// A character typed into the palette, the filter or the ask.
+    Type(char),
+    Backspace,
+    /// A knob one step down (`-1`) or up (`1`).
+    Turn(i32),
+    /// Go ahead with the staged action.
+    Confirm,
+    /// Drop the staged action.
+    Decline,
 }
 
 /// A palette entry: the searchable label and the action it runs.

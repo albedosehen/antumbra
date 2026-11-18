@@ -8,22 +8,21 @@
 │                                                                        ││                                            │
 │                                                                        ││network    world                            │
 │                                                                        ││status     committed                        │
-│                                                                        ││strength   ██████████▍─ 0.86                │
-│                                   ◉⠂                                   ││confidence ██████████▍─ 0.86                │
-│                                 ⢀⠔⠁                                    ││reinforce  4                                │
-│                                ⡠⠊                                      ││volatile   no                               │
-│                              ⢀⠔⠁                                       ││use        never seen                       │
-│                             ⡠⠃   world                                 ││                                            │
-│                           ⢀⠜                                           ││evidence                                    │
-│                          ⡠⠃                                            ││  · session-log                             │
-│                        ⢀⠜                                              ││                                            │
-│                       ⡰⠁                                               ││edges (2)                                   │
-│                     ⢀⠎                                                 ││  ← contradicts memory:incident             │
-│                    ⡰⠁                                                  ││  → caused      memory:incident             │
-│                  ⢠⠊                                                    ││                                            │
-│                 ⡔⠁                                                     ││                                            │
-│              ○⢠⠊                                       ○               ││                                            │
-│              ⠐⠁                                                        ││                                            │
+│                                   ◉                                    ││strength   ██████████▍─ 0.86                │
+│                                   ⡔⠁                                   ││confidence ██████████▍─ 0.86                │
+│                                 ⡠⠊                                     ││reinforce  4                                │
+│                               ⢀⠔⠁                                      ││volatile   no                               │
+│                              ⡠⠃  world                                 ││use        never seen                       │
+│                            ⢀⠎                                          ││                                            │
+│                           ⡔⠁                                           ││evidence                                    │
+│                         ⢠⠊                                             ││  · session-log                             │
+│                       ⢀⠔⠁                                              ││                                            │
+│                      ⡠⠊                                                ││edges (2)                                   │
+│                    ⢀⠜                                                  ││  ← contradicts memory:incident             │
+│                   ⡰⠁                                                   ││  → caused      memory:incident             │
+│                 ⢠⠊                                                     ││                                            │
+│              ○⢀⠔⠁                                      ○               ││                                            │
+│              ⠠⠊                                                        ││                                            │
 │                                                                        ││                                            │
 │                                                                        ││                                            │
 │             bank                                      opinion          ││                                            │
@@ -33,4 +32,5 @@
 │                                                                        ││                                            │
 │                                                                        ││                                            │
 ╰────────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────╯
- q  quit   ↑↓  select   tab  focus:umbra   []  page:memory   t  theme:night   ±  cap:144   r  reload   ?  help   :  pale
+
+ ↑↓  move   /  find   1-5  pages   a  ask   :  commands   ?  help   q  quit

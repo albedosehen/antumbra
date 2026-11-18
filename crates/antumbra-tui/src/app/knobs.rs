@@ -30,9 +30,9 @@ impl App {
     }
 
     /// Turn the highlighted knob one step down (`-1`) or up (`1`), within its
-    /// range. Only an operator's console turns anything.
+    /// range. Only an operator's console turns anything; any other says so.
     pub fn knob_turn(&mut self, direction: i32) {
-        if !self.operator {
+        if !self.may_act() {
             return;
         }
         let knob = &KNOBS[self.knob_selected];
