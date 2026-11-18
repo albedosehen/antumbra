@@ -180,6 +180,11 @@ pub struct Finding {
     pub said: String,
     /// What to do about it, when it is not as it should be.
     pub fix: Option<String>,
+    /// Whether what was found still works: a file an earlier build wrote, or
+    /// one edited in place. It is said with what to do, and does not fail the
+    /// check, which is how a hook script of Claude Code's that differs from
+    /// this build's is treated.
+    pub works: bool,
 }
 
 impl Finding {
@@ -187,6 +192,7 @@ impl Finding {
         Finding {
             said: said.into(),
             fix: None,
+            works: true,
         }
     }
 
@@ -194,6 +200,16 @@ impl Finding {
         Finding {
             said: said.into(),
             fix: Some(fix.into()),
+            works: false,
+        }
+    }
+
+    /// Something that works and is not what this build would write.
+    fn stale(said: impl Into<String>, fix: impl Into<String>) -> Self {
+        Finding {
+            said: said.into(),
+            fix: Some(fix.into()),
+            works: true,
         }
     }
 }
@@ -259,8 +275,11 @@ fn kept(dir: &Path, files: &[Kept], what: &str) -> Vec<Finding> {
             "run setup again to write it",
         ));
     }
+    // A file that is there and differs is one an earlier build wrote (each
+    // carries its version) or one edited in place. Either still does its
+    // work, so it is said and not counted against the setup.
     if !changed.is_empty() {
-        found.push(Finding::bad(
+        found.push(Finding::stale(
             format!(
                 "{what}: {} in {} differs from what this build writes",
                 changed.join(", "),

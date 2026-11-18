@@ -1892,6 +1892,9 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
             for finding in agents::check(agent, &ground) {
                 match finding.fix {
                     None => ok(finding.said),
+                    // Said, as a differing hook of Claude Code's is, and not
+                    // a failed check: it works.
+                    Some(fix) if finding.works => println!("  ! {}; {fix}", finding.said),
                     Some(fix) => fail(finding.said, fix),
                 }
             }
