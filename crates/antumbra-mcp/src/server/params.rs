@@ -463,6 +463,11 @@ pub(super) struct RouteParams {
     pub(super) task: String,
     /// How many candidate experts to return (default 3).
     pub(super) top_k: Option<u32>,
+    /// The repository the task is in (`host/org/name`), so the answer says
+    /// which of your standing experts are in scope there. Those for
+    /// everywhere always are.
+    #[serde(default)]
+    pub(super) repo: Option<String>,
 }
 
 /// Minimum cosine similarity for one of the user's *private* experts to be
@@ -502,7 +507,55 @@ pub(super) struct RouteOut {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) reason: Option<String>,
     pub(super) routes: Vec<RouteHit>,
+    /// Your standing experts, the closest to the task first. A standing
+    /// expert is never among `routes`: it is composed into every answer in
+    /// its scope, and answers alone a task like the ones it was taught. Empty
+    /// when you have none.
+    pub(super) standing: Vec<StandingHit>,
+    /// The behaviors of yours nearest the task, closest first: what you have
+    /// taught, or proposed, that bears on it. Empty when you have none.
+    pub(super) taught: Vec<TaughtHit>,
 }
+
+/// One of your standing experts, and how close a task is to what it was
+/// taught.
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct StandingHit {
+    pub(super) expert_id: String,
+    /// The scope it is composed into every answer of: `everywhere`, or a
+    /// repository.
+    pub(super) scope: String,
+    /// How close the task is to what it was taught: the cosine similarity of
+    /// the task to its centroid.
+    pub(super) similarity: f32,
+    /// Whether the task is in its scope: everywhere, or the `repo` given.
+    pub(super) in_scope: bool,
+    /// Whether it answers this task when no expert is routed to it: in scope
+    /// and close enough, which is how `answer` decides, on a server that
+    /// holds its adapter.
+    pub(super) answers: bool,
+}
+
+/// One of your behaviors, and how close a task is to it.
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct TaughtHit {
+    pub(super) behavior_id: String,
+    pub(super) rule: String,
+    /// `everywhere`, or a repository.
+    pub(super) scope: String,
+    /// `proposed`, `accepted` or `trained`. A retired one is not listed.
+    pub(super) status: String,
+    /// The cosine similarity of the task to the behavior as it is stored: its
+    /// rule, its checks and its examples.
+    pub(super) similarity: f32,
+    /// Whether its scope's expert learned it at its last training. Absent
+    /// for one that has not been through a training.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) learned: Option<bool>,
+}
+
+/// How many behaviors `route` lists as nearest a task.
+pub(super) const TAUGHT_SHOWN: usize = 3;
 
 #[derive(Deserialize, schemars::JsonSchema)]
 pub(super) struct AnswerParams {

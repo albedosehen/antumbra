@@ -44,7 +44,54 @@ pub struct Routed {
     /// boundary covers the task, there is no learned router yet, the experts
     /// that cover it are resting, or it is outside what the population covers.
     pub reason: Option<String>,
+    /// What the server read beside the routes.
+    pub near: Near,
 }
+
+/// What a task is near, of the user's own: their standing experts and the
+/// behaviors they have taught. A standing expert is never routed to, so this
+/// is the half of an answer a workspace of standing experts has.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Near {
+    /// The standing experts, the closest to the task first. `None` from a
+    /// server that says nothing of them (one from before it did), which is
+    /// not the same as a user who has none.
+    pub standing: Option<Vec<StandingHit>>,
+    /// The behaviors nearest the task, closest first.
+    pub taught: Vec<TaughtHit>,
+}
+
+/// One standing expert, as the server reads it for a task.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StandingHit {
+    pub expert: ExpertId,
+    pub scope: String,
+    /// How close the task is to what it was taught.
+    pub similarity: f32,
+    /// Whether the task is in its scope: everywhere, or the repository the
+    /// console was started in.
+    pub in_scope: bool,
+    /// Whether it answers the task with no expert routed to it.
+    pub answers: bool,
+}
+
+/// One behavior near a task.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaughtHit {
+    pub rule: String,
+    pub scope: String,
+    /// `proposed`, `accepted` or `trained`.
+    pub status: String,
+    pub similarity: f32,
+    /// Whether its scope's expert learned it at its last training; `None`
+    /// before it has been through one.
+    pub learned: Option<bool>,
+}
+
+/// The least a task's likeness to what a standing expert was taught may be
+/// for the expert to answer it alone: the server's own floor, which the demo
+/// applies as the server does.
+const ANSWERS_FROM: f32 = 0.3;
 
 impl Routed {
     /// Read the server's `route` answer: its `routes`, and its `reason` when
@@ -65,7 +112,38 @@ impl Routed {
             .as_str()
             .filter(|reason| !reason.is_empty())
             .map(str::to_string);
-        Routed { routes, reason }
+        let standing = out["standing"].as_array().map(|hits| {
+            hits.iter()
+                .filter_map(|hit| {
+                    Some(StandingHit {
+                        expert: ExpertId::new(hit["expert_id"].as_str()?),
+                        scope: hit["scope"].as_str()?.to_string(),
+                        similarity: hit["similarity"].as_f64()? as f32,
+                        in_scope: hit["in_scope"].as_bool()?,
+                        answers: hit["answers"].as_bool()?,
+                    })
+                })
+                .collect()
+        });
+        let taught = out["taught"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|hit| {
+                Some(TaughtHit {
+                    rule: hit["rule"].as_str()?.to_string(),
+                    scope: hit["scope"].as_str()?.to_string(),
+                    status: hit["status"].as_str()?.to_string(),
+                    similarity: hit["similarity"].as_f64()? as f32,
+                    learned: hit["learned"].as_bool(),
+                })
+            })
+            .collect();
+        Routed {
+            routes,
+            reason,
+            near: Near { standing, taught },
+        }
     }
 }
 
@@ -117,14 +195,19 @@ impl Backend {
     /// embeds it with the model its population was built with and applies its
     /// boundaries; the demo embeds with its stand-in over `router`, which is
     /// only coherent over the population it seeded.
-    pub async fn route(&self, task: &str, router: Option<&LearnedRouter>) -> Result<Routed> {
+    pub async fn route(
+        &self,
+        task: &str,
+        repo: Option<&str>,
+        router: Option<&LearnedRouter>,
+    ) -> Result<Routed> {
         match self {
             Backend::Server(server) => {
                 let server = server.clone();
-                let task = task.to_string();
-                tokio::task::spawn_blocking(move || server.route(&task)).await?
+                let (task, repo) = (task.to_string(), repo.map(str::to_string));
+                tokio::task::spawn_blocking(move || server.route(&task, repo.as_deref())).await?
             }
-            Backend::Demo(_) => {
+            Backend::Demo(store) => {
                 let vec = FixedEmbedder::new(EMBED_DIM).embed(task).await?;
                 let routes = router.map(|r| r.route(&vec)).unwrap_or_default();
                 // The demo says why in the server's words, for the two cases
@@ -134,7 +217,34 @@ impl Backend {
                     (true, None) => Some("no learned router yet".to_string()),
                     (true, Some(_)) => Some("outside what the population covers".to_string()),
                 };
-                Ok(Routed { routes, reason })
+                // And reads its standing experts as the server reads a
+                // user's: by the task's likeness to what each was taught.
+                let mut standing: Vec<StandingHit> = antumbra_store::repo::expert::list(store)
+                    .await?
+                    .iter()
+                    .filter_map(|e| {
+                        let scope = e.standing_scope()?.to_string();
+                        let similarity = e.capability_similarity(&vec).unwrap_or(0.0);
+                        let in_scope = scope == antumbra_core::behavior::EVERYWHERE
+                            || Some(scope.as_str()) == repo;
+                        Some(StandingHit {
+                            expert: e.id.clone(),
+                            answers: in_scope && similarity >= ANSWERS_FROM,
+                            scope,
+                            similarity,
+                            in_scope,
+                        })
+                    })
+                    .collect();
+                standing.sort_by(|a, b| b.similarity.total_cmp(&a.similarity));
+                Ok(Routed {
+                    routes,
+                    reason,
+                    near: Near {
+                        standing: Some(standing),
+                        taught: Vec::new(),
+                    },
+                })
             }
         }
     }
@@ -269,10 +379,10 @@ impl Server {
         }
     }
 
-    fn route(&self, task: &str) -> Result<Routed> {
+    fn route(&self, task: &str, repo: Option<&str>) -> Result<Routed> {
         let out = match self
             .surface
-            .call("route", json!({ "task": task, "top_k": 5 }))
+            .call("route", json!({ "task": task, "top_k": 5, "repo": repo }))
         {
             Ok(out) => out,
             // The shared refusal, with where this console found the token.

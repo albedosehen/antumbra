@@ -1,0 +1,22 @@
+╭ Ask · which expert takes a task? ────────────────────────────────────────╮
+│task › draw a game character▏                                             │
+│                                                                          │
+│  No expert is routed to it: your standing expert everywhere answers it.  │
+│  Why: no learned router yet, and none of your private experts is         │
+│       close to this task                                                 │
+│                                                                          │
+│  Standing experts, the closest to this task first:                       │
+│  ● everywhere             0.41  answers it                               │
+│  ○ billing                0.36  for another repository                   │
+│  ○ orders                 0.12  in scope, too far to answer alone        │
+│  and 1 more, further from it                                             │
+│                                                                          │
+│  The nearest of what you have taught:                                    │
+│  Draw a game character for a side-scrolling or platformer game in a      │
+│  three-quarter or side view facing its direction of travel, with b…      │
+│    everywhere · not learned at its last training                         │
+│  Name a branch for an issue feat/{issue}-{slug}.                         │
+│    orders · learned                                                      │
+│  Write a commit subject in the imperative.                               │
+│    everywhere · proposed, waiting to be accepted                         │
+╰──────────────────────────────────────────────────────────────────────────╯

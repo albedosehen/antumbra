@@ -305,6 +305,7 @@ async fn a_standing_expert_is_never_routed() -> anyhow::Result<()> {
         .route(Parameters(RouteParams {
             task: "my private skill".into(),
             top_k: Some(5),
+            repo: None,
         }))
         .await?;
     let ids: Vec<&str> = r.0.routes.iter().map(|h| h.expert_id.as_str()).collect();
@@ -325,5 +326,226 @@ fn an_answer_without_standing_experts_matches_the_output_schema() -> anyhow::Res
         standing: Vec::new(),
     };
     assert_required_keys_present(&out)?;
+    Ok(())
+}
+
+fn asked(task: &str, repo: Option<&str>) -> Parameters<RouteParams> {
+    Parameters(RouteParams {
+        task: task.into(),
+        top_k: None,
+        repo: repo.map(str::to_string),
+    })
+}
+
+/// A vector as far from `v` as one can be.
+fn opposite(v: &[f32]) -> Vec<f32> {
+    v.iter().map(|x| -x).collect()
+}
+
+// A workspace whose experts are all standing ones is routed to none of them
+// for any task. `route` still says how close the task is to what each was
+// taught, and which would answer it, so asking is not answered with nothing.
+#[tokio::test]
+async fn route_says_how_close_each_standing_expert_is_and_which_would_answer() -> anyhow::Result<()>
+{
+    let (s, _rec) = serving(mem_store().await?).await;
+    let task = "add two numbers";
+    let near = embed(task).await?;
+    for e in [
+        expert(
+            "expert:mine:everywhere",
+            "user:test",
+            standing("everywhere"),
+            opposite(&near),
+        ),
+        expert(
+            "expert:mine:repo",
+            "user:test",
+            standing("github.com/o/r"),
+            near.clone(),
+        ),
+        expert(
+            "expert:mine:other",
+            "user:test",
+            standing("github.com/o/other"),
+            embed("add three numbers").await?,
+        ),
+        expert(
+            "expert:theirs",
+            "user:else",
+            standing("everywhere"),
+            near.clone(),
+        ),
+    ] {
+        expert::insert(&s.store, &e).await?;
+    }
+
+    let out = s.route(asked(task, Some("github.com/o/r"))).await?.0;
+    assert!(
+        out.escalate && out.routes.is_empty(),
+        "a standing expert is never routed"
+    );
+    let read = |out: &RouteOut| -> Vec<(String, String, bool, bool)> {
+        out.standing
+            .iter()
+            .map(|h| (h.expert_id.clone(), h.scope.clone(), h.in_scope, h.answers))
+            .collect()
+    };
+    let hit = |id: &str, scope: &str, in_scope: bool, answers: bool| {
+        (id.to_string(), scope.to_string(), in_scope, answers)
+    };
+    // The closest first; another user's is not this user's to see.
+    assert_eq!(
+        read(&out),
+        [
+            hit("expert:mine:repo", "github.com/o/r", true, true),
+            // Close, and for another repository.
+            hit("expert:mine:other", "github.com/o/other", false, false),
+            // In scope, and nothing like the task.
+            hit("expert:mine:everywhere", "everywhere", true, false),
+        ]
+    );
+    assert!(out.standing[0].similarity > 0.99 && out.standing[2].similarity < 0.0);
+
+    // Asked from no repository, only the one for everywhere is in scope.
+    let out = s.route(asked(task, None)).await?.0;
+    assert_eq!(
+        read(&out)[0],
+        hit("expert:mine:repo", "github.com/o/r", false, false)
+    );
+    Ok(())
+}
+
+/// One of `user:test`'s behaviors, stored with `embedding`.
+async fn taught(
+    s: &McpServer,
+    rule: &str,
+    scope: &str,
+    status: antumbra_core::behavior::Status,
+    embedding: Vec<f32>,
+) -> anyhow::Result<MemoryId> {
+    let spec = antumbra_core::behavior::Spec {
+        rule: rule.into(),
+        must: Vec::new(),
+        must_not: Vec::new(),
+        examples: Vec::new(),
+        violations: Vec::new(),
+    };
+    let id = MemoryId::new(next_id("memory"));
+    antumbra_store::repo::behavior::record(
+        &s.store,
+        &TenantId::new("ws:test"),
+        &UserId::new("user:test"),
+        "h",
+        id.clone(),
+        &spec,
+        status,
+        scope,
+        None,
+        &[],
+        embedding,
+    )
+    .await?;
+    Ok(id)
+}
+
+// What the user has taught that bears on a task: the nearest behaviors,
+// closest first, each with its scope, where it stands and whether its expert
+// learned it. A retired one teaches nothing and is not listed.
+#[tokio::test]
+async fn route_lists_the_nearest_of_what_was_taught_and_whether_it_was_learned(
+) -> anyhow::Result<()> {
+    use antumbra_core::behavior::{self, Status};
+    let (s, _rec) = serving(mem_store().await?).await;
+    let task = "draw the player character";
+    let near = embed(task).await?;
+    let missed = taught(
+        &s,
+        "Draw a character in side view.",
+        "everywhere",
+        Status::Accepted,
+        near.clone(),
+    )
+    .await?;
+    taught(
+        &s,
+        "Name a branch feat/{issue}-{slug}.",
+        "github.com/o/r",
+        Status::Proposed,
+        embed("draw the player").await?,
+    )
+    .await?;
+    taught(
+        &s,
+        "An old rule.",
+        "everywhere",
+        Status::Retired,
+        near.clone(),
+    )
+    .await?;
+    for n in 0..3 {
+        let rule = format!("Far rule {n}.");
+        taught(&s, &rule, "everywhere", Status::Trained, opposite(&near)).await?;
+    }
+    // The nearest was taught, and its expert did not learn it.
+    let tenant = TenantId::new("ws:test");
+    let Some(mut m) = memory::get(&s.store, &tenant, &missed).await? else {
+        anyhow::bail!("the behavior just recorded is gone");
+    };
+    behavior::mark_training(
+        &mut m.evidence,
+        &behavior::Training {
+            set: "set".into(),
+            base: 0.0,
+            expert: 0.0,
+            learned: false,
+            admitted: true,
+            held: 3,
+            worse: 0.5,
+        },
+    );
+    memory::upsert(&s.store, &m).await?;
+
+    let out = s.route(asked(task, None)).await?.0;
+    let read: Vec<(&str, &str, &str, Option<bool>)> = out
+        .taught
+        .iter()
+        .map(|t| {
+            (
+                t.rule.as_str(),
+                t.scope.as_str(),
+                t.status.as_str(),
+                t.learned,
+            )
+        })
+        .collect();
+    assert_eq!(out.taught.len(), 3, "the nearest three: {read:?}");
+    assert_eq!(
+        read[..2],
+        [
+            (
+                "Draw a character in side view.",
+                "everywhere",
+                "accepted",
+                Some(false)
+            ),
+            (
+                "Name a branch feat/{issue}-{slug}.",
+                "github.com/o/r",
+                "proposed",
+                None
+            ),
+        ]
+    );
+    assert!(read.iter().all(|t| t.0 != "An old rule."), "{read:?}");
+    assert_eq!(out.taught[0].behavior_id, missed.as_str());
+
+    // A user with no behaviors and no standing experts gets both lists empty:
+    // the output schema requires the keys, and a client that checks results
+    // refuses an answer without them.
+    let (bare, _rec) = serving(mem_store().await?).await;
+    let out = bare.route(asked(task, None)).await?.0;
+    assert_required_keys_present(&out)?;
+    assert!(out.standing.is_empty() && out.taught.is_empty());
     Ok(())
 }

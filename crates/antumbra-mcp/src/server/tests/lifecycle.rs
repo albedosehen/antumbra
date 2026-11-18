@@ -46,6 +46,7 @@ async fn a_dormant_expert_is_not_routed_to_and_population_says_so() -> anyhow::R
         s.route(Parameters(RouteParams {
             task: "add two numbers".into(),
             top_k: Some(3),
+            repo: None,
         }))
     };
     assert_eq!(route().await?.0.routes.len(), 1);

@@ -186,7 +186,10 @@ pub(crate) async fn apply(
 /// Route the ask's task, storing the distribution on the app. A failure is
 /// said on the main view and yields an empty (escalate) result.
 pub(crate) async fn ask_route(app: &mut App, backend: &Backend) {
-    let routed = match backend.route(&app.ask_query, app.router.as_ref()).await {
+    let routed = match backend
+        .route(&app.ask_query, app.git.repo.as_deref(), app.router.as_ref())
+        .await
+    {
         Ok(routed) => routed,
         Err(e) => {
             app.problem(format!("ask failed · {e:#}"));

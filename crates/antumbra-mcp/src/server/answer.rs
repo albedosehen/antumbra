@@ -8,9 +8,9 @@
 //! it, or any task when the caller asks for standing experts only.
 
 use super::*;
-use antumbra_core::behavior::{normalize_scope, EVERYWHERE};
+use antumbra_core::behavior::{self, normalize_scope, State, Status, EVERYWHERE};
 use antumbra_core::ports::Serve;
-use antumbra_core::Expert;
+use antumbra_core::{cosine_similarity, Expert};
 
 #[tool_router(router = answer_router, vis = "pub(super)")]
 impl McpServer {
@@ -138,6 +138,72 @@ impl McpServer {
                     .cloned()
             })
             .collect())
+    }
+}
+
+impl McpServer {
+    /// Every standing expert of the session user's, the closest to `v` first:
+    /// how near the task is to what each was taught, whether the task is in
+    /// its scope (everywhere, or `repo`), and whether it would answer the
+    /// task with no expert routed to it, decided as `answer` decides it.
+    /// `route` leaves standing experts out of its routes, so without this a
+    /// workspace that has only them is told nothing about any task.
+    pub(super) async fn standing_near(
+        &self,
+        v: &[f32],
+        repo: Option<&str>,
+    ) -> antumbra_core::Result<Vec<StandingHit>> {
+        let repo = normalize_scope(repo);
+        let mut hits: Vec<StandingHit> = lifecycle::routable(&self.store)
+            .await?
+            .iter()
+            .filter(|e| behavior::is_standing_for(e, &self.tenant, &self.user))
+            .filter_map(|e| {
+                let scope = e.standing_scope()?.to_string();
+                let similarity = e.capability_similarity(v).unwrap_or(0.0);
+                let in_scope = scope == EVERYWHERE || scope == repo;
+                Some(StandingHit {
+                    expert_id: e.id.as_str().to_string(),
+                    answers: in_scope && similarity >= PRIVATE_ROUTE_FLOOR,
+                    scope,
+                    similarity,
+                    in_scope,
+                })
+            })
+            .collect();
+        hits.sort_by(|a, b| b.similarity.total_cmp(&a.similarity));
+        Ok(hits)
+    }
+
+    /// The session user's behaviors nearest `v`, closest first, at most
+    /// [`TAUGHT_SHOWN`]: what they have taught, or proposed, that bears on
+    /// the task, and whether each one's expert learned it. A retired one is
+    /// left out, as is one stored without an embedding.
+    pub(super) async fn taught_near(&self, v: &[f32]) -> antumbra_core::Result<Vec<TaughtHit>> {
+        let compartment = behavior::compartment_id(&self.tenant, &self.user);
+        let mut hits: Vec<TaughtHit> =
+            memory::list_by_compartment(&self.store, &self.tenant, &compartment)
+                .await?
+                .iter()
+                .filter_map(|m| {
+                    let state = State::of(&m.evidence)?;
+                    if state.status == Status::Retired {
+                        return None;
+                    }
+                    let spec = behavior::spec_of(&m.content)?;
+                    Some(TaughtHit {
+                        behavior_id: m.id.as_str().to_string(),
+                        rule: spec.rule,
+                        scope: state.scope,
+                        status: state.status.as_str().to_string(),
+                        similarity: cosine_similarity(m.embedding.as_deref()?, v),
+                        learned: behavior::training(&m.evidence).map(|t| t.learned),
+                    })
+                })
+                .collect();
+        hits.sort_by(|a, b| b.similarity.total_cmp(&a.similarity));
+        hits.truncate(TAUGHT_SHOWN);
+        Ok(hits)
     }
 }
 
