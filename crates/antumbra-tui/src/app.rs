@@ -4,8 +4,8 @@
 pub use antumbra_core::console::Snapshot;
 use antumbra_core::generational::GenerationHead;
 use antumbra_core::{
-    EvaluationRun, Expert, FailureBoundary, LearnedRouter, Memory, MemoryEdge, MemoryPolicy,
-    MemoryUse, RunId, Shadow,
+    EvaluationRun, Expert, FailureBoundary, LearnedRouter, Memory, MemoryEdge, MemoryNetwork,
+    MemoryPolicy, MemoryUse, RunId, Shadow,
 };
 
 use std::collections::{HashMap, HashSet};
@@ -47,12 +47,13 @@ pub enum Mode {
     Knobs,
 }
 
-/// How the body arranges its panels: the graph beside a single focused detail
-/// (`Focused`), the graph beside all three regions at once (`Dashboard`), or the
-/// graph alone, full width (`Graph`).
+/// How the population page arranges its panels: the list in front beside the
+/// detail of what is selected (`List`, the default), the graph beside all
+/// three lists at once (`Dashboard`), or the graph alone, full width
+/// (`Graph`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LayoutMode {
-    Focused,
+    List,
     Dashboard,
     Graph,
     /// A full-width sortable table of the population (the data-grid view).
@@ -63,7 +64,7 @@ impl LayoutMode {
     /// The lowercase name shown in the header.
     pub fn name(self) -> &'static str {
         match self {
-            LayoutMode::Focused => "focused",
+            LayoutMode::List => "list",
             LayoutMode::Dashboard => "dashboard",
             LayoutMode::Graph => "graph",
             LayoutMode::Table => "table",
@@ -191,6 +192,11 @@ pub struct App {
     pub knob_draft: MemoryPolicy,
     /// Index into `memories` of the highlighted trace (Memory page).
     pub selected_memory: usize,
+    /// The kind of memory the Memory page lists: one network, or all three.
+    pub memory_kind: Option<MemoryNetwork>,
+    /// Whether the Memory page shows the graph of the kinds and their links
+    /// in place of the list.
+    pub memory_graph: bool,
     /// The Sovereign page's reading of `memories`, made once per reload.
     pub sovereign: crate::sovereign::View,
     /// Index into `sovereign.skills` of the highlighted row (Sovereign page).
@@ -320,6 +326,8 @@ impl App {
             knob_selected: 0,
             knob_draft: MemoryPolicy::default(),
             selected_memory: 0,
+            memory_kind: None,
+            memory_graph: false,
             sovereign: crate::sovereign::View::default(),
             selected_skill: 0,
             loop_heads: Vec::new(),
@@ -333,7 +341,7 @@ impl App {
             selected_shadow: 0,
             page: Page::Population,
             focus: Focus::Experts,
-            layout: LayoutMode::Focused,
+            layout: LayoutMode::List,
             sort: SortKey::Fitness,
             mode: Mode::Normal,
             palette: Palette::default(),
@@ -379,6 +387,10 @@ impl App {
             app.token_from = token_from;
         }
         app.reload(backend).await?;
+        // The Memory page opens on the first memory it lists.
+        if let Some(&first) = app.listed_memories().first() {
+            app.selected_memory = first;
+        }
         Ok(app)
     }
 

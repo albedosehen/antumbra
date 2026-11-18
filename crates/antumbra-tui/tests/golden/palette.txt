@@ -18,7 +18,7 @@
 │  Memory knobs                                          K   │
 │  Connect an agent                                      c   │
 │  History: what changed and what was done               e   │
-│  Layout: focused, one list and its detail                  │
+│  Layout: list, one list beside its detail                  │
 │  Layout: dashboard, all three lists at once                │
 │  Layout: graph, the experts alone                          │
 │  Layout: table, the experts as a table                     │

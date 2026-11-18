@@ -153,6 +153,8 @@ fn demo_app() -> App {
         knob_selected: 0,
         knob_draft: antumbra_core::MemoryPolicy::default(),
         selected_memory: 0,
+        memory_kind: None,
+        memory_graph: false,
         sovereign: crate::sovereign::View::default(),
         selected_skill: 0,
         loop_heads: demo_loop_heads(now),
@@ -166,7 +168,7 @@ fn demo_app() -> App {
         selected_shadow: 0,
         page: crate::app::Page::Population,
         focus: Focus::Experts,
-        layout: LayoutMode::Focused,
+        layout: LayoutMode::List,
         sort: crate::app::SortKey::Fitness,
         mode: Mode::Normal,
         palette: Palette::default(),
@@ -677,5 +679,6 @@ fn golden_focused_boundaries_panel() -> anyhow::Result<()> {
 
 mod behavior;
 mod keys;
+mod lists;
 mod look;
 mod wording;

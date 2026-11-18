@@ -179,7 +179,7 @@ pub async fn run(args: Args) -> Result<()> {
                 "dashboard" => app::LayoutMode::Dashboard,
                 "graph" => app::LayoutMode::Graph,
                 "table" => app::LayoutMode::Table,
-                _ => app::LayoutMode::Focused,
+                _ => app::LayoutMode::List,
             });
             app.set_focus(match focus.as_str() {
                 "shadows" => app::Focus::Shadows,

@@ -1,31 +1,31 @@
-╭ Expert ─────────────────────────────────╮
-│arith-specialist                         │
-│fitness    ██████████▊─ 0.90             │
-│state      ● frozen                      │
-│generation 0                             │
-│base model base                          │
-│                                         │
-│learned from 2 examples                  │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-╰─────────────────────────────────────────╯
-╭ Routing ────────────────────────────────╮
-│router     not trained yet: a task goes  │
-│to the nearest expert                    │
-│boundaries 0 · 0 in force                │
-│                                         │
-│                                         │
-╰─────────────────────────────────────────╯
+╭ Expert ────────────────────────────────────────╮
+│arith-specialist                                │
+│fitness    ██████████▊─ 0.90                    │
+│state      ● frozen                             │
+│generation 0                                    │
+│base model base                                 │
+│                                                │
+│learned from 2 examples                         │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+╰────────────────────────────────────────────────╯
+╭ Routing ───────────────────────────────────────╮
+│router     not trained yet: a task goes to the  │
+│nearest expert                                  │
+│boundaries 0 · 0 in force                       │
+│                                                │
+│                                                │
+╰────────────────────────────────────────────────╯

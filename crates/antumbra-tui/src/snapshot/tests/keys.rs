@@ -17,7 +17,7 @@ fn full_app() -> App {
 }
 
 const LAYOUTS: [LayoutMode; 4] = [
-    LayoutMode::Focused,
+    LayoutMode::List,
     LayoutMode::Dashboard,
     LayoutMode::Graph,
     LayoutMode::Table,
@@ -198,18 +198,31 @@ fn tab_is_bound_only_where_the_list_it_moves_to_is_drawn() -> anyhow::Result<()>
         if app.mode != Mode::Normal {
             continue;
         }
-        let drawn = app.page == Page::Population
-            && matches!(app.layout, LayoutMode::Focused | LayoutMode::Dashboard);
+        // The population's three lists, where they are drawn; the kinds of
+        // memory, where the list of them is.
+        let lists = app.page == Page::Population
+            && matches!(app.layout, LayoutMode::List | LayoutMode::Dashboard);
+        let kinds = app.page == Page::Memory && !app.memory_graph;
         assert_eq!(
             keys::action_for(&app, Key::Tab),
-            drawn.then_some(Action::FocusNext),
+            (lists || kinds).then_some(Action::FocusNext),
             "{view}"
         );
         // Where it is not, the keys drive the list that is drawn.
-        if app.page == Page::Population && !drawn {
+        if app.page == Page::Population && !lists {
             assert_eq!(app.focus, Focus::Experts, "{view}");
         }
     }
+    // The memory page's graph draws every kind, so there is none to move to.
+    let mut app = full_app();
+    app.set_page(Page::Memory);
+    app.toggle_memory_graph();
+    assert_eq!(keys::action_for(&app, Key::Tab), None);
+    assert_eq!(
+        keys::action_for(&app, Key::Char('l')),
+        Some(Action::LayoutNext),
+        "and `l` swaps it back for the list"
+    );
     Ok(())
 }
 

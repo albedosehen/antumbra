@@ -12,7 +12,7 @@
 │                                                                          │
 │view                                                                      │
 │  1-5  [ ]       pages: Population, Memory, Training, Evaluations, Agent  │
-│  l  L           change the layout: focused, dashboard, graph, table      │
+│  l  L           change the layout: list, dashboard, graph, table         │
 │  s              sort the experts: by fitness, name or generation         │
 │  t              change the theme: night, mist, mono                      │
 │  + -  0         raise or lower the frame-rate cap; 0 follows the monitor │

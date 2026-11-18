@@ -1,36 +1,36 @@
  ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                 ● live
   1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent
  Memory: what your agents stored. World is facts, bank is experiences, opinion is judgments.
-╭ Memory · by kind ──────────────────────────────────────────────────────╮╭ Selected memory ───────────────────────────╮
-│                                                                        ││prefer deno over node for new scripts       │
-│                                                                        ││                                            │
-│                                                                        ││kind       world · a fact                   │
-│                                                                        ││status     committed                        │
-│                                                                        ││strength   ██████████▍─ 0.86                │
-│                                   ◉⠄                                   ││confidence ██████████▍─ 0.86                │
-│                                  ⡠⠃                                    ││reinforced 4 times                          │
-│                                ⢀⠜                                      ││may change no                               │
-│                               ⡠⠃                                       ││use        not seen in use yet              │
-│                             ⢀⠜   world                                 ││                                            │
-│                            ⡠⠃                                          ││Evidence                                    │
-│                          ⢀⠜                                            ││  · session-log                             │
-│                         ⡠⠃                                             ││                                            │
-│                       ⢀⠜                                               ││Links · 2                                   │
-│                      ⡠⠃                                                ││  ← contradicts memory:incident             │
-│                    ⢀⠜                                                  ││  → caused      memory:incident             │
-│                   ⡠⠃                                                   ││                                            │
-│                 ⢀⠜                                                     ││                                            │
-│                ⡠⠃                                                      ││                                            │
-│              ○⠜                                        ○               ││                                            │
-│                                                                        ││                                            │
-│                                                                        ││                                            │
-│                                                                        ││                                            │
-│             bank                                      opinion          ││                                            │
-│                                                                        ││                                            │
-│                                                                        ││                                            │
-│                                                                        ││                                            │
-│                                                                        ││                                            │
-│                                                                        ││                                            │
-╰────────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────╯
+╭  All 3 │ World 1 │ Bank 1 │ Opinion 1  ────────────────────────────╮╭ Selected memory ───────────────────────────────╮
+│  MEMORY                                        KIND     STRENGTH   ││prefer deno over node for new scripts           │
+│▸ prefer deno over node for new scripts         world    █████▏ 0.86││                                                │
+│  npm install failed under the deno runtime     bank     ████▎─ 0.70││kind       world · a fact                       │
+│  keep operator docs terse, no emojis           opinion  ████▊─ 0.80││status     committed                            │
+│                                                                    ││strength   ██████████▍─ 0.86                    │
+│                                                                    ││confidence ██████████▍─ 0.86                    │
+│                                                                    ││reinforced 4 times                              │
+│                                                                    ││may change no                                   │
+│                                                                    ││use        not seen in use yet                  │
+│                                                                    ││                                                │
+│                                                                    ││Evidence                                        │
+│                                                                    ││  · session-log                                 │
+│                                                                    ││                                                │
+│                                                                    ││Links · 2                                       │
+│                                                                    ││  ← contradicts memory:incident                 │
+│                                                                    ││  → caused      memory:incident                 │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+╰────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
 
- ↑↓  move   /  find   1-5  pages   a  ask   :  commands   ?  help   q  quit
+ ↑↓  move   tab  next kind   /  find   1-5  pages   l  graph   a  ask   :  commands   ?  help   q  quit

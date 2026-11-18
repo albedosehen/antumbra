@@ -15,6 +15,7 @@ mod evals;
 mod graph;
 mod heatmap;
 mod knobs;
+mod lists;
 mod loops;
 mod memory;
 mod overlays;
@@ -144,20 +145,28 @@ fn page_body(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-/// The body between header and footer, arranged per the active layout: graph
-/// beside one focused detail, graph beside all three regions, or graph alone.
+/// A page that is a list beside the detail of what is selected: the list's
+/// column and the detail's. The one split the pages and the transitions read.
+pub fn list_columns(body: Rect) -> [Rect; 2] {
+    let cols =
+        Layout::horizontal([Constraint::Percentage(58), Constraint::Percentage(42)]).split(body);
+    [cols[0], cols[1]]
+}
+
+/// The population page's body, arranged per the active layout: the list in
+/// front beside the detail of what is selected, the graph beside all three
+/// lists, the graph alone, or the experts as a full-width table.
 fn body(f: &mut Frame, app: &App, area: Rect) {
     match app.layout {
         LayoutMode::Table => table::experts_table(f, app, area),
         LayoutMode::Graph => graph::graph(f, app, area),
-        LayoutMode::Focused => {
-            let cols = Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)])
-                .split(area);
-            graph::graph(f, app, cols[0]);
+        LayoutMode::List => {
+            let [list, detail] = list_columns(area);
+            lists::population(f, app, list);
             match app.focus {
-                Focus::Experts => panels::detail(f, app, cols[1]),
-                Focus::Shadows => panels::shadows(f, app, cols[1]),
-                Focus::Boundaries => panels::boundaries(f, app, cols[1]),
+                Focus::Experts => panels::detail(f, app, detail),
+                Focus::Shadows => panels::candidate_side(f, app, detail),
+                Focus::Boundaries => panels::boundary_side(f, app, detail),
             }
         }
         LayoutMode::Dashboard => {

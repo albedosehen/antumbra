@@ -111,9 +111,9 @@ pub const COMMANDS: &[Command] = &[
         Action::Events,
     ),
     command(
-        "Layout: focused, one list and its detail",
+        "Layout: list, one list beside its detail",
         "",
-        Action::Layout(LayoutMode::Focused),
+        Action::Layout(LayoutMode::List),
     ),
     command(
         "Layout: dashboard, all three lists at once",

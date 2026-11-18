@@ -34,7 +34,13 @@ impl App {
     /// index is that item's place in it.
     fn focused_labels(&self) -> Vec<String> {
         match self.page {
-            Page::Memory => return self.memories.iter().map(|m| m.content.clone()).collect(),
+            Page::Memory => {
+                return self
+                    .listed_memories()
+                    .into_iter()
+                    .map(|i| self.memories[i].content.clone())
+                    .collect()
+            }
             Page::Evals => {
                 return self
                     .evals
@@ -129,10 +135,10 @@ impl App {
     /// Cycle the body layout: focused -> dashboard -> graph.
     pub fn cycle_layout(&mut self) {
         let next = match self.layout {
-            LayoutMode::Focused => LayoutMode::Dashboard,
+            LayoutMode::List => LayoutMode::Dashboard,
             LayoutMode::Dashboard => LayoutMode::Graph,
             LayoutMode::Graph => LayoutMode::Table,
-            LayoutMode::Table => LayoutMode::Focused,
+            LayoutMode::Table => LayoutMode::List,
         };
         self.set_layout(next);
     }
@@ -249,7 +255,16 @@ impl App {
     /// truth all the selection movers (next/prev/first/last/page) dispatch on.
     fn focused_list(&self) -> (usize, usize) {
         match self.page {
-            Page::Memory => return (self.memories.len(), self.selected_memory),
+            // The list is the kind in front; the selection's place in it is
+            // where it sits among that kind, or the top when it is of another.
+            Page::Memory => {
+                let listed = self.listed_memories();
+                let at = listed
+                    .iter()
+                    .position(|&i| i == self.selected_memory)
+                    .unwrap_or(0);
+                return (listed.len(), at);
+            }
             Page::Evals => return (self.evals.len(), self.selected_eval),
             Page::Sovereign => return (self.sovereign.skills.len(), self.selected_skill),
             Page::Loop => return (self.loop_heads.len(), self.selected_loop),
@@ -267,7 +282,9 @@ impl App {
     fn set_focused_selection(&mut self, idx: usize) {
         match self.page {
             Page::Memory => {
-                self.selected_memory = idx;
+                if let Some(&memory) = self.listed_memories().get(idx) {
+                    self.selected_memory = memory;
+                }
                 return;
             }
             Page::Evals => {
@@ -337,6 +354,72 @@ impl App {
 
     pub fn selected_memory(&self) -> Option<&Memory> {
         self.memories.get(self.selected_memory)
+    }
+
+    /// The memories the Memory page lists, as indices into `memories` in the
+    /// order they are shown: those of the kind in front, or every one, kind
+    /// after kind in the order the title names the kinds. The server sends
+    /// each kind strongest first, and that order is kept within it.
+    pub fn listed_memories(&self) -> Vec<usize> {
+        let of = |kind: MemoryNetwork| {
+            self.memories
+                .iter()
+                .enumerate()
+                .filter(move |(_, m)| m.network == kind)
+                .map(|(i, _)| i)
+        };
+        match self.memory_kind {
+            Some(kind) => of(kind).collect(),
+            None => Self::MEMORY_KINDS
+                .into_iter()
+                .flatten()
+                .flat_map(of)
+                .collect(),
+        }
+    }
+
+    /// How many memories there are of `kind`, or in all.
+    pub fn memory_count(&self, kind: Option<MemoryNetwork>) -> usize {
+        match kind {
+            None => self.memories.len(),
+            Some(kind) => self.memories.iter().filter(|m| m.network == kind).count(),
+        }
+    }
+
+    /// The kinds the Memory page lists, in the order Tab moves through them:
+    /// all, then each network.
+    pub const MEMORY_KINDS: [Option<MemoryNetwork>; 4] = [
+        None,
+        Some(MemoryNetwork::World),
+        Some(MemoryNetwork::Bank),
+        Some(MemoryNetwork::Opinion),
+    ];
+
+    /// List the next kind of memory (Tab on the Memory page), wrapping. The
+    /// selection stays where it is when it is of that kind, and moves to the
+    /// strongest of that kind when it is not, so what is selected is always
+    /// in the list.
+    pub fn next_memory_kind(&mut self) {
+        let at = Self::MEMORY_KINDS
+            .iter()
+            .position(|kind| *kind == self.memory_kind)
+            .unwrap_or(0);
+        self.memory_kind = Self::MEMORY_KINDS[(at + 1) % Self::MEMORY_KINDS.len()];
+        let listed = self.listed_memories();
+        if !listed.contains(&self.selected_memory) {
+            if let Some(&first) = listed.first() {
+                self.selected_memory = first;
+            }
+        }
+    }
+
+    /// Swap the Memory page's list for the graph of the kinds and their
+    /// links, or back (`l` on the Memory page). The graph draws every kind.
+    pub fn toggle_memory_graph(&mut self) {
+        self.memory_graph = !self.memory_graph;
+        if self.memory_graph {
+            self.memory_kind = None;
+        }
     }
 
     /// Edges touching `id`, as `(edge, is_outgoing)`: the selected trace's links.

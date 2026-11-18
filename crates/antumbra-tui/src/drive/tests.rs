@@ -161,13 +161,13 @@ async fn find_on_the_memory_page_selects_a_memory() -> anyhow::Result<()> {
     keys_pressed(&mut app, &backend, &[Key::Char('2')]).await;
     assert_eq!(app.page, Page::Memory);
     // The last memory listed, so the jump is not where the selection began.
-    let wanted = app
-        .memories
-        .last()
-        .context("the demo has memories")?
-        .content
-        .clone();
-    anyhow::ensure!(app.memories.len() > 1 && app.selected_memory == 0);
+    let listed = app.listed_memories();
+    let last = *listed.last().context("the demo has memories")?;
+    let wanted = app.memories[last].content.clone();
+    anyhow::ensure!(
+        listed.len() > 1 && listed.first() == Some(&app.selected_memory),
+        "the page opens on the first memory it lists"
+    );
     keys_pressed(&mut app, &backend, &[Key::Char('/')]).await;
     assert_eq!(app.mode, Mode::Filter);
     assert_eq!(app.filter_subject(), "memories");
@@ -178,6 +178,98 @@ async fn find_on_the_memory_page_selects_a_memory() -> anyhow::Result<()> {
         app.selected_memory().map(|m| m.content.as_str()),
         Some(wanted.as_str()),
         "the memory that was found is the one selected"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn tab_on_the_memory_page_lists_the_next_kind_and_keeps_the_keys_within_it(
+) -> anyhow::Result<()> {
+    use antumbra_core::MemoryNetwork;
+    let (_store, backend, mut app) = console().await?;
+    keys_pressed(&mut app, &backend, &[Key::Char('2')]).await;
+    assert_eq!(app.memory_kind, None, "it opens on every kind");
+    let all = app.listed_memories().len();
+    anyhow::ensure!(all == app.memories.len() && all > 3);
+
+    // Tab: the facts alone. The selection is one of them.
+    keys_pressed(&mut app, &backend, &[Key::Tab]).await;
+    assert_eq!(app.memory_kind, Some(MemoryNetwork::World));
+    let world = app.listed_memories();
+    assert!(!world.is_empty() && world.len() < all);
+    assert!(world
+        .iter()
+        .all(|&i| app.memories[i].network == MemoryNetwork::World));
+    assert!(world.contains(&app.selected_memory));
+
+    // The keys stay within the kind: past the last is the first again.
+    for _ in 0..world.len() {
+        keys_pressed(&mut app, &backend, &[Key::Down]).await;
+        assert!(world.contains(&app.selected_memory));
+    }
+    keys_pressed(&mut app, &backend, &[Key::End]).await;
+    assert_eq!(Some(&app.selected_memory), world.last());
+
+    // So does find: a memory of another kind is not found.
+    let bank = app
+        .memories
+        .iter()
+        .find(|m| m.network == MemoryNetwork::Bank)
+        .context("the demo has an experience")?
+        .content
+        .clone();
+    keys_pressed(&mut app, &backend, &[Key::Char('/')]).await;
+    typed(&mut app, &backend, &bank).await;
+    assert!(app.filtered().is_empty(), "an experience is not a fact");
+    keys_pressed(&mut app, &backend, &[Key::Esc]).await;
+
+    // Three more Tabs come round to every kind, the selection kept.
+    let kept = app.selected_memory;
+    keys_pressed(&mut app, &backend, &[Key::Tab]).await;
+    assert_eq!(app.memory_kind, Some(MemoryNetwork::Bank));
+    assert_ne!(app.selected_memory, kept, "a fact is not an experience");
+    keys_pressed(&mut app, &backend, &[Key::Tab, Key::Tab]).await;
+    assert_eq!(app.memory_kind, None);
+    Ok(())
+}
+
+#[tokio::test]
+async fn l_swaps_the_memory_list_for_the_graph_and_back() -> anyhow::Result<()> {
+    let (_store, backend, mut app) = console().await?;
+    keys_pressed(&mut app, &backend, &[Key::Char('2'), Key::Tab]).await;
+    anyhow::ensure!(app.memory_kind.is_some(), "a kind is chosen");
+    keys_pressed(&mut app, &backend, &[Key::Char('l')]).await;
+    assert!(app.memory_graph);
+    assert_eq!(app.memory_kind, None, "the graph draws every kind");
+    assert!(said(&app)?.1.contains("graph"));
+    // Tab has no list to move along while the graph is shown.
+    keys_pressed(&mut app, &backend, &[Key::Tab]).await;
+    assert_eq!(app.memory_kind, None);
+    keys_pressed(&mut app, &backend, &[Key::Char('l')]).await;
+    assert!(!app.memory_graph);
+    assert!(said(&app)?.1.contains("list"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn l_on_the_population_page_reaches_the_graph_and_comes_back() -> anyhow::Result<()> {
+    use crate::app::LayoutMode;
+    let (_store, backend, mut app) = console().await?;
+    assert_eq!(app.layout, LayoutMode::List, "it opens on the list");
+    let mut seen = vec![app.layout];
+    for _ in 0..4 {
+        keys_pressed(&mut app, &backend, &[Key::Char('l')]).await;
+        seen.push(app.layout);
+    }
+    assert_eq!(
+        seen,
+        vec![
+            LayoutMode::List,
+            LayoutMode::Dashboard,
+            LayoutMode::Graph,
+            LayoutMode::Table,
+            LayoutMode::List,
+        ]
     );
     Ok(())
 }

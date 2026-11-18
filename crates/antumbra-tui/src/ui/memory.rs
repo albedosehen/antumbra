@@ -7,11 +7,11 @@
 use std::collections::HashMap;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::canvas::{Canvas, Line as CanvasLine};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::{Cell, Paragraph, Row, Wrap};
 use ratatui::Frame;
 
 use antumbra_core::{scope_of_evidence, EdgeType, GitProvenance, MemoryNetwork, Scope};
@@ -20,7 +20,8 @@ use crate::app::App;
 use crate::theme::{Theme, Tone};
 use crate::words;
 
-use super::{clip, gauge_row, heading, kv, panel, state_row};
+use super::lists::{self, Grid};
+use super::{clip, gauge_row, gauge_spans, heading, kv, panel, state_row};
 
 /// The three networks and where their clusters anchor on the canvas.
 const ANCHORS: [(MemoryNetwork, (f64, f64)); 3] = [
@@ -40,11 +41,112 @@ const MAX_GRAPH_NODES_PER_NETWORK: usize = 48;
 /// edges joining drawn nodes paint anyway).
 const MAX_GRAPH_EDGES: usize = 256;
 
+/// The Memory page: the list of memories, or the graph of the kinds and
+/// their links (`l` swaps them), beside the detail of the one selected.
 pub(super) fn page(f: &mut Frame, app: &App, area: Rect) {
-    let cols =
-        Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)]).split(area);
-    graph(f, app, cols[0]);
-    detail(f, app, cols[1]);
+    let [left, right] = super::list_columns(area);
+    if app.memory_graph {
+        graph(f, app, left);
+    } else {
+        list(f, app, left);
+    }
+    detail(f, app, right);
+}
+
+/// A kind of memory, as the list's title names it.
+fn kind_name(kind: Option<MemoryNetwork>) -> &'static str {
+    match kind {
+        None => "All",
+        Some(MemoryNetwork::World) => "World",
+        Some(MemoryNetwork::Bank) => "Bank",
+        Some(MemoryNetwork::Opinion) => "Opinion",
+    }
+}
+
+/// The memories of the kind in front, strongest first within each kind: what
+/// each says, its kind, and how strongly it stands. Its title names every
+/// kind with its count and marks the one in front. Every memory is reached
+/// here, whatever their number; only the rows in view are built.
+fn list(f: &mut Frame, app: &App, area: Rect) {
+    let t = app.theme();
+    let kinds: Vec<(&str, usize)> = App::MEMORY_KINDS
+        .iter()
+        .map(|kind| (kind_name(*kind), app.memory_count(*kind)))
+        .collect();
+    let front = App::MEMORY_KINDS
+        .iter()
+        .position(|kind| *kind == app.memory_kind)
+        .unwrap_or(0);
+    let block = lists::segments(&t, &kinds, front);
+    let listed = app.listed_memories();
+    if listed.is_empty() {
+        // Every token reads its own workspace's memories, so none listed is
+        // none stored.
+        let why = if app.memories.is_empty() {
+            "No memories yet: an agent stores one when it learns something worth keeping. Press c for how to connect one."
+        } else {
+            "No memories of this kind yet."
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(why, Style::default().fg(t.ink3))))
+                .block(block)
+                .wrap(Wrap { trim: true }),
+            area,
+        );
+        return;
+    }
+    let selected = listed
+        .iter()
+        .position(|&i| i == app.selected_memory)
+        .unwrap_or(0);
+    let (first, last, at) = lists::window(area, listed.len(), selected);
+    // The kind is in the title when one is chosen, and is the first column
+    // to go when it is narrow.
+    let kinds_shown = app.memory_kind.is_none() && area.width >= 60;
+    let rows: Vec<Row> = listed[first..last]
+        .iter()
+        .map(|&i| {
+            let m = &app.memories[i];
+            let strength = app.strength_of(m);
+            // One line a memory: its line breaks read as spaces.
+            let says = m.content.split_whitespace().collect::<Vec<_>>().join(" ");
+            let mut cells = vec![Cell::from(Span::styled(says, Style::default().fg(t.ink)))];
+            if kinds_shown {
+                cells.push(Cell::from(Span::styled(
+                    m.network.as_str(),
+                    Style::default().fg(t.ink2),
+                )));
+            }
+            let mut meter = gauge_spans(&t, strength, 6, t.accent);
+            meter.push(Span::styled(
+                format!(" {strength:.2}"),
+                Style::default().fg(t.ink),
+            ));
+            cells.push(Cell::from(Line::from(meter)));
+            Row::new(cells)
+        })
+        .collect();
+    let (names, widths): (&[&str], &[Constraint]) = if kinds_shown {
+        (
+            &["MEMORY", "KIND", "STRENGTH"],
+            &[
+                Constraint::Min(20),
+                Constraint::Length(8),
+                Constraint::Length(11),
+            ],
+        )
+    } else {
+        (
+            &["MEMORY", "STRENGTH"],
+            &[Constraint::Min(16), Constraint::Length(11)],
+        )
+    };
+    let grid = Grid {
+        header: lists::heading(&t, names),
+        rows,
+        widths,
+    };
+    lists::table(f, &t, area, block, grid, Some(at));
 }
 
 /// Color an edge by its kind. A contradiction is the one that says something
@@ -233,17 +335,8 @@ fn detail(f: &mut Frame, app: &App, area: Rect) {
     );
     let inner = block.inner(area);
     f.render_widget(block, area);
+    // With no memory there is nothing to show beside the list, which says so.
     let Some(m) = app.selected_memory() else {
-        // Every token reads its own workspace's memories, so none listed is
-        // none stored.
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "No memories yet: an agent stores one when it learns something worth keeping. Press c for how to connect one.",
-                Style::default().fg(t.ink3),
-            )))
-            .wrap(Wrap { trim: true }),
-            inner,
-        );
         return;
     };
     let w = inner.width.saturating_sub(1) as usize;

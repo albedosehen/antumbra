@@ -6,9 +6,9 @@
 //! buffer, then idle to `None` when done, so the loop only spends the extra
 //! frames while one is running.
 
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 
-use crate::ui::frame_rows;
+use crate::ui::{frame_rows, list_columns};
 use tachyonfx::{fx, Effect, EffectTimer, Interpolation};
 
 use crate::theme::Theme;
@@ -37,8 +37,7 @@ fn body(frame: Rect) -> Rect {
 /// same split [`crate::ui::render`] uses, so the effect lands on the panel that
 /// actually changed.
 pub fn detail_area(frame: Rect) -> Rect {
-    Layout::horizontal([Constraint::Percentage(64), Constraint::Percentage(36)]).split(body(frame))
-        [1]
+    list_columns(body(frame))[1]
 }
 
 /// Resolve a fixed [`Scope`] to the rectangle it animates within `frame`.

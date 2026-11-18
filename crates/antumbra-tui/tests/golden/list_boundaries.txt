@@ -1,0 +1,36 @@
+ ◆◆◆ Antumbra   http://127.0.0.1:8081 · operator                                                                 ● live
+  1 Population  ·  2 Memory  ·  3 Training  ·  4 Evaluations  ·  5 Agent
+ Boundaries: where an expert was found to be wrong. One in force keeps such tasks away from it.
+╭  Experts 3 │ Candidates 2 │ Boundaries 2  ─────────────────────────╮╭ Boundary ──────────────────────────────────────╮
+│  BOUNDARY                                 WHERE          STATUS    ││run `npm install`                               │
+│▸ run `npm install`                        runtime        ● in force││status     ● in force · routing avoids it       │
+│  Run the test suite before calling a chan code           ○ recorded││decided by runtime                              │
+│                                                                    ││applies to project                              │
+│                                                                    ││confidence █████████▋── 0.80                    │
+│                                                                    ││wrong when {"runtime":"deno"}                   │
+│                                                                    ││right when {"runtime":"node"}                   │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+│                                                                    ││                                                │
+╰────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
+
+ ↑↓  move   enter  details   tab  next list   /  find   x  delete   1-5  pages   :  commands   ?  help   q  quit

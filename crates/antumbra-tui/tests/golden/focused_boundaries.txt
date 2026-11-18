@@ -1,31 +1,31 @@
-╭ Boundaries · 1 ─────────────────────────╮
-│▸ ● run `npm install`                    │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-╰─────────────────────────────────────────╯
-╭ Boundary ───────────────────────────────╮
-│run `npm install`                        │
-│status     ● in force · routing avoids it│
-│decided by runtime                       │
-│applies to project                       │
-│confidence █████████▋── 0.80             │
-│wrong when {"runtime":"deno"}            │
-│right when {"runtime":"node"}            │
-╰─────────────────────────────────────────╯
+╭ Boundary ──────────────────────────────────────╮
+│run `npm install`                               │
+│status     ● in force · routing avoids it       │
+│decided by runtime                              │
+│applies to project                              │
+│confidence █████████▋── 0.80                    │
+│wrong when {"runtime":"deno"}                   │
+│right when {"runtime":"node"}                   │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+│                                                │
+╰────────────────────────────────────────────────╯
