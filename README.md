@@ -109,12 +109,12 @@ New here? Install the CLI from a release (the command names a tag rather than `l
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.1/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.2/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.4.1/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.4.2/antumbra-cli-installer.ps1 | iex
 ```
 
 ```bash
@@ -132,12 +132,12 @@ Each binary ships a one-line installer that pulls the right prebuilt build for y
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.1/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.2/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.4.1/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.4.2/antumbra-cli-installer.ps1 | iex
 ```
 
 The MCP server (`antumbra-mcp`) installs the same way, with `antumbra-mcp` in place of `antumbra-cli` in the URL; `antumbra setup local` runs it in Docker instead, so most people never install it by hand. Windows `.msi` packages, per-OS archives, and a `.sha256` beside each are attached to every [release](https://github.com/albedosehen/antumbra/releases); [docs/getting-started.md](docs/getting-started.md) shows the download-verify-unpack form for a machine that should check the archive itself before anything runs.
