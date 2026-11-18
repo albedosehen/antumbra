@@ -174,6 +174,7 @@ fn demo_app() -> App {
         palette: Palette::default(),
         filter: String::new(),
         filter_selected: 0,
+        filter_hits: Vec::new(),
         events: Vec::new(),
         events_scroll: 0,
         detail_scroll: 0,

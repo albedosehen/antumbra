@@ -235,6 +235,10 @@ pub struct App {
     pub filter: String,
     /// The highlighted match within the filter results.
     pub filter_selected: usize,
+    /// The filter's matches for the query as typed, best first: each item's
+    /// place in its list and the label shown. Worked out when the query or
+    /// the list changes, and only read while drawing.
+    pub filter_hits: Vec<(usize, String)>,
     /// The live event stream (store changes), newest first.
     pub events: Vec<Event>,
     /// Scroll position within the events overlay.
@@ -347,6 +351,7 @@ impl App {
             palette: Palette::default(),
             filter: String::new(),
             filter_selected: 0,
+            filter_hits: Vec::new(),
             events: Vec::new(),
             events_scroll: 0,
             detail_scroll: 0,
@@ -477,6 +482,11 @@ impl App {
         }
         if !self.loop_heads.is_empty() && self.selected_loop >= self.loop_heads.len() {
             self.selected_loop = self.loop_heads.len() - 1;
+        }
+        // A list that changed under an open filter is searched again, so a
+        // match never points at a row that has moved.
+        if self.mode == Mode::Filter {
+            self.refilter();
         }
         self.record_events();
         self.since_reload_ms = 0.0;

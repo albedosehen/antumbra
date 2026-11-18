@@ -152,36 +152,45 @@ pub const COMMANDS: &[Command] = &[
 /// match and few gaps between matched characters. `None` if `query` is not a
 /// subsequence of `label`; an empty query matches everything at score 0.
 pub fn fuzzy_score(label: &str, query: &str) -> Option<i32> {
-    if query.is_empty() {
+    score_chars(label, &lowered(query))
+}
+
+/// A query as [`score_chars`] takes it: its characters, lowercased. Made once
+/// for a query that is then scored against many labels.
+pub fn lowered(query: &str) -> Vec<char> {
+    query.chars().flat_map(char::to_lowercase).collect()
+}
+
+/// [`fuzzy_score`] for a query already [`lowered`]. It reads `label` a
+/// character at a time and stops at the last character of the query, copying
+/// nothing, so scoring a query against every memory of a large store costs
+/// no more than reading them.
+pub fn score_chars(label: &str, needle: &[char]) -> Option<i32> {
+    let Some(mut want) = needle.first().copied() else {
         return Some(0);
-    }
-    let haystack: Vec<char> = label.to_lowercase().chars().collect();
-    let mut needle = query.to_lowercase().chars().collect::<Vec<_>>().into_iter();
-    let mut want = needle.next();
-    let mut first: Option<i32> = None;
+    };
+    let mut matched = 0usize;
+    let mut first = 0i32;
     let mut prev: Option<usize> = None;
     let mut gaps = 0i32;
-    for (i, &c) in haystack.iter().enumerate() {
-        match want {
-            Some(qc) if qc == c => {
-                if first.is_none() {
-                    first = Some(i as i32);
-                }
-                if let Some(p) = prev {
-                    if i != p + 1 {
-                        gaps += 1;
-                    }
-                }
-                prev = Some(i);
-                want = needle.next();
-            }
-            _ => {}
+    for (i, c) in label.chars().flat_map(char::to_lowercase).enumerate() {
+        if c != want {
+            continue;
+        }
+        if matched == 0 {
+            first = i32::try_from(i).unwrap_or(i32::MAX);
+        }
+        if prev.is_some_and(|p| i != p + 1) {
+            gaps += 1;
+        }
+        prev = Some(i);
+        matched += 1;
+        match needle.get(matched) {
+            Some(&next) => want = next,
+            None => return Some(first.saturating_add(gaps * 3)),
         }
     }
-    match want {
-        Some(_) => None,
-        None => Some(first.unwrap_or(0) + gaps * 3),
-    }
+    None
 }
 
 /// The commands matching `query`, best match first; ties keep registry order.
@@ -207,6 +216,35 @@ mod tests {
         assert!(fuzzy_score("reload", "dler").is_none());
         // An empty query matches everything.
         assert_eq!(fuzzy_score("anything", ""), Some(0));
+        Ok(())
+    }
+
+    #[test]
+    fn a_lowered_query_scores_as_the_query_does() -> anyhow::Result<()> {
+        let labels = [
+            "Theme: change to the next",
+            "prefer deno over node for new scripts",
+            "İstanbul ĞÜŞ: letters whose lowercase is longer than they are",
+            "",
+        ];
+        for label in labels {
+            for query in ["", "the", "DENO", "node", "zzz", "ist", "ğüş"] {
+                assert_eq!(
+                    score_chars(label, &lowered(query)),
+                    fuzzy_score(label, query),
+                    "`{query}` in `{label}`"
+                );
+            }
+        }
+        // It stops at the query's last character: what follows is not read
+        // for a match, and cannot change the score.
+        let needle = lowered("deno");
+        assert_eq!(
+            score_chars("deno", &needle),
+            score_chars(&format!("deno{}", " and more".repeat(1000)), &needle)
+        );
+        assert_eq!(score_chars("prefer deno", &needle), Some(7));
+        assert_eq!(score_chars("d e n o", &needle), Some(9), "three gaps");
         Ok(())
     }
 

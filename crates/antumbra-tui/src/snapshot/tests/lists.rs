@@ -294,6 +294,109 @@ fn a_narrow_terminal_drops_a_lesser_column_before_it_cuts_a_name() -> anyhow::Re
     Ok(())
 }
 
+/// A store the size of a real one: `count` memories, each a few lines long,
+/// one of them, deep in the list and deep in its own text, saying `needle`.
+fn large_store(count: usize, at: usize, needle: &str) -> Vec<Memory> {
+    let now = Utc::now();
+    (0..count)
+        .map(|i| {
+            let mut says = format!(
+                "Session note {i}: the deploy of service {i} finished.\n\
+                 It took {} minutes, and nothing in it needed a second look.\n\
+                 The owner was told, and the ticket for it was closed.",
+                i % 17
+            );
+            if i == at {
+                says.push_str("\nAfterwards: ");
+                says.push_str(needle);
+            }
+            Memory::new(
+                format!("memory:large-{i}"),
+                "ws:demo",
+                MemoryNetwork::World,
+                says,
+                0.7,
+                now,
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn find_on_a_large_store_keeps_a_page_of_matches_and_finds_one_deep_in_it() -> anyhow::Result<()> {
+    let mut app = demo_app();
+    app.memories = large_store(5_000, 4_321, "the zebra crossing protocol");
+    app.edges.clear();
+    app.set_page(Page::Memory);
+    app.select_first();
+
+    // With nothing typed everything matches, and a page of it is kept.
+    app.open_filter();
+    assert_eq!(app.filtered().len(), App::FILTER_KEPT);
+    for (_, label) in app.filtered() {
+        assert!(!label.contains('\n'), "one line a match: `{label}`");
+        assert!(label.chars().count() <= 96, "cut to a row: `{label}`");
+    }
+
+    // A phrase at the end of one memory's text, four thousand down the list.
+    for c in "zebra crossing".chars() {
+        app.filter_input(c);
+    }
+    let Some((place, _)) = app.filtered().first().cloned() else {
+        anyhow::bail!("nothing matched");
+    };
+    assert_eq!(
+        place, 4_321,
+        "the one memory that says it is the best match"
+    );
+    app.filter_apply();
+    assert_eq!(app.selected_memory, 4_321);
+    assert_eq!(app.mode, Mode::Normal);
+    // And it is in view and marked, among five thousand.
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
+    assert!(marked(&text)[0].contains("Session note 4321"), "{text}");
+    Ok(())
+}
+
+#[test]
+fn the_filter_is_worked_out_when_the_query_or_the_list_changes_and_only_read_while_drawing(
+) -> anyhow::Result<()> {
+    let mut app = demo_app();
+    app.memories = large_store(400, 123, "the zebra crossing protocol");
+    app.edges.clear();
+    app.set_page(Page::Memory);
+    app.open_filter();
+    for c in "zebra".chars() {
+        app.filter_input(c);
+    }
+    let found: Vec<(usize, String)> = app.filtered().to_vec();
+    assert_eq!(found.first().map(|(place, _)| *place), Some(123));
+
+    // Drawing reads what was worked out: frames drawn after the list is
+    // emptied behind its back still show it, since nothing searched again.
+    app.memories.clear();
+    let text = to_text(&render(&mut app, 120, 36, 1600.0)?);
+    assert_eq!(app.filtered(), found.as_slice());
+    assert!(text.contains("Session note 123"), "{text}");
+
+    // A new read of the server is a change of the list, and is searched: here
+    // it brings the memory back at another place.
+    let mut snapshot = crate::app::Snapshot {
+        memories: large_store(400, 7, "the zebra crossing protocol"),
+        operator: true,
+        ..crate::app::Snapshot::default()
+    };
+    snapshot.experts = app.experts.clone();
+    app.apply_snapshot(snapshot);
+    assert_eq!(app.filtered().first().map(|(place, _)| *place), Some(7));
+    // So is a keystroke: with the query rubbed out, everything matches again.
+    for _ in 0.."zebra".len() {
+        app.filter_backspace();
+    }
+    assert_eq!(app.filtered().len(), App::FILTER_KEPT);
+    Ok(())
+}
+
 #[test]
 fn the_memory_graph_is_one_key_from_the_list() -> anyhow::Result<()> {
     let mut app = demo_app();
