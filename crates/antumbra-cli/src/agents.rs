@@ -24,6 +24,7 @@ pub mod bridge;
 pub mod codex;
 pub mod copilot;
 pub mod gemini;
+pub mod goose;
 pub mod hook;
 
 /// A coding agent `antumbra setup` connects besides Claude Code.
@@ -35,11 +36,13 @@ pub enum Agent {
     Codex,
     /// GitHub Copilot CLI, and Copilot in VS Code, which reads the same files.
     Copilot,
+    /// goose.
+    Goose,
 }
 
 impl Agent {
     /// Every agent, in the order setup connects them.
-    pub const ALL: [Agent; 3] = [Agent::Gemini, Agent::Codex, Agent::Copilot];
+    pub const ALL: [Agent; 4] = [Agent::Gemini, Agent::Codex, Agent::Copilot, Agent::Goose];
 
     /// The name it is chosen by (`--agent`), recorded under, and named to the
     /// server with.
@@ -48,6 +51,7 @@ impl Agent {
             Agent::Gemini => "gemini",
             Agent::Codex => "codex",
             Agent::Copilot => "copilot",
+            Agent::Goose => "goose",
         }
     }
 
@@ -57,6 +61,7 @@ impl Agent {
             Agent::Gemini => "Gemini CLI",
             Agent::Codex => "Codex",
             Agent::Copilot => "Copilot CLI",
+            Agent::Goose => "goose",
         }
     }
 
@@ -66,6 +71,7 @@ impl Agent {
             Agent::Gemini => "gemini",
             Agent::Codex => "codex",
             Agent::Copilot => "copilot",
+            Agent::Goose => "goose",
         }
     }
 
@@ -257,6 +263,7 @@ pub fn present(agent: Agent, ground: &Ground<'_>) -> bool {
             Agent::Gemini => gemini::home(ground).is_dir(),
             Agent::Codex => codex::home(ground).is_dir(),
             Agent::Copilot => copilot::home(ground).is_dir(),
+            Agent::Goose => goose::config_dir(ground).is_dir(),
         }
 }
 
@@ -267,6 +274,7 @@ pub fn connect(agent: Agent, ground: &Ground<'_>, report: &dyn Report) -> anyhow
         Agent::Gemini => gemini::connect(ground, report),
         Agent::Codex => codex::connect(ground, report),
         Agent::Copilot => copilot::connect(ground, report),
+        Agent::Goose => goose::connect(ground, report),
     }
 }
 
@@ -276,6 +284,7 @@ pub fn check(agent: Agent, ground: &Ground<'_>) -> Vec<Finding> {
         Agent::Gemini => gemini::check(ground),
         Agent::Codex => codex::check(ground),
         Agent::Copilot => copilot::check(ground),
+        Agent::Goose => goose::check(ground),
     }
 }
 

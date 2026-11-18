@@ -83,7 +83,7 @@ pub struct Common {
     /// Leave Claude Code alone: no hooks, no MCP server, no settings.
     #[arg(long)]
     pub no_claude: bool,
-    /// The agents to connect, by name: claude, gemini, codex, copilot, or all. Give it more
+    /// The agents to connect, by name: claude, gemini, codex, copilot, goose, or all. Give it more
     /// than once, or with commas. Without it: Claude Code, and every other
     /// agent found on this machine.
     #[arg(long = "agent", value_delimiter = ',', value_name = "NAME")]
@@ -2200,7 +2200,10 @@ mod tests {
         };
         let said = problem.to_string();
         assert!(said.contains("--agent cursor: no such agent"), "{said}");
-        assert!(said.contains("claude, gemini, codex, copilot"), "{said}");
+        assert!(
+            said.contains("claude, gemini, codex, copilot, goose"),
+            "{said}"
+        );
         Ok(())
     }
 

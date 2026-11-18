@@ -308,6 +308,8 @@ fn codex_is_given_a_smaller_bootstrap_and_gemini_the_whole_one() {
             .map(|(_, value)| value)
     };
     assert_eq!(limit(Agent::Codex).as_deref(), Some("7000"));
+    // goose is handed the bootstrap again with every turn.
+    assert_eq!(limit(Agent::Goose).as_deref(), Some("4000"));
     assert_eq!(limit(Agent::Gemini), None);
 }
 
@@ -411,5 +413,39 @@ fn the_end_of_a_long_log_is_all_that_is_read() -> anyhow::Result<()> {
     assert_eq!(last_in_events(&read).as_deref(), Some("the last answer"));
     // No log is no answer, not an error.
     assert_eq!(tail(&scratch.path().join("gone.jsonl")), None);
+    Ok(())
+}
+
+#[test]
+fn goose_is_heard_in_its_own_names_and_reads_only_a_turns_end() -> anyhow::Result<()> {
+    // What goose 1.60 hands its hooks, as it was recorded from one.
+    let prompt = json!({ "event": "UserPromptSubmit", "session_id": "20261118_1",
+        "matcher_context": "Say hello.", "message": "Say hello.",
+        "working_dir": "/home/me/work" });
+    let heard = heard(Agent::Goose, Event::Prompt, &prompt);
+    assert_eq!(heard["hook_event_name"], "UserPromptSubmit");
+    assert_eq!(heard["prompt"], "Say hello.");
+    assert_eq!(heard["cwd"], "/home/me/work");
+    assert_eq!(heard["session_id"], "20261118_1");
+    let stop = json!({ "event": "Stop", "session_id": "20261118_1", "matcher_context": null,
+        "last_assistant_message": "It builds with bun.", "working_dir": "/home/me/work" });
+    let heard = super::heard(Agent::Goose, Event::Stop, &stop);
+    assert_eq!(heard["last_assistant_message"], "It builds with bun.");
+
+    // goose drops what a session-start or prompt hook prints: nothing is
+    // printed for them, and the context goes to the file it keeps in mind.
+    let context = Said::Context("what is remembered".into());
+    assert_eq!(answer(Agent::Goose, Event::SessionStart, &context), None);
+    assert_eq!(answer(Agent::Goose, Event::Prompt, &context), None);
+    let blocked = answer(
+        Agent::Goose,
+        Event::Stop,
+        &Said::Reminder("store what was learned".into()),
+    )
+    .ok_or_else(|| anyhow::anyhow!("a turn's end was not answered"))?;
+    assert_eq!(
+        serde_json::from_str::<Value>(&blocked)?,
+        json!({ "decision": "block", "reason": "store what was learned" })
+    );
     Ok(())
 }
