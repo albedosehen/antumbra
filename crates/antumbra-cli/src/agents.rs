@@ -5,14 +5,257 @@
 //! `env`. No other agent has all three, and each has its own config file and
 //! its own shape for a hook's input and answer. What they share is here: where
 //! the server is and how to reach it, as `antumbra setup` left it
-//! ([`Reach`]), and the bridge that carries an agent's MCP connection there
-//! ([`bridge`]).
+//! ([`Reach`]); the bridge that carries an agent's MCP connection there
+//! ([`bridge`]); and the command that answers an agent's hook with the hook
+//! scripts Claude Code runs ([`hook`]).
+//!
+//! What differs is one module an agent: where its config lives, and the files
+//! Antumbra writes there. Each writes only files that are Antumbra's own, so
+//! connecting an agent again replaces them whole, and nothing a person wrote
+//! is edited. `antumbra setup` connects every agent it finds
+//! ([`connect`]), and `antumbra setup check` reads back what it wrote
+//! ([`check`]).
 
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
 pub mod bridge;
+pub mod gemini;
+pub mod hook;
+
+/// A coding agent `antumbra setup` connects besides Claude Code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Agent {
+    /// Gemini CLI.
+    Gemini,
+}
+
+impl Agent {
+    /// Every agent, in the order setup connects them.
+    pub const ALL: [Agent; 1] = [Agent::Gemini];
+
+    /// The name it is chosen by (`--agent`), recorded under, and named to the
+    /// server with.
+    pub fn name(self) -> &'static str {
+        match self {
+            Agent::Gemini => "gemini",
+        }
+    }
+
+    /// What a person calls it.
+    pub fn title(self) -> &'static str {
+        match self {
+            Agent::Gemini => "Gemini CLI",
+        }
+    }
+
+    /// The program a person starts it with, which is how setup finds it.
+    pub fn program(self) -> &'static str {
+        match self {
+            Agent::Gemini => "gemini",
+        }
+    }
+
+    /// The agent `name` chooses, in any case.
+    pub fn named(name: &str) -> Option<Agent> {
+        Agent::ALL
+            .into_iter()
+            .find(|agent| agent.name().eq_ignore_ascii_case(name.trim()))
+    }
+}
+
+/// The shell an agent runs a hook's command in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shell {
+    /// `sh -c`, `bash -c`.
+    Posix,
+    /// `powershell -Command`, `pwsh -Command`.
+    PowerShell,
+}
+
+/// How something outside this process runs `antumbra`: by its name where that
+/// is on the PATH, which survives an upgrade that moves it, else by where it
+/// is now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Program {
+    Named,
+    At(PathBuf),
+}
+
+impl Program {
+    /// This program, given whether its name is on the PATH.
+    pub fn this(on_path: bool) -> Self {
+        if on_path {
+            return Program::Named;
+        }
+        match std::env::current_exe() {
+            Ok(path) => Program::At(path),
+            Err(_) => Program::Named,
+        }
+    }
+
+    /// For a config that takes a program apart from its arguments.
+    pub fn file(&self) -> String {
+        match self {
+            Program::Named => "antumbra".to_string(),
+            Program::At(path) => path.display().to_string(),
+        }
+    }
+
+    /// For a command line `shell` reads. A path is quoted, since it may hold
+    /// a space, and PowerShell runs a quoted path only after `&`.
+    pub fn line(&self, shell: Shell) -> String {
+        match (self, shell) {
+            (Program::Named, _) => "antumbra".to_string(),
+            (Program::At(path), Shell::Posix) => format!("\"{}\"", path.display()),
+            (Program::At(path), Shell::PowerShell) => format!("& \"{}\"", path.display()),
+        }
+    }
+}
+
+/// What connecting an agent, or checking one, stands on.
+pub struct Ground<'a> {
+    /// The user's home directory.
+    pub home: &'a Path,
+    /// How the agent runs `antumbra`.
+    pub antumbra: Program,
+    /// The value of an environment variable, or nothing: an agent's own
+    /// variable for where its config lives.
+    pub env: &'a dyn Fn(&str) -> Option<String>,
+}
+
+/// Where connecting an agent says what it did, as setup's other steps do.
+pub trait Report {
+    /// Whether this run changes nothing and only says what it would.
+    fn dry_run(&self) -> bool;
+    fn ok(&self, said: &str);
+    fn would(&self, said: &str);
+    fn info(&self, said: &str);
+}
+
+/// One thing `antumbra setup check` found about an agent's connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Finding {
+    /// What was found.
+    pub said: String,
+    /// What to do about it, when it is not as it should be.
+    pub fix: Option<String>,
+}
+
+impl Finding {
+    fn good(said: impl Into<String>) -> Self {
+        Finding {
+            said: said.into(),
+            fix: None,
+        }
+    }
+
+    fn bad(said: impl Into<String>, fix: impl Into<String>) -> Self {
+        Finding {
+            said: said.into(),
+            fix: Some(fix.into()),
+        }
+    }
+}
+
+/// One file Antumbra keeps in an agent's config: where, relative to the
+/// directory the agent gives it, and its whole text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Kept {
+    pub path: &'static str,
+    pub text: String,
+}
+
+/// Write `files` under `dir`, each whole, and say so once. A file already
+/// holding its text is left as it is, so its time does not move.
+fn keep(dir: &Path, files: &[Kept], what: &str, report: &dyn Report) -> anyhow::Result<()> {
+    let differs = |file: &Kept| {
+        std::fs::read_to_string(dir.join(file.path))
+            .map(|have| have.replace("\r\n", "\n") != file.text)
+            .unwrap_or(true)
+    };
+    if !files.iter().any(differs) {
+        report.ok(&format!("{what} already in {}", dir.display()));
+        return Ok(());
+    }
+    if report.dry_run() {
+        report.would(&format!("write {what} to {}", dir.display()));
+        return Ok(());
+    }
+    for file in files {
+        let path = dir.join(file.path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, &file.text)?;
+    }
+    report.ok(&format!("{what} written to {}", dir.display()));
+    Ok(())
+}
+
+/// What `files` under `dir` are, against what this build writes: each one
+/// there and the same, or what to do about it.
+fn kept(dir: &Path, files: &[Kept], what: &str) -> Vec<Finding> {
+    let mut found = Vec::new();
+    let mut missing = Vec::new();
+    let mut changed = Vec::new();
+    for file in files {
+        match std::fs::read_to_string(dir.join(file.path)) {
+            Ok(have) if have.replace("\r\n", "\n") == file.text => {}
+            Ok(_) => changed.push(file.path),
+            Err(_) => missing.push(file.path),
+        }
+    }
+    if missing.is_empty() && changed.is_empty() {
+        found.push(Finding::good(format!("{what} in {}", dir.display())));
+    }
+    if !missing.is_empty() {
+        found.push(Finding::bad(
+            format!(
+                "{what}: {} missing from {}",
+                missing.join(", "),
+                dir.display()
+            ),
+            "run setup again to write it",
+        ));
+    }
+    if !changed.is_empty() {
+        found.push(Finding::bad(
+            format!(
+                "{what}: {} in {} differs from what this build writes",
+                changed.join(", "),
+                dir.display()
+            ),
+            "run setup again to write this build's",
+        ));
+    }
+    found
+}
+
+/// Whether `agent` is on this machine: its program is on the PATH (`found`
+/// says), or its config directory is there.
+pub fn present(agent: Agent, ground: &Ground<'_>, found: impl Fn(&str) -> bool) -> bool {
+    found(agent.program())
+        || match agent {
+            Agent::Gemini => gemini::home(ground).is_dir(),
+        }
+}
+
+/// Connect `agent`: write what it needs to reach the server through the
+/// bridge and to run its hooks through `antumbra hook`.
+pub fn connect(agent: Agent, ground: &Ground<'_>, report: &dyn Report) -> anyhow::Result<()> {
+    match agent {
+        Agent::Gemini => gemini::connect(ground, report),
+    }
+}
+
+/// What is there of `agent`'s connection, read back.
+pub fn check(agent: Agent, ground: &Ground<'_>) -> Vec<Finding> {
+    match agent {
+        Agent::Gemini => gemini::check(ground),
+    }
+}
 
 /// How a command an agent runs reaches the server: what `antumbra setup`
 /// recorded in `~/.antumbra/setup.json`, with the environment's `ANTUMBRA_*`

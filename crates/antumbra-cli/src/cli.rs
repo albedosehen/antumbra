@@ -229,7 +229,7 @@ pub enum McpAction {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Set Antumbra up for Claude Code in one command: on this machine
+    /// Set Antumbra up for your coding agents in one command: on this machine
     /// (`setup local`), against a hosted workspace (`setup hosted <url>`),
     /// or check what is there (`setup check`). With no mode, it asks.
     Setup {
@@ -242,6 +242,13 @@ pub enum Command {
         #[command(subcommand)]
         action: ClaudeAction,
     },
+    /// Answer one hook of a coding agent other than Claude Code, in that
+    /// agent's own shape, with the hook scripts Claude Code runs: what a
+    /// session opens with, what is recalled for a prompt, and what is kept
+    /// when a turn ends. `antumbra setup` writes the hooks that run it. It
+    /// never fails the agent: whatever goes wrong is said on standard error,
+    /// and nothing is printed.
+    Hook(crate::agents::hook::HookArgs),
     /// The server's MCP endpoint for an agent that runs a command: Gemini
     /// CLI, Codex, OpenCode, goose and Copilot CLI are wired to it by
     /// `antumbra setup`.

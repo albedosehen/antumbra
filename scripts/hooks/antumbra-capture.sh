@@ -156,6 +156,16 @@ fi
 
 reminder="Before stopping, deposit any non-obvious observations from this phase into Antumbra so they are not lost. Call the store_memory MCP tool (workspace \"${workspace}\") and pick the network: world (facts), bank (experiences/incidents), opinion (judgments/preferences). Save: project context, conventions, bug/incident history, user feedback/corrections, decisions, deadlines. Skip ephemeral chatter. Where a result was verified (a test passed, a command worked), note it. When the user states or corrects how an agent should act (a convention, a preference, a correction), also call record_behavior with rule (one sentence), must (regular expressions every answer that follows it matches), examples (at least four {task, answer} objects that follow it) and violations (plain-string answers that break it): behaviors are what the user's own expert learns.${git_note} If nothing is worth saving this turn, just stop again -- the next stop proceeds automatically."
 
+# The short form, for an agent that shows the reminder to its user as well as
+# to its model (Gemini CLI prints it as a warning): what to do, without the
+# paragraph on how, which the MCP connection's instructions already gave.
+# Asked for with ANTUMBRA_CAPTURE_REMINDER=brief, which `antumbra hook` sets.
+if [ "${ANTUMBRA_CAPTURE_REMINDER:-}" = "brief" ]; then
+  brief_note=""
+  [ -n "$git_note" ] && brief_note=" For a memory about this code, pass provenance {repo: \"${repo}\", commit: \"${commit}\", branch: \"${branch}\"}."
+  reminder="Before stopping, store in Antumbra what this session learned that the code does not say: call store_memory, and record_behavior when the user stated or corrected how an agent should act.${brief_note} If nothing is worth saving, stop again: the next stop goes through."
+fi
+
 if [ "${ANTUMBRA_CAPTURE_NUDGE:-}" = "block" ]; then
   jq -nc --arg text "$reminder" '{decision:"block", reason:$text}'
 else

@@ -133,8 +133,10 @@ fi
 # features gated on them, and nothing tells it. `antumbra claude brief`
 # prints a few lines when that is so and nothing when it is not. No antumbra on
 # the path, or any failure: no lines. It runs while the calls are in flight.
+# Off with ANTUMBRA_BRIEF=0, which is how the hook is run for an agent the
+# brief is not about (`antumbra hook`).
 brief=""
-if command -v "$BIN" >/dev/null 2>&1; then
+if [ "${ANTUMBRA_BRIEF:-1}" != "0" ] && command -v "$BIN" >/dev/null 2>&1; then
   brief=$("$BIN" claude brief 2>/dev/null || true)
 fi
 

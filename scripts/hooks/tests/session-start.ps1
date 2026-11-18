@@ -235,6 +235,16 @@ Check 'keeps no rules' (-not (Test-Path $remembered))
 Check 'still answers' $ctx.Contains('first small')
 Remove-Item Env:ANTUMBRA_REMEMBER
 
+Write-Output 'the brief, turned off'
+Remove-Item -Force $remembered -ErrorAction SilentlyContinue
+$env:ANTUMBRA_BRIEF = '0'
+$ctx = Get-Context $small $stub $clone
+Start-Sleep -Seconds 2
+Check 'says nothing of the session''s mode' (-not $ctx.Contains('Sovereign mode'))
+Check 'keeps no rules' (-not (Test-Path $remembered))
+Check 'still answers' $ctx.Contains('first small')
+Remove-Item Env:ANTUMBRA_BRIEF
+
 Write-Output 'in a clone, turned off'
 Remove-Item -Force $marker -ErrorAction SilentlyContinue
 $env:ANTUMBRA_REANCHOR = '0'

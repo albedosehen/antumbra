@@ -168,6 +168,10 @@ async fn run() -> anyhow::Result<()> {
             // Blocking work (files, git, an HTTP surface): keep it off the runtime.
             tokio::task::spawn_blocking(move || claude::run::run(action)).await??;
         }
+        Command::Hook(args) => {
+            // A script, run and waited for.
+            tokio::task::spawn_blocking(move || agents::hook::run(&args)).await?;
+        }
         Command::Mcp { action } => {
             // Pipes and blocking HTTP for as long as the agent runs.
             tokio::task::spawn_blocking(move || match action {

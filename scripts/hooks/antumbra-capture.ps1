@@ -190,6 +190,16 @@ $reminder = "Before stopping, deposit any non-obvious observations from this pha
             $gitNote +
             " If nothing is worth saving this turn, just stop again -- the next stop proceeds automatically."
 
+# The short form, for an agent that shows the reminder to its user as well as
+# to its model (Gemini CLI prints it as a warning): what to do, without the
+# paragraph on how, which the MCP connection's instructions already gave.
+# Asked for with ANTUMBRA_CAPTURE_REMINDER=brief, which `antumbra hook` sets.
+if ($env:ANTUMBRA_CAPTURE_REMINDER -eq 'brief') {
+    $briefNote = ''
+    if ($gitNote) { $briefNote = " For a memory about this code, pass provenance {repo: `"$repo`", commit: `"$commit`", branch: `"$branch`"}." }
+    $reminder = "Before stopping, store in Antumbra what this session learned that the code does not say: call store_memory, and record_behavior when the user stated or corrected how an agent should act.$briefNote If nothing is worth saving, stop again: the next stop goes through."
+}
+
 $answer = if ($env:ANTUMBRA_CAPTURE_NUDGE -eq 'block') {
     @{ decision = 'block'; reason = $reminder }
 } else {

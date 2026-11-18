@@ -161,6 +161,14 @@ sleep 2
 check "keeps no rules" test ! -e "$remembered"
 check "still answers" grep -q 'first small' <<<"$ctx"
 
+echo "the brief, turned off"
+rm -f "$remembered"
+ctx=$(run_in "$work/clone" "$work/small.json" ANTUMBRA_REANCHOR=0 ANTUMBRA_BRIEF=0 | context)
+sleep 2
+check "says nothing of the session's mode" bash -c '! grep -q "Sovereign mode" <<<"$1"' _ "$ctx"
+check "keeps no rules" test ! -e "$remembered"
+check "still answers" grep -q 'first small' <<<"$ctx"
+
 echo "the rules, outside the mode they are for"
 ctx=$(run_in "$work/clone" "$work/small.json" ANTUMBRA_REANCHOR=0 ANTUMBRA_BIN=antumbra-is-not-installed | context)
 sleep 2

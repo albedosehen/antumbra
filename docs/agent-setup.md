@@ -2,13 +2,15 @@
 
 You are setting up Antumbra for the person you are working with. Antumbra gives their coding agent a memory that carries across sessions: it recalls what matters at the start of each session and with each prompt, and stores what was learned at the end. Setup is one command, `antumbra setup`, which you run on their behalf. This guide tells you what to check, what to ask, and how to confirm it worked.
 
+Setup connects Claude Code, and every other agent it knows that it finds on the machine (Gemini CLI). To connect only some, name them: `--agent gemini`, or `--agent claude,gemini`.
+
 Antumbra is before 1.0, so the steps can change between releases. If a command here fails in a way this guide does not describe, run `antumbra setup --help` and follow the CLI over this page.
 
 ## Rules
 
 - **Ask before installing anything system-wide** (Docker, ollama, Rust, jq). Say what it is for. Never install silently.
 - **Never print a token.** Do not echo it, paste it into the chat, or write it anywhere but the file setup writes (`~/.antumbra/token.txt`). Pass it with `--token-file`, never on a command line you show.
-- **Do not edit Claude Code's `settings.json` yourself.** Setup does it safely: it backs the file up, only adds, never rewrites what is already there, and refuses an edit that would change anything else.
+- **Do not edit Claude Code's `settings.json` yourself.** Setup does it safely: it backs the file up, only adds, never rewrites what is already there, and refuses an edit that would change anything else. For every other agent it writes only files of its own, and edits none of the person's.
 - **Re-running is safe.** Every step keeps what is already in place. When a step fails, its message says what to fix: fix it (or ask the person to), then run the same command again.
 - Pass `--yes` so setup does not wait on a question you cannot answer. Use `--dry-run` first if the person wants to see what will change.
 
@@ -111,15 +113,18 @@ Exit code 0 and `Everything is in place.` means done. Anything else is listed wi
 
 ## 5. Tell the person
 
-Claude Code loads hooks and MCP servers when a session starts, so **they need to start a new Claude Code session** (or restart it). The new session opens with what Antumbra remembers, and what they work on goes back in.
+An agent loads hooks and MCP servers when a session starts, so **they need to start a new session** in each agent setup connected (its last lines name them). The new session opens with what Antumbra remembers, and what they work on goes back in.
+
+Gemini CLI connects no MCP server in a folder the person has not trusted, and asks before an Antumbra tool runs. Both are theirs to decide; `docs/integration.md` has the policy file that allows the tools.
 
 ## What setup changed
 
 Say this if they ask:
 
-- `~/.antumbra/`: `token.txt` (only they can read it), `hooks/` (the scripts Claude Code runs), `setup.json` (what was set up).
+- `~/.antumbra/`: `token.txt` (only they can read it), `hooks/` (the scripts the agents' hooks run), `setup.json` (what was set up, and for which agents).
 - `~/.claude/settings.json`: hooks on SessionStart, UserPromptSubmit, Stop and PreCompact; `ANTUMBRA_URL`, `ANTUMBRA_WORKSPACE_ID` and (when absent) `ANTUMBRA_HOST_ID` under `env`; `autoMemoryEnabled: false` when the file did not say (pass `--keep-auto-memory` to skip). A backup sits beside it, `settings.json.antumbra-backup-<time>`.
 - Claude Code's MCP servers: `antumbra`, user scope, reading the token from its file on each connection.
+- Gemini CLI, when it is connected: the extension `~/.gemini/extensions/antumbra` (a manifest and `hooks/hooks.json`). Its `settings.json` is not touched.
 - The server: this machine is listed among their devices under its `ANTUMBRA_HOST_ID`, as a memory node. Each session start names it again, which keeps "last seen" current. If they want a particular name, set `ANTUMBRA_HOST_ID` in the settings' `env` before running setup, since setup keeps a name that is already there.
 - Local only: the stack's compose file and `.env` in `~/.antumbra/stack/docker` (or `docker/.env` in the clone, when setup ran from one), the containers `antumbra-surrealdb` and `antumbra-mcp` (they restart with Docker), and the database in `~/.antumbra/surrealdb`.
 
@@ -130,7 +135,7 @@ claude mcp remove antumbra --scope user
 docker compose -f ~/.antumbra/stack/docker/docker-compose.yml down   # local only (from a clone: docker/docker-compose.yml)
 ```
 
-Then restore the settings backup over `~/.claude/settings.json` and delete `~/.antumbra`.
+Then restore the settings backup over `~/.claude/settings.json` and delete `~/.antumbra`. For Gemini CLI: `gemini extensions uninstall antumbra`, or delete `~/.gemini/extensions/antumbra`.
 
 ## When something goes wrong
 
