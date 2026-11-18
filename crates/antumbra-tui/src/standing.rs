@@ -46,6 +46,11 @@ pub struct Scope {
     pub accepted: usize,
     /// Behaviors proposed, waiting to be accepted.
     pub proposed: usize,
+    /// Accepted behaviors with no room in the set: the expert is taught at
+    /// most the workspace's `behaviors_per_expert`.
+    pub waiting: usize,
+    /// Behaviors the base model already follows, left out of the set.
+    pub followed: usize,
     pub state: Standing,
     /// When the scope's expert was last trained, where the console may read
     /// the trainings (an operator's token).
@@ -59,13 +64,16 @@ pub struct Scope {
 /// Every scope there is something to say about, user by user, each user's
 /// `everywhere` first. `accept_after_hours` is the workspace's knob: how long
 /// a proposed behavior waits before the server accepts it, 0 for never.
+/// `behaviors_per_expert` is the most one expert is taught.
 pub fn read(
     memories: &[Memory],
     experts: &[Expert],
     shadows: &[Shadow],
     accept_after_hours: f32,
+    behaviors_per_expert: f32,
     now: DateTime<Utc>,
 ) -> Vec<Scope> {
+    let most = behaviors_per_expert.round().max(1.0) as usize;
     // One user's behaviors are in one compartment, and their standing
     // experts name it as what they were trained from.
     let mut owners: BTreeMap<&str, (Vec<Memory>, Vec<Expert>)> = BTreeMap::new();
@@ -105,7 +113,11 @@ pub fn read(
             if trained + accepted + proposed == 0 && expert.is_none() {
                 continue;
             }
-            let taught = behavior::learnable(behaviors, &scope);
+            let behavior::Taught {
+                set: taught,
+                waiting,
+                followed,
+            } = behavior::taught(behaviors, &scope, most);
             let state = if taught.is_empty() {
                 if expert.is_some() {
                     Standing::Dropping
@@ -142,6 +154,8 @@ pub fn read(
                 trained,
                 accepted,
                 proposed,
+                waiting: waiting.len(),
+                followed: followed.len(),
                 state,
                 accepts_in,
             });
@@ -265,6 +279,7 @@ pub(crate) mod tests {
             &[expert("everywhere", &taught)],
             &[training("everywhere", 3)],
             24.0,
+            10.0,
             Utc::now(),
         );
         assert_eq!(scopes.len(), 1);
@@ -289,6 +304,7 @@ pub(crate) mod tests {
             &[expert("everywhere", &taught)],
             &[],
             24.0,
+            10.0,
             Utc::now(),
         );
         assert_eq!(scopes[0].state, Standing::Waiting);
@@ -300,7 +316,7 @@ pub(crate) mod tests {
             "github.com/acme/orders",
             1,
         )];
-        let scopes = read(&new, &[], &[], 24.0, Utc::now());
+        let scopes = read(&new, &[], &[], 24.0, 10.0, Utc::now());
         assert_eq!(
             scopes.len(),
             1,
@@ -318,7 +334,7 @@ pub(crate) mod tests {
             recorded("memory:old", Status::Proposed, "everywhere", 20),
             recorded("memory:new", Status::Proposed, "everywhere", 2),
         ];
-        let scopes = read(&proposed, &[], &[], 24.0, Utc::now());
+        let scopes = read(&proposed, &[], &[], 24.0, 10.0, Utc::now());
         assert_eq!(scopes[0].state, Standing::Proposed);
         assert_eq!(scopes[0].proposed, 2);
         // The one that has waited longest is accepted first.
@@ -327,10 +343,10 @@ pub(crate) mod tests {
         };
         assert!((3..=4).contains(&left.num_hours()), "{left}");
         // One that has waited past the wait is due now, not in the past.
-        let scopes = read(&proposed, &[], &[], 6.0, Utc::now());
+        let scopes = read(&proposed, &[], &[], 6.0, 10.0, Utc::now());
         assert_eq!(scopes[0].accepts_in, Some(Duration::zero()));
         // A workspace that leaves accepting to its users says no time.
-        let scopes = read(&proposed, &[], &[], 0.0, Utc::now());
+        let scopes = read(&proposed, &[], &[], 0.0, 10.0, Utc::now());
         assert_eq!(scopes[0].accepts_in, None);
         Ok(())
     }
@@ -344,6 +360,7 @@ pub(crate) mod tests {
             &[expert("everywhere", &was)],
             &[],
             24.0,
+            10.0,
             Utc::now(),
         );
         assert_eq!(scopes[0].state, Standing::Dropping);
@@ -358,10 +375,33 @@ pub(crate) mod tests {
             &TenantId::new(TENANT),
             &UserId::new("user:other"),
         ));
-        let scopes = read(&[mine, theirs], &[], &[], 24.0, Utc::now());
+        let scopes = read(&[mine, theirs], &[], &[], 24.0, 10.0, Utc::now());
         assert_eq!(scopes.len(), 2);
         let states: Vec<Standing> = scopes.iter().map(|s| s.state).collect();
         assert!(states.contains(&Standing::Waiting) && states.contains(&Standing::Proposed));
+        Ok(())
+    }
+
+    #[test]
+    fn a_full_expert_says_how_many_wait_for_room() -> anyhow::Result<()> {
+        let accepted: Vec<Memory> = (1..=3)
+            .map(|n| {
+                recorded(
+                    &format!("memory:{n}"),
+                    Status::Accepted,
+                    "everywhere",
+                    10 - n,
+                )
+            })
+            .collect();
+        let scopes = read(&accepted, &[], &[], 24.0, 2.0, Utc::now());
+        let s = &scopes[0];
+        assert_eq!((s.accepted, s.waiting, s.followed), (3, 1, 0));
+        // Two fit, so there is something to train: the keeper's next pass.
+        assert_eq!(s.state, Standing::Waiting);
+        // Room for all three, and none waits.
+        let roomy = read(&accepted, &[], &[], 24.0, 10.0, Utc::now());
+        assert_eq!(roomy[0].waiting, 0);
         Ok(())
     }
 }

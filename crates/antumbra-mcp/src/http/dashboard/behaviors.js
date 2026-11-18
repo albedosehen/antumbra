@@ -50,6 +50,10 @@ function behaviorItem(b) {
     // Accepted for the user after it had waited, not by them: said, so a
     // behavior they never looked at is not taken for one they chose.
     b.accepted_by_server ? h("span", { class: "tag" }, "accepted after waiting") : null,
+    // The scope's expert is full, or the base model already does this: said,
+    // so an accepted behavior that is not being taught is not a mystery.
+    b.waiting_for_room ? h("span", { class: "tag" }, "waits for room") : null,
+    b.followed_by_base ? h("span", { class: "tag" }, "the base model already follows it") : null,
     h("span", {}, b.scope),
     h("span", {}, `${plural(b.examples, "example", "examples")} · ${plural(b.violations, "violation", "violations")}`),
     sources.length ? h("span", {}, `from ${plural(sources.length, "memory", "memories")}`) : null,

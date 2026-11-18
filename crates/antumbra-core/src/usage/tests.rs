@@ -152,3 +152,23 @@ fn the_wait_before_a_behavior_is_accepted_is_a_knob() -> anyhow::Result<()> {
     assert_eq!(policy.clamped().accept_after_hours, 720.0);
     Ok(())
 }
+
+#[test]
+fn the_most_behaviors_an_expert_is_taught_is_a_knob_with_a_default() -> anyhow::Result<()> {
+    assert_eq!(MemoryPolicy::default().behaviors_per_expert, 10.0);
+    // A policy stored before the knob existed reads the default.
+    let stored_before: MemoryPolicy = serde_json::from_str(r#"{"auto": true}"#)?;
+    assert_eq!(stored_before.behaviors_per_expert, 10.0);
+    let Some(knob) = MemoryPolicy::knob("behaviors_per_expert") else {
+        anyhow::bail!("behaviors_per_expert is not a knob");
+    };
+    assert_eq!((knob.min, knob.max, knob.step), (1.0, 64.0, 1.0));
+    let mut policy = MemoryPolicy {
+        behaviors_per_expert: 0.0,
+        ..MemoryPolicy::default()
+    };
+    assert_eq!(policy.clone().clamped().behaviors_per_expert, 1.0);
+    policy.behaviors_per_expert = 500.0;
+    assert_eq!(policy.clamped().behaviors_per_expert, 64.0);
+    Ok(())
+}

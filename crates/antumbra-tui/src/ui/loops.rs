@@ -140,6 +140,12 @@ fn standing(f: &mut Frame, app: &App, area: Rect) {
     };
     let rows = app.standing.iter().map(|s| {
         let (tone, says) = stands(app, s);
+        // A full expert is not a fault, and not finished either: say what waits.
+        let says = if s.waiting > 0 {
+            format!("{says}; {} wait for room", s.waiting)
+        } else {
+            says
+        };
         Row::new(vec![
             Cell::from(Span::styled(
                 words::scope_name(&s.scope).to_string(),
@@ -185,13 +191,15 @@ fn standing(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Table::new(rows, widths).header(header), parts[0]);
 
     let hours = app.policy.accept_after_hours;
+    let most = app.policy.behaviors_per_expert.round().max(1.0);
     let note = if hours > 0.0 {
         format!(
-            "A proposed behavior that can be taught is accepted after {hours:.0} hours. K changes the wait."
+            "A proposed behavior that can be taught is accepted after {hours:.0} hours, and an expert is taught at most {most:.0}. K changes both."
         )
     } else {
-        "Proposed behaviors wait for you to accept them. K sets a wait after which the server does."
-            .to_string()
+        format!(
+            "Proposed behaviors wait for you to accept them, and an expert is taught at most {most:.0}. K changes both."
+        )
     };
     f.render_widget(
         Paragraph::new(Span::styled(note, Style::default().fg(t.ink3))),

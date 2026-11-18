@@ -492,6 +492,8 @@ fn a_behavior_with_nothing_wrong_and_no_training_matches_the_output_schema() -> 
         last_audit: None,
         missed: None,
         accepted_by_server: false,
+        waiting_for_room: false,
+        followed_by_base: false,
     };
     assert_required_keys_present(&view)?;
     Ok(())
@@ -751,5 +753,58 @@ async fn a_behavior_the_server_accepts_is_accepted_once_and_says_who_did() -> an
     assert!(!accept_waited(&store, &tenant, &user, &id).await?);
     let other = record_id(&server_for(&store, "user:else"), branch_rule(None, false)).await?;
     assert!(!accept_waited(&store, &tenant, &user, &other).await?);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_accepted_behavior_with_no_room_says_it_waits() -> anyhow::Result<()> {
+    let store = mem_store().await?;
+    let s = server_for(&store, "user:a");
+    // A workspace that lets one expert be taught two behaviors.
+    let policy = antumbra_core::MemoryPolicy {
+        behaviors_per_expert: 2.0,
+        ..antumbra_core::MemoryPolicy::default()
+    };
+    antumbra_store::repo::memory_policy::set(&store, &TenantId::new("ws:test"), &policy).await?;
+    let mut recorded = Vec::new();
+    for n in 1..=3 {
+        let mut rule = branch_rule(None, true);
+        rule.rule = format!("Name a branch for an issue feat/{{issue}}-{{slug}}, rule {n}.");
+        recorded.push(record_id(&s, rule).await?);
+        // Recorded in this order, so the set fills oldest first.
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let listed = s
+        .list_behaviors(Parameters(ListBehaviorsParams {
+            status: None,
+            scope: None,
+        }))
+        .await?
+        .0
+        .behaviors;
+    let waiting: Vec<&str> = listed
+        .iter()
+        .filter(|b| b.waiting_for_room)
+        .map(|b| b.id.as_str())
+        .collect();
+    // The newest waits; the two before it fill the set.
+    assert_eq!(waiting, [recorded[2].as_str()]);
+    assert!(listed.iter().all(|b| !b.followed_by_base));
+    // Room for all, and nothing waits.
+    antumbra_store::repo::memory_policy::set(
+        &store,
+        &TenantId::new("ws:test"),
+        &antumbra_core::MemoryPolicy::default(),
+    )
+    .await?;
+    let roomy = s
+        .list_behaviors(Parameters(ListBehaviorsParams {
+            status: None,
+            scope: None,
+        }))
+        .await?
+        .0
+        .behaviors;
+    assert!(roomy.iter().all(|b| !b.waiting_for_room));
     Ok(())
 }

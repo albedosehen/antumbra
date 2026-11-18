@@ -853,3 +853,117 @@ fn a_proposed_behavior_is_due_for_acceptance_once_it_has_waited() -> anyhow::Res
     assert!(!due_for_acceptance(&plain, day, now));
     Ok(())
 }
+
+/// A behavior recorded `minutes_ago`, so the order the set fills in is known.
+fn recorded_at(id: &str, status: Status, minutes_ago: i64) -> Memory {
+    let mut m = recorded(id, status, EVERYWHERE);
+    m.created_at = chrono::Utc::now() - chrono::Duration::minutes(minutes_ago);
+    m
+}
+
+/// `m` with a note that its scope's last training read the base model at
+/// `base` on it, and whether it was learned.
+fn noted(mut m: Memory, base: f32, learned: bool) -> Memory {
+    let training = Training {
+        base,
+        ..trained_in("set-before", if learned { 1.0 } else { 0.0 }, learned, true)
+    };
+    mark_training(&mut m.evidence, &training);
+    m
+}
+
+fn ids(set: &[(Memory, Spec)]) -> Vec<&str> {
+    set.iter().map(|(m, _)| m.id.as_str()).collect()
+}
+
+#[test]
+fn a_set_holds_what_the_expert_knows_then_the_oldest_untried_then_the_missed() {
+    let all = vec![
+        recorded_at("memory:trained", Status::Trained, 500),
+        noted(
+            recorded_at("memory:missed-old", Status::Accepted, 400),
+            0.0,
+            false,
+        ),
+        recorded_at("memory:new", Status::Accepted, 10),
+        recorded_at("memory:old", Status::Accepted, 300),
+        recorded_at("memory:middle", Status::Accepted, 200),
+        recorded_at("memory:proposed", Status::Proposed, 900),
+    ];
+    let taught = taught(&all, EVERYWHERE, 3);
+    // What the expert holds, then the two oldest never tried. A behavior it
+    // was taught and missed gives its room to one not yet tried, however old.
+    assert_eq!(
+        ids(&taught.set),
+        ["memory:trained", "memory:old", "memory:middle"]
+    );
+    assert_eq!(ids(&taught.waiting), ["memory:new", "memory:missed-old"]);
+    assert!(taught.followed.is_empty());
+    // With room for all, the missed one is taught again too, last.
+    let roomy = super::taught(&all, EVERYWHERE, 10);
+    assert_eq!(roomy.set.len(), 5);
+    assert_eq!(
+        roomy.set.last().map(|(m, _)| m.id.as_str()),
+        Some("memory:missed-old")
+    );
+    assert!(roomy.waiting.is_empty());
+}
+
+#[test]
+fn a_set_never_drops_what_the_expert_already_learned() {
+    let all: Vec<Memory> = (0..5)
+        .map(|i| recorded_at(&format!("memory:trained-{i}"), Status::Trained, 100 - i))
+        .chain([recorded_at("memory:accepted", Status::Accepted, 1)])
+        .collect();
+    // Five learned, a ceiling of three: all five stay, and nothing is added,
+    // since a set that dropped one would unteach it.
+    let taught = taught(&all, EVERYWHERE, 3);
+    assert_eq!(taught.set.len(), 5);
+    assert_eq!(ids(&taught.waiting), ["memory:accepted"]);
+    // The same set from pass to pass, so a full expert is not retrained.
+    assert_eq!(
+        fingerprint(&taught.set),
+        fingerprint(&super::taught(&all, EVERYWHERE, 3).set)
+    );
+}
+
+#[test]
+fn a_behavior_the_base_already_follows_is_left_out_of_the_set() {
+    let all = vec![
+        noted(
+            recorded_at("memory:the-base-had-it", Status::Trained, 50),
+            1.0,
+            true,
+        ),
+        noted(
+            recorded_at("memory:at-the-bar", Status::Accepted, 40),
+            LEARNED_AT,
+            false,
+        ),
+        noted(
+            recorded_at("memory:below", Status::Accepted, 30),
+            0.33,
+            false,
+        ),
+        recorded_at("memory:untried", Status::Accepted, 20),
+    ];
+    let taught = taught(&all, EVERYWHERE, 10);
+    assert_eq!(
+        ids(&taught.followed),
+        ["memory:the-base-had-it", "memory:at-the-bar"]
+    );
+    assert_eq!(ids(&taught.set), ["memory:untried", "memory:below"]);
+    // Read from the scope's last training only: a behavior never trained
+    // says nothing about the base yet.
+    assert!(!followed_by_base(&all[3].evidence));
+    // And it takes no room: two left out, two taught, under a ceiling of two.
+    assert_eq!(super::taught(&all, EVERYWHERE, 2).set.len(), 2);
+}
+
+#[test]
+fn the_ceiling_admission_and_the_base_rule_share_one_bar() {
+    // Admission's learned bar and the base rule read the same number.
+    assert!((LEARNED_AT - 0.6).abs() < f32::EPSILON);
+    assert_eq!(MOST_PER_EXPERT, 10);
+    assert!(taught(&[], EVERYWHERE, MOST_PER_EXPERT).set.is_empty());
+}

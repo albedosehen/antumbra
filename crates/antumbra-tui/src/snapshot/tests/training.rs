@@ -43,6 +43,7 @@ fn reread(app: &mut App) {
         &app.experts,
         &app.shadows,
         app.policy.accept_after_hours,
+        app.policy.behaviors_per_expert,
         Utc::now(),
     );
 }
@@ -77,7 +78,7 @@ fn the_training_page_says_what_the_server_is_teaching_and_what_it_does_next() ->
         "{text}"
     );
     assert!(
-        text.contains("A proposed behavior that can be taught is accepted after 24 hours."),
+        text.contains("A proposed behavior that can be taught is accepted after 24 hours, and an expert is taught at most 10."),
         "{text}"
     );
     // Every heading is whole, and a short terminal still lists every expert.
@@ -111,7 +112,9 @@ fn a_workspace_that_keeps_accepting_to_itself_says_so() -> anyhow::Result<()> {
         "{text}"
     );
     assert!(
-        text.contains("Proposed behaviors wait for you to accept them."),
+        text.contains(
+            "Proposed behaviors wait for you to accept them, and an expert is taught at most 10."
+        ),
         "{text}"
     );
     Ok(())
