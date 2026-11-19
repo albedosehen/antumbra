@@ -1107,11 +1107,18 @@ fn finish(
         // still what `antumbra hook` runs.
         write_hooks(&antumbra.join("hooks"), &agents::hook::scripts(), steps)?;
     }
+    // The ones connected because they were found here, which nobody named.
+    let mut found: Vec<Agent> = Vec::new();
     for agent in &chosen.others {
         // One agent's config that cannot be written is that agent's loss,
         // not the setup's.
         match agents::connect(*agent, &ground, steps) {
-            Ok(()) => connected.push(agent.name()),
+            Ok(()) => {
+                connected.push(agent.name());
+                if chosen.found {
+                    found.push(*agent);
+                }
+            }
             Err(e) => steps.warn(format!("{} was not connected: {e}", agent.title())),
         }
     }
@@ -1157,6 +1164,9 @@ fn finish(
             }
             None => println!("\nAntumbra is set up. No agent was connected to it."),
         }
+        if let Some(found) = found_line(&found) {
+            println!("{found}");
+        }
         println!("Check it any time with: antumbra setup check");
     }
     Ok(())
@@ -1170,6 +1180,9 @@ const CLAUDE: &str = "claude";
 struct Chosen {
     claude: bool,
     others: Vec<Agent>,
+    /// Whether the others are the ones found on this machine, and not ones
+    /// `--agent` named.
+    found: bool,
 }
 
 /// The agents `--agent` names, or nothing when it names none. A name it does
@@ -1178,6 +1191,7 @@ fn named_agents(names: &[String]) -> anyhow::Result<Option<Chosen>> {
     let mut chosen = Chosen {
         claude: false,
         others: Vec::new(),
+        found: false,
     };
     let mut any = false;
     for name in names {
@@ -1217,6 +1231,7 @@ fn chosen(common: &Common, ground: &agents::Ground<'_>) -> anyhow::Result<Chosen
                 .into_iter()
                 .filter(|agent| agents::present(*agent, ground))
                 .collect(),
+            found: true,
         },
     };
     if common.no_claude {
@@ -1240,6 +1255,21 @@ fn titles(names: &[&str]) -> Option<String> {
         [one] => Some((*one).to_string()),
         [first @ .., last] => Some(format!("{} and {last}", first.join(", "))),
     }
+}
+
+/// What the summary says of the agents connected because they were found on
+/// this machine, so that one nobody asked for is seen there, and not first in
+/// a check that fails. Nothing for none.
+fn found_line(found: &[Agent]) -> Option<String> {
+    let names: Vec<&str> = found.iter().map(|agent| agent.name()).collect();
+    let agents = titles(&names)?;
+    let were_found = match found {
+        [_] => "was connected because it was found",
+        _ => "were connected because they were found",
+    };
+    Some(format!(
+        "{agents} {were_found} on this machine.\nTo choose the agents yourself, name them with --agent."
+    ))
 }
 
 /// Write the bundled hook scripts `names` into `dir`, replacing what is there.
@@ -1893,7 +1923,8 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
                 match finding.fix {
                     None => ok(finding.said),
                     // Said, as a differing hook of Claude Code's is, and not
-                    // a failed check: it works.
+                    // a failed check: it works, or it waits on a program
+                    // setup cannot install.
                     Some(fix) if finding.works => println!("  ! {}; {fix}", finding.said),
                     Some(fix) => fail(finding.said, fix),
                 }
@@ -2181,21 +2212,24 @@ mod tests {
             named_agents(&names(&["Gemini"]))?,
             Some(Chosen {
                 claude: false,
-                others: vec![Agent::Gemini]
+                others: vec![Agent::Gemini],
+                found: false
             })
         );
         assert_eq!(
             named_agents(&names(&["claude", "gemini", "gemini"]))?,
             Some(Chosen {
                 claude: true,
-                others: vec![Agent::Gemini]
+                others: vec![Agent::Gemini],
+                found: false
             })
         );
         assert_eq!(
             named_agents(&names(&["all"]))?,
             Some(Chosen {
                 claude: true,
-                others: Agent::ALL.to_vec()
+                others: Agent::ALL.to_vec(),
+                found: false
             })
         );
         let Err(problem) = named_agents(&names(&["cursor"])) else {
@@ -2208,6 +2242,87 @@ mod tests {
             "{said}"
         );
         Ok(())
+    }
+
+    #[test]
+    fn an_agent_that_left_only_its_directory_is_not_connected_unless_named() -> anyhow::Result<()> {
+        let home = agents::scratch::Scratch::new("setup-chosen")?;
+        let nothing = |_: &str| None;
+        let nowhere = |_: &str| None;
+        let ground = agents::Ground {
+            home: home.path(),
+            antumbra: agents::Program::Named,
+            env: &nothing,
+            find: &nowhere,
+        };
+        // What Codex leaves behind when it is removed, and Gemini CLI's
+        // settings on a machine whose PATH does not have it.
+        std::fs::create_dir_all(agents::codex::home(&ground))?;
+        let gemini = agents::gemini::home(&ground);
+        std::fs::create_dir_all(&gemini)?;
+        std::fs::write(gemini.join("settings.json"), "{}\n")?;
+        let common = |named: &[&str]| Common {
+            yes: true,
+            dry_run: false,
+            no_claude: false,
+            agents: named.iter().map(|name| name.to_string()).collect(),
+            keep_auto_memory: false,
+            claude_dir: None,
+        };
+
+        assert_eq!(
+            chosen(&common(&[]), &ground)?,
+            Chosen {
+                claude: true,
+                others: vec![Agent::Gemini],
+                found: true
+            }
+        );
+        // Named, it is connected, and not as one that was found.
+        assert_eq!(
+            chosen(&common(&["codex"]), &ground)?,
+            Chosen {
+                claude: false,
+                others: vec![Agent::Codex],
+                found: false
+            }
+        );
+        // With its program on the PATH it is found.
+        let codex = |name: &str| (name == "codex").then(|| PathBuf::from("codex"));
+        let installed = agents::Ground {
+            home: home.path(),
+            antumbra: agents::Program::Named,
+            env: &nothing,
+            find: &codex,
+        };
+        assert_eq!(
+            chosen(&common(&[]), &installed)?,
+            Chosen {
+                claude: true,
+                others: vec![Agent::Gemini, Agent::Codex],
+                found: true
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_summary_names_the_agents_connected_because_they_were_found() {
+        assert_eq!(found_line(&[]), None);
+        assert_eq!(
+            found_line(&[Agent::Codex]).as_deref(),
+            Some(
+                "Codex was connected because it was found on this machine.\n\
+                 To choose the agents yourself, name them with --agent."
+            )
+        );
+        assert_eq!(
+            found_line(&[Agent::Gemini, Agent::Codex, Agent::Opencode]).as_deref(),
+            Some(
+                "Gemini CLI, Codex and OpenCode were connected because they were found on this machine.\n\
+                 To choose the agents yourself, name them with --agent."
+            )
+        );
     }
 
     #[test]

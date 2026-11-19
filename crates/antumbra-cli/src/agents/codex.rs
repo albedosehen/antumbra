@@ -7,7 +7,8 @@
 //!
 //! - **The server** is registered with Codex's own `codex mcp add`, which
 //!   edits `config.toml` as Codex does and replaces an entry of the same
-//!   name. Without `codex` on the PATH, setup prints the command.
+//!   name. Without `codex` on the PATH, setup prints the command, and the
+//!   check says what to install without counting it against the setup.
 //! - **The hooks** are added to `hooks.json` as setup adds Claude Code's to
 //!   its settings: as text, adding only, with a backup, and never twice.
 //!
@@ -226,6 +227,16 @@ pub fn check(ground: &Ground<'_>) -> Vec<Finding> {
         found.push(Finding::good(
             "Codex: the MCP server \"antumbra\" is registered",
         ));
+    } else if (ground.find)(Agent::Codex.program()).is_none() {
+        // Only `codex mcp add` registers it, so without the program setup
+        // has nothing to run, and running it again would change nothing.
+        found.push(Finding::waiting(
+            format!(
+                "Codex: the MCP server \"antumbra\" is not in {}, because the codex command that registers it is not on your PATH",
+                config.display()
+            ),
+            "install Codex, then run setup again",
+        ));
     } else {
         found.push(Finding::bad(
             format!(
@@ -311,9 +322,10 @@ mod tests {
         assert!(check(&ground)
             .iter()
             .any(|f| f.fix.is_none() && f.said.contains("three hooks")));
+        // The server waits on the program, which does not fail the check.
         assert!(check(&ground)
             .iter()
-            .any(|f| f.fix.is_some() && f.said.contains("is not in")));
+            .any(|f| f.fix.is_some() && f.works && f.said.contains("is not in")));
 
         let again = Told::default();
         connect(&ground, &again)?;
@@ -322,6 +334,68 @@ mod tests {
         assert!(!said.contains("Codex skips a hook"), "{said}");
         let twice: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("hooks.json"))?)?;
         assert_eq!(twice, after);
+        Ok(())
+    }
+
+    #[test]
+    fn a_server_setup_could_not_register_without_codex_does_not_fail_the_check(
+    ) -> anyhow::Result<()> {
+        let home = Scratch::new("codex-missing")?;
+        let ground = Ground {
+            home: home.path(),
+            antumbra: Program::Named,
+            env: &nothing,
+            find: &nowhere,
+        };
+        // Named with `--agent`, on a machine without Codex: the hooks are
+        // written, and the server is left for `codex mcp add`.
+        connect(&ground, &Told::default())?;
+        let config = home.path().join(".codex").join("config.toml");
+        assert!(!config.exists());
+
+        // Setup again would do no more, so it is said with what to install
+        // and the check passes.
+        let found = check(&ground);
+        assert!(found.iter().all(|f| f.works), "{found:?}");
+        let waits: Vec<&Finding> = found.iter().filter(|f| f.fix.is_some()).collect();
+        let [waiting] = waits.as_slice() else {
+            anyhow::bail!("one thing waits on Codex, and the check found {found:?}");
+        };
+        assert!(
+            waiting
+                .said
+                .contains("the codex command that registers it is not on your PATH"),
+            "{waiting:?}"
+        );
+        assert_eq!(
+            waiting.fix.as_deref(),
+            Some("install Codex, then run setup again")
+        );
+
+        // With Codex installed, setup can register it, and the check says so
+        // and fails. The check only looks for the program and never runs it.
+        let on_path = |name: &str| (name == "codex").then(|| PathBuf::from("codex"));
+        let installed = Ground {
+            home: home.path(),
+            antumbra: Program::Named,
+            env: &nothing,
+            find: &on_path,
+        };
+        let found = check(&installed);
+        assert!(
+            found.iter().any(|f| !f.works
+                && f.said.contains("is not in")
+                && f.fix.as_deref() == Some("run setup again")),
+            "{found:?}"
+        );
+
+        // A server registered while Codex was there is found without it.
+        std::fs::write(
+            &config,
+            "[mcp_servers.antumbra]\ncommand = \"antumbra\"\nargs = [\"mcp\", \"bridge\", \"--agent\", \"codex\"]\n",
+        )?;
+        let found = check(&ground);
+        assert!(found.iter().all(|f| f.fix.is_none()), "{found:?}");
         Ok(())
     }
 
