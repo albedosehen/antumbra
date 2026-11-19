@@ -16,8 +16,8 @@
 //! dispatch (`phases`): each run of the weight's rows through its tiles
 //! (`tiles`) with the adapter's `A` times the row beside them, then the
 //! adapter's `B` rows and the bias. The adapter is read from a copy of its
-//! factors at half precision, laid out for vectors (`pack`), less the ranks
-//! a blend of fewer experts leaves at nothing. The MLP is one dispatch: its
+//! factors at eight bits, laid out for vectors (`pack`), less the ranks a
+//! blend of fewer experts leaves at nothing. The MLP is one dispatch: its
 //! two wide products, then the gate and the quantizing of its result a block
 //! at a time by the cores that hold those values, then its narrow product.
 //! So the MLP's wide rows never reach the calling thread, where pulling them
@@ -237,9 +237,7 @@ unsafe fn a_unit(w: &Weight, x: &[f32], rows: usize, t: &Shared<f32>, start: usi
     let Some(pack) = w.pack else { return };
     let out = t.part(start, rows * pack.rank);
     pack.through(0, pack.cols(), x, pack.cols(), rows, out);
-    for value in out.iter_mut() {
-        *value *= pack.scale;
-    }
+    pack.scaled(out);
 }
 
 /// To the sixteens `first..last` of `w`'s products for every one of `rows`
@@ -667,12 +665,13 @@ impl Mlp {
             // thread, and nothing else reads or writes either until it is
             // done.
             let (parts, t_down) = unsafe { (parts.all(), t_down.part(0, rows * down_rank)) };
-            let scale = down.pack.map_or(0.0, |p| p.scale);
             for (at, t) in t_down.iter_mut().enumerate() {
-                let sum: f32 = (0..blocks)
+                *t = (0..blocks)
                     .map(|block| parts[block * rows * down_rank + at])
                     .sum();
-                *t = sum * scale;
+            }
+            if let Some(pack) = down.pack {
+                pack.scaled(t_down);
             }
         };
 
@@ -887,6 +886,9 @@ mod tests {
         }
     }
 
+    /// The rank of the adapter these tests read through.
+    const RANK: usize = 8;
+
     /// A base of weights drawn from a seed, under the names a Qwen checkpoint
     /// gives them: the same base in every run, so what these tests find they
     /// find every time.
@@ -945,10 +947,10 @@ mod tests {
 
     /// A model over `weights`, served at `serve`, generating: its adapter is
     /// of rank 8, drawn from a seed on the A side and, with `trained`, set
-    /// to values that are not nothing on the B side. Every factor is a value
-    /// half precision holds, as an expert trained in bf16 has: the copy a
-    /// decoded token reads is then the factors themselves, and the two paths
-    /// are compared on their arithmetic alone.
+    /// to values that are not nothing on the B side. Every factor is put as
+    /// the copy a decoded token reads holds it, at eight bits of its rank's
+    /// largest (`pack::as_held`): the copy is then the factors themselves,
+    /// and the two paths are compared on their arithmetic alone.
     fn model(
         cfg: &Config,
         weights: &HashMap<String, Tensor>,
@@ -959,7 +961,7 @@ mod tests {
         let base = VarBuilder::from_tensors(weights.clone(), DType::F32, &dev);
         let varmap = VarMap::new();
         let lora = VarBuilder::from_varmap(&varmap, DType::F32, &dev);
-        let mut model = QwenLora::build(cfg, &base, &lora, varmap, 8, 2.0, serve)?;
+        let mut model = QwenLora::build(cfg, &base, &lora, varmap, RANK, 2.0, serve)?;
         seed_lora_a(&model.varmap, 11)?;
         {
             let vars = model
@@ -977,11 +979,9 @@ mod tests {
                         .collect(),
                     false => var.flatten_all()?.to_vec1()?,
                 };
-                let halves: Vec<f32> = values
-                    .into_iter()
-                    .map(|v| pack::from_half(pack::to_half(v)))
-                    .collect();
-                var.set(&Tensor::from_vec(halves, var.shape(), &dev)?)?;
+                let mut values = values;
+                pack::as_held(&mut values, RANK, name.ends_with("lora_a"));
+                var.set(&Tensor::from_vec(values, var.shape(), &dev)?)?;
             }
         }
         model.set_grad(false);

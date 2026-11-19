@@ -6,7 +6,7 @@
 //! position and a weighted sum of the cached values. A value at a time, or
 //! eight at a time without a vector exponential, they are most of what one
 //! thread does while the others wait for it. An adapter's factors, held at
-//! half precision, are multiplied here as well. Each kernel here has a plain
+//! eight bits, are multiplied here as well. Each kernel here has a plain
 //! twin it is held to.
 
 use std::arch::x86_64::*;
@@ -219,37 +219,10 @@ pub(super) unsafe fn weigh(
     }
 }
 
-/// `values` at half precision, each the nearest half with ties to even, into
-/// `out`, over as many values as the two share.
-///
-/// SAFETY (for the caller): the CPU has AVX-512F.
+/// Sixteen factors at `a`, whole numbers of eight bits, as floats.
 #[target_feature(enable = "avx512f")]
-pub(super) unsafe fn to_halves(values: &[f32], out: &mut [u16]) {
-    const NEAREST: i32 = _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC;
-    let n = values.len().min(out.len());
-    let mut i = 0;
-    while i + 16 <= n {
-        let halves = _mm512_cvtps_ph::<NEAREST>(_mm512_loadu_ps(values.as_ptr().add(i)));
-        _mm256_storeu_si256(out.as_mut_ptr().add(i) as *mut __m256i, halves);
-        i += 16;
-    }
-    if i < n {
-        // The last few through room of their own, so nothing past either
-        // slice is read or written.
-        let (mut last, mut halves) = ([0f32; 16], [0u16; 16]);
-        last[..n - i].copy_from_slice(&values[i..n]);
-        _mm256_storeu_si256(
-            halves.as_mut_ptr() as *mut __m256i,
-            _mm512_cvtps_ph::<NEAREST>(_mm512_loadu_ps(last.as_ptr())),
-        );
-        out[i..n].copy_from_slice(&halves[..n - i]);
-    }
-}
-
-/// Sixteen halves at `a` as floats.
-#[target_feature(enable = "avx512f")]
-unsafe fn halves(a: *const u16) -> __m512 {
-    _mm512_cvtph_ps(_mm256_loadu_si256(a as *const __m256i))
+unsafe fn eights(a: *const i8) -> __m512 {
+    _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(_mm_loadu_si128(a as *const __m128i)))
 }
 
 /// Running sums a row's products with `A` are kept in, so one step does not
@@ -275,7 +248,7 @@ unsafe fn summed(sums: &[__m512; SUMS]) -> __m512 {
 
 /// Sixteen rank rows of an adapter's `A` over `n` columns, times those
 /// columns of each of `rows` rows of input. `a` holds a column at a time,
-/// the sixteen rows' values of it as halves; row `i`'s values of the columns
+/// the sixteen rows' values of it at eight bits; row `i`'s values of the columns
 /// are at `x + i * stride`, and its sixteen sums are written at
 /// `out + i * out_stride`.
 ///
@@ -286,11 +259,11 @@ unsafe fn summed(sums: &[__m512; SUMS]) -> __m512 {
 /// `c % 8` in the order of the columns, whatever rows are beside it.
 ///
 /// SAFETY (for the caller): the CPU has AVX-512F; `a` holds `16 * n`
-/// halves; each row of `x` holds `n` values; and each place in `out` is room
-/// for sixteen.
+/// factors; each row of `x` holds `n` values; and each place in `out` is
+/// room for sixteen.
 #[target_feature(enable = "avx512f")]
 pub(super) unsafe fn through_cols(
-    a: *const u16,
+    a: *const i8,
     n: usize,
     x: *const f32,
     stride: usize,
@@ -305,7 +278,7 @@ pub(super) unsafe fn through_cols(
         while c + SUMS <= n {
             for (j, sum) in sums.iter_mut().enumerate() {
                 *sum = _mm512_fmadd_ps(
-                    halves(a.add((c + j) * 16)),
+                    eights(a.add((c + j) * 16)),
                     _mm512_set1_ps(*x.add(c + j)),
                     *sum,
                 );
@@ -314,7 +287,7 @@ pub(super) unsafe fn through_cols(
         }
         for (j, sum) in sums[..n - c].iter_mut().enumerate() {
             *sum = _mm512_fmadd_ps(
-                halves(a.add((c + j) * 16)),
+                eights(a.add((c + j) * 16)),
                 _mm512_set1_ps(*x.add(c + j)),
                 *sum,
             );
@@ -331,7 +304,7 @@ pub(super) unsafe fn through_cols(
         while c + SUMS <= n {
             let mut cols = [_mm512_setzero_ps(); SUMS];
             for (j, col) in cols.iter_mut().enumerate() {
-                *col = halves(a.add((c + j) * 16));
+                *col = eights(a.add((c + j) * 16));
             }
             for (i, sums) in sums[..some].iter_mut().enumerate() {
                 let x = x.add(i * stride + c);
@@ -342,7 +315,7 @@ pub(super) unsafe fn through_cols(
             c += SUMS;
         }
         for j in 0..n - c {
-            let col = halves(a.add((c + j) * 16));
+            let col = eights(a.add((c + j) * 16));
             for (i, sums) in sums[..some].iter_mut().enumerate() {
                 sums[j] = _mm512_fmadd_ps(col, _mm512_set1_ps(*x.add(i * stride + c + j)), sums[j]);
             }
@@ -356,7 +329,7 @@ pub(super) unsafe fn through_cols(
 
 /// To `sixteens` sixteens of products of each of `rows` rows, an adapter's
 /// `B` times that row's `A · x`. `b` holds a sixteen of products at a time,
-/// for each of the `rank` ranks the sixteen's factors as halves; row `i`'s
+/// for each of the `rank` ranks the sixteen's factors at eight bits; row `i`'s
 /// `rank` values of `A · x` are at `t + i * rank`, and its products at
 /// `out + i * stride`.
 ///
@@ -367,12 +340,12 @@ pub(super) unsafe fn through_cols(
 /// the two to the products, sixteen ranks at a time.
 ///
 /// SAFETY (for the caller): the CPU has AVX-512F; `b` holds
-/// `16 * rank * sixteens` halves; `t` holds `rank` values for every row; and
+/// `16 * rank * sixteens` factors; `t` holds `rank` values for every row; and
 /// each row's place in `out` holds `16 * sixteens` values that nothing else
 /// reads or writes meanwhile.
 #[target_feature(enable = "avx512f")]
 pub(super) unsafe fn add_sixteens(
-    b: *const u16,
+    b: *const i8,
     rank: usize,
     sixteens: usize,
     t: *const f32,
@@ -387,7 +360,7 @@ pub(super) unsafe fn add_sixteens(
             let some = (rank - first).min(16);
             let mut factors = [_mm512_setzero_ps(); 16];
             for (r, factor) in factors[..some].iter_mut().enumerate() {
-                *factor = halves(b.add((first + r) * 16));
+                *factor = eights(b.add((first + r) * 16));
             }
             for i in 0..rows {
                 let t = t.add(i * rank + first);
