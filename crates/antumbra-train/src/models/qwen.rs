@@ -596,26 +596,7 @@ impl QwenCausalLm {
             .data()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(device) = vars.values().next().map(|v| v.device().clone()) else {
-            return Err(AntumbraError::other(
-                "load blend: the model has no LoRA factors",
-            ));
-        };
-        let rank = vars
-            .iter()
-            .find(|(k, _)| k.ends_with("lora_a"))
-            .map(|(_, v)| v.dim(0).unwrap_or(0))
-            .unwrap_or(0);
-        let parts = specs
-            .iter()
-            .map(|(p, w)| {
-                let factors = candle_core::safetensors::load(p, &device)
-                    .map_err(|e| AntumbraError::other(format!("load adapter `{p}`: {e}")))?;
-                Ok((factors, *w))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let blended = crate::compose::blend(&parts, Some(rank))?;
-        crate::compose::set_factors(&vars, &blended, "load blend")
+        crate::compose::set_blend(&vars, specs)
     }
 
     /// Wrap a raw prompt in the Qwen chat template for an `-Instruct` base, so
