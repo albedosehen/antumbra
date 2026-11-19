@@ -91,21 +91,23 @@ pub(super) fn plan_user(
     behavior::scopes(memories, experts)
         .into_iter()
         .map(|scope| {
-            let behavior::Taught {
-                set: taught,
-                waiting,
-                ..
-            } = behavior::taught(memories, &scope, most);
+            let whole = behavior::taught(memories, &scope, most);
             let expert = experts
                 .iter()
                 .find(|e| e.standing_scope() == Some(scope.as_str()))
                 .cloned();
             let key = (tenant.to_string(), user.to_string(), scope.clone());
-            let need = need(&taught, expert.as_ref(), failed.get(&key));
+            let need = match expert.as_ref() {
+                // It learned exactly this set and what it missed still
+                // waits: training it on the same behaviors again would teach
+                // it nothing, and could cost it one it has.
+                Some(expert) if behavior::holds(&whole, expert) => Need::Nothing,
+                expert => need(&whole.set, expert, failed.get(&key)),
+            };
             ScopePlan {
                 scope,
-                taught,
-                waiting: waiting.len(),
+                taught: whole.set,
+                waiting: whole.waiting.len(),
                 expert,
                 need,
             }

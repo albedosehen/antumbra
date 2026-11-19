@@ -431,6 +431,19 @@ async fn an_expert_is_minted_with_what_it_learned_and_left_be_until_its_set_chan
     );
     let set = behavior::fingerprint(&plan.taught);
     assert_eq!(behavior::trained_set(&e), Some(set.as_str()));
+    // And what it learned of that set, as a set of its own: the set in force
+    // once the one it missed has no room.
+    let learned: Vec<_> = plan
+        .taught
+        .iter()
+        .filter(|(m, _)| m.id.as_str() == "memory:learned")
+        .cloned()
+        .collect();
+    assert_eq!(
+        behavior::held_set(&e),
+        Some(behavior::fingerprint(&learned).as_str())
+    );
+    assert_eq!(behavior::missed_by(&e), ["memory:missed"]);
     // The card keeps each behavior's scores at admission, for the audit.
     assert!(behavior::card_worse(&e.capability_card, &["memory:missed"]).is_some());
     assert!(

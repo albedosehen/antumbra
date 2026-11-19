@@ -936,6 +936,15 @@ pub async fn mint(
         })).collect::<Vec<_>>(),
     });
     card[behavior::CARD_EXAMPLES] = serde_json::Value::Object(examples);
+    // What it learned of the set, as a set of its own: when the ones it missed
+    // have no room, that is the set in force, and it is in step with it.
+    let held: Vec<_> = plan
+        .taught
+        .iter()
+        .filter(|(m, _)| learned.contains(&m.id.as_str()))
+        .cloned()
+        .collect();
+    card[behavior::CARD_HELD] = serde_json::json!(behavior::fingerprint(&held));
     // Each behavior's held-out scores at admission: the bet an audit checks.
     let scores: serde_json::Map<String, serde_json::Value> = verdict
         .behaviors
