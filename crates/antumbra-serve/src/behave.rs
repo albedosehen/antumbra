@@ -21,13 +21,15 @@
 use chrono::Utc;
 
 use antumbra_core::behavior::missed::{self, Missed};
-use antumbra_core::behavior::{self, learnable, Spec, State, Status};
+use antumbra_core::behavior::{self, Spec, State, Status};
 use antumbra_core::ports::Embedder;
 use antumbra_core::{
     BoundaryId, EvalStatus, EvaluationRun, Expert, ExpertId, FailureBoundary, Generation, Memory,
     MemoryId, Result, RunId, Shadow, ShadowId, ShadowStatus, SubjectKind, TenantId, UserId,
 };
-use antumbra_store::repo::{boundary, evaluation, expert, memory, principal, shadow};
+use antumbra_store::repo::{
+    boundary, evaluation, expert, memory, memory_policy, principal, shadow,
+};
 use antumbra_store::{Store, EMBED_DIM};
 use antumbra_train::behave::{self as course, Verdict};
 use antumbra_train::{
@@ -105,10 +107,17 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// The behaviors `memories` hold for `scope`. `None` when there is
-    /// nothing to teach.
-    pub fn of(tenant: &TenantId, user: &UserId, scope: &str, memories: &[Memory]) -> Option<Plan> {
-        let taught = learnable(memories, scope);
+    /// The behaviors `memories` hold for `scope`, no more than `most` of
+    /// them, as the keeper chooses them (`behavior::taught`). `None` when
+    /// there is nothing to teach.
+    pub fn of(
+        tenant: &TenantId,
+        user: &UserId,
+        scope: &str,
+        memories: &[Memory],
+        most: usize,
+    ) -> Option<Plan> {
+        let taught = behavior::taught(memories, scope, most).set;
         (!taught.is_empty()).then(|| Plan {
             tenant: tenant.clone(),
             user: user.clone(),
@@ -136,7 +145,12 @@ pub async fn plan(
     principal::provision(store, tenant, user).await?;
     let compartment = behavior::compartment_id(tenant, user);
     let memories = memory::list_by_compartment(store, tenant, &compartment).await?;
-    Ok(Plan::of(tenant, user, scope, &memories))
+    let most = memory_policy::get(store, tenant)
+        .await?
+        .behaviors_per_expert
+        .round()
+        .max(1.0) as usize;
+    Ok(Plan::of(tenant, user, scope, &memories, most))
 }
 
 /// The seed a training of `plan` runs under: [`behavior::seed`] of what it

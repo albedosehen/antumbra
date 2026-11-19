@@ -2,6 +2,9 @@ use super::*;
 use antumbra_core::behavior::{content, scope_evidence, status_evidence, Example, Status};
 use antumbra_core::{ExpertId, Generation, TenantId, UserId};
 
+/// The ceiling the planning is given where the test is not about it.
+const MOST: usize = antumbra_core::behavior::MOST_PER_EXPERT;
+
 fn spec(rule: &str) -> Spec {
     Spec {
         rule: rule.into(),
@@ -28,7 +31,7 @@ fn a_behavior_that_could_never_be_admitted_starts_no_training() -> anyhow::Resul
     let taught = behavior::learnable(&[three.clone()], "everywhere");
     assert!(taught.is_empty(), "nothing it could be admitted by");
     assert_eq!(need(&taught, None, None), Need::Nothing);
-    let planned = plan_user(&[three], &[], &Failed::new(), "ws:a", "user:a");
+    let planned = plan_user(&[three], &[], &Failed::new(), "ws:a", "user:a", MOST);
     assert!(planned.iter().all(|p| p.need == Need::Nothing));
     Ok(())
 }
@@ -143,7 +146,7 @@ fn a_set_refused_before_a_restart_is_not_trained_again() -> anyhow::Result<()> {
         );
     }
     // A new process: nothing failed in it yet, but the store remembers.
-    let planned = plan_user(&accepted, &[], &Failed::new(), "ws:a", "user:a");
+    let planned = plan_user(&accepted, &[], &Failed::new(), "ws:a", "user:a", MOST);
     assert_eq!(planned[0].need, Need::Nothing);
 
     accepted.push(recorded(
@@ -152,7 +155,7 @@ fn a_set_refused_before_a_restart_is_not_trained_again() -> anyhow::Result<()> {
         Status::Accepted,
         "everywhere",
     ));
-    let planned = plan_user(&accepted, &[], &Failed::new(), "ws:a", "user:a");
+    let planned = plan_user(&accepted, &[], &Failed::new(), "ws:a", "user:a", MOST);
     assert!(
         matches!(planned[0].need, Need::Train(_)),
         "a behavior added since is a new set, trained"
@@ -232,7 +235,7 @@ fn every_scope_of_a_user_is_planned() -> anyhow::Result<()> {
     ];
     let experts = vec![standing("github.com/o/gone", &["memory:old"])];
     let planned: Vec<(String, bool)> =
-        plan_user(&memories, &experts, &Failed::new(), "ws:a", "user:a")
+        plan_user(&memories, &experts, &Failed::new(), "ws:a", "user:a", MOST)
             .into_iter()
             .map(|p| (p.scope, matches!(p.need, Need::Train(_))))
             .collect();
@@ -244,12 +247,45 @@ fn every_scope_of_a_user_is_planned() -> anyhow::Result<()> {
             ("github.com/o/gone".to_string(), false),
         ]
     );
-    let Some(gone) = plan_user(&memories, &experts, &Failed::new(), "ws:a", "user:a")
+    let Some(gone) = plan_user(&memories, &experts, &Failed::new(), "ws:a", "user:a", MOST)
         .into_iter()
         .find(|p| p.scope == "github.com/o/gone")
     else {
         anyhow::bail!("the scope whose expert has nothing left to teach was not planned");
     };
     assert_eq!(gone.need, Need::Drop);
+    Ok(())
+}
+
+#[test]
+fn a_scope_is_trained_on_no_more_than_its_ceiling() -> anyhow::Result<()> {
+    let accepted: Vec<Memory> = (1..=3)
+        .map(|n| {
+            let mut m = recorded(
+                &format!("memory:{n}"),
+                &format!("Rule {n}."),
+                Status::Accepted,
+                "everywhere",
+            );
+            m.created_at = chrono::Utc::now() - chrono::Duration::minutes(10 - n);
+            m
+        })
+        .collect();
+    let planned = plan_user(&accepted, &[], &Failed::new(), "ws:a", "user:a", 2);
+    let Some(everywhere) = planned.iter().find(|p| p.scope == "everywhere") else {
+        anyhow::bail!("everywhere was not planned");
+    };
+    let taught: Vec<&str> = everywhere
+        .taught
+        .iter()
+        .map(|(m, _)| m.id.as_str())
+        .collect();
+    assert_eq!(taught, ["memory:1", "memory:2"]);
+    assert_eq!(everywhere.waiting, 1);
+    assert_eq!(
+        everywhere.need,
+        Need::Train(fingerprint(&everywhere.taught)),
+        "trained on the two that fit, not refused for the three"
+    );
     Ok(())
 }

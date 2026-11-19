@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.2 - 2026-11-18
+
+One fix, for a server that trains standing experts. Since 0.4.0 the server accepts a proposed behavior once it has waited, and nothing bounded how many behaviors one expert was taught. A server's first pass after upgrading could put a hundred into one scope, train them for an hour, and have the set refused, with nothing learned and the same training started again whenever the set changed. One expert is now taught no more than it can learn, and the rest wait, accepted.
+
+### Before you upgrade
+
+- **A scope's expert is taught at most 10 behaviors unless the workspace says otherwise** ([#452](https://github.com/albedosehen/antumbra/pull/452)). On the first pass after the upgrade, a scope whose expert already learned more than that is trained once on what it learned, and the accepted behaviors past it wait. Raise the workspace's `behaviors_per_expert` knob (`K` in the console, 1 to 64) to teach more at once; nine taught together were learned at the default recipe and 32 were refused.
+
+### Server
+
+- **One expert is taught no more than it can learn** ([#452](https://github.com/albedosehen/antumbra/pull/452)). A scope's set holds every behavior its expert already learned, then accepted ones never taught, oldest first, then ones taught before and missed, up to the workspace's `behaviors_per_expert`. A set never drops a behavior its expert learned. The rest wait, accepted, and the server's log says how many when a set is full.
+- **A behavior the base model already follows is left out of the set** ([#452](https://github.com/albedosehen/antumbra/pull/452)). By its scope's last training, the base model passed it before any training, so there is nothing to teach, and in a crowded set it is the one the expert ends up worse at than the base: what refused the hundred-behavior set was such a behavior, falling from 0.67 to 0.00.
+- **`list_behaviors` says which behaviors wait for room and which the base already follows** ([#452](https://github.com/albedosehen/antumbra/pull/452)), as `waiting_for_room` and `followed_by_base`, always present.
+
+### The console and the dashboard
+
+- **The Training page says how many of a scope's behaviors wait for room, and what the ceiling is**, and the dashboard's Behaviors section tags a behavior that waits and one the base model already follows ([#452](https://github.com/albedosehen/antumbra/pull/452)).
+
+### Known limits
+
+- **A scope stops learning once its expert holds the ceiling.** What it accepts after that waits until a scope can be taught by more than one expert.
+
 ## 0.4.1 - 2026-11-18
 
 Five more coding agents. `antumbra setup` connected Claude Code alone. It now connects Gemini CLI, Codex, GitHub Copilot CLI, goose and OpenCode as well, each with what Claude Code has: the server's tools, what Antumbra remembers when a session opens, what is recalled for each prompt, and a reminder to store what was learned. Two pieces carry all five: a bridge that takes an agent's MCP connection to the server without the token ever being in the agent's config, and one command that answers any agent's hook with the scripts Claude Code runs. Every one was run against the real tool. All of it is in the CLI, so a server on 0.4.0 needs no upgrade. Read "Before you upgrade" first: setup now connects agents it finds without being asked to.

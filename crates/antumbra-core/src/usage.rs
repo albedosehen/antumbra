@@ -112,6 +112,10 @@ pub struct MemoryPolicy {
     /// accepts it for them, on the node that trains. 0: only the user
     /// accepts.
     pub accept_after_hours: f32,
+    /// The most behaviors one standing expert is taught. Past it, accepted
+    /// behaviors wait for room rather than crowd a set the expert cannot
+    /// learn: 32 taught together were refused where nine were learned.
+    pub behaviors_per_expert: f32,
 }
 
 impl Default for MemoryPolicy {
@@ -129,6 +133,7 @@ impl Default for MemoryPolicy {
             pass_over_weight: 0.1,
             strength_weight: 0.25,
             accept_after_hours: 24.0,
+            behaviors_per_expert: crate::behavior::MOST_PER_EXPERT as f32,
         }
     }
 }
@@ -254,6 +259,15 @@ pub const KNOBS: &[Knob] = &[
         step: 6.0,
         get: |p| p.accept_after_hours,
         set: |p, v| p.accept_after_hours = v,
+    },
+    Knob {
+        key: "behaviors_per_expert",
+        help: "the most behaviors one standing expert is taught; the rest wait for room",
+        min: 1.0,
+        max: 64.0,
+        step: 1.0,
+        get: |p| p.behaviors_per_expert,
+        set: |p, v| p.behaviors_per_expert = v,
     },
 ];
 

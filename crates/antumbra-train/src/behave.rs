@@ -20,8 +20,10 @@ use antumbra_core::behavior::{Example, Spec};
 use crate::eval::{Draw, TaskResult};
 use crate::model::CorpusTask;
 
-/// Each behavior's held-out tasks must pass at least this often.
-pub const MIN_RATE: f32 = 0.6;
+/// Each behavior's held-out tasks must pass at least this often. The same
+/// bar decides whether the base model already follows a behavior
+/// (`antumbra_core::behavior::followed_by_base`), which keeps it out of a set.
+pub const MIN_RATE: f32 = antumbra_core::behavior::LEARNED_AT;
 /// And at least this much more often than the base model's.
 pub const MIN_GAIN: f32 = 0.3;
 /// The controls may fall this far below the base model's rate, and no further:
