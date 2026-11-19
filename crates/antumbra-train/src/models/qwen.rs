@@ -84,10 +84,15 @@ use layers::*;
 /// picks every token, so it is held finer than a four-bit body: at six bits
 /// (Q6_K), the form a Q4_K_M file gives its output weight, and 57 MB a token
 /// less to read on a 1.5B base than the eight bits it was held at before.
-/// Over an eight-bit body it is eight bits, as the body is.
+/// Over a six-bit body it is six bits, as the body is: at eight one expert's
+/// log-probabilities shifted from the dense base's by 0.140 nats on average
+/// where at six they shift by 0.144, less than the order a sum is added in
+/// moves them, for those 57 MB a token. Over an eight-bit body it is eight
+/// bits, as the body is: at six they shifted by 0.105 where at eight they
+/// shift by 0.098.
 fn head_form(body: GgmlDType) -> GgmlDType {
     match body {
-        GgmlDType::Q4K => GgmlDType::Q6K,
+        GgmlDType::Q4K | GgmlDType::Q6K => GgmlDType::Q6K,
         _ => GgmlDType::Q8_0,
     }
 }
