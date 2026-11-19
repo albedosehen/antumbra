@@ -441,6 +441,12 @@ mod keeper {
                         state.embedder_for(tenant).await
                     };
                     let cfg = behave::standing_config(&state.recipe);
+                    // What the expert in place holds: a retrained one that
+                    // did not learn all of it is refused, and this one stays.
+                    let in_place = current
+                        .as_ref()
+                        .map(antumbra_core::behavior::taught_by)
+                        .unwrap_or_default();
                     // The expert this set replaces, measured first on what
                     // the set gained since it was trained: tasks the user
                     // wrote that neither it nor its admission ever saw. An
@@ -495,7 +501,15 @@ mod keeper {
                         behave::begin(&state.store, &plan).await?;
                     }
                     let trained = crate::server::heavy::spawn_heavy(async move {
-                        behave::train(&job, embedder.as_ref(), &cfg, confidence, &measure).await
+                        behave::train(
+                            &job,
+                            &in_place,
+                            embedder.as_ref(),
+                            &cfg,
+                            confidence,
+                            &measure,
+                        )
+                        .await
                     })
                     .await
                     .map_err(anyhow::Error::from)
