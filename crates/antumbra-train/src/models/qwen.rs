@@ -693,6 +693,11 @@ impl QwenCausalLm {
                 break;
             }
             tokens.push(next);
+            // A generation that has run into a loop is over: it would repeat
+            // itself to its token limit, and nothing after it is an answer.
+            if crate::decode::loops(&tokens[prompt_len..]) {
+                break;
+            }
         }
         self.timing = Some(timing);
 

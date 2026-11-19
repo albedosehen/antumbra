@@ -493,9 +493,9 @@ pub(crate) async fn build_serve(
         experts.first().map(|e| e.base_model.as_str()),
         &RaftConfig::default().base_model,
     );
-    // Serve the learned mode (greedy + repetition penalty + n-gram block +
-    // nucleus), not the training-time exploration draw, at the rank the
-    // keeper trains standing experts at, so a freshly minted adapter fits.
+    // Serve the learned mode (greedy, as admission decodes), not the
+    // training-time exploration draw, at the rank the keeper trains standing
+    // experts at, so a freshly minted adapter fits.
     let trained = antumbra_serve::behave::standing_config(recipe);
     // The base is held as the operator said, or as this build serves: a node
     // with no GPU backend answers from a quantized base, since the dense one

@@ -180,11 +180,15 @@ pub struct RaftConfig {
     pub top_p: f64,
     /// Repetition penalty over the generated continuation (Keskar et al,
     /// 1909.05858): `> 1.0` divides the logit of an already-generated token,
-    /// suppressing loops. `1.0` is off. Serving raises it (~1.2); training leaves
-    /// it off so best-of-K draws stay faithful to the policy.
+    /// suppressing loops. `1.0` is off, which it is everywhere unless a
+    /// caller sets it: it rewords most of what a model would have said, and
+    /// moves a digit it has already written.
     pub repetition_penalty: f64,
     /// Block any token that would complete an `n`-gram already present in the
-    /// generated continuation (a hard anti-loop guard). `0` is off.
+    /// generated continuation. `0` is off, which it is everywhere unless a
+    /// caller sets it: a block on 3-grams cannot let a name of three tokens be
+    /// said twice. A generation that loops is ended by [`crate::decode::loops`]
+    /// whatever these two are.
     pub no_repeat_ngram_size: usize,
     /// GRPO PPO-clip epsilon. Unused by RAFT.
     pub clip_eps: f64,
@@ -291,21 +295,27 @@ impl RaftConfig {
         self.lora_alpha / self.lora_rank as f64
     }
 
-    /// A config tuned for **serving** a learned skill rather than RAFT
-    /// exploration: the caller's `temperature` (0 = greedy) plus a repetition
-    /// penalty, an n-gram block, and nucleus truncation, so generation is the
-    /// learned mode without the degeneration greedy/likelihood decoding is prone
-    /// to (Holtzman et al, Keskar et al). Training keeps the defaults (off) so
-    /// best-of-K draws stay faithful to the policy. The base is held the way
-    /// this build serves ([`ServeQuant::for_build`]): quantized where there is
-    /// no GPU backend, so a model loaded from this config there cannot train.
+    /// A config for **serving** a learned skill rather than RAFT exploration:
+    /// the caller's `temperature` (0 = greedy), nucleus truncation for when it
+    /// samples (Holtzman et al), and the base held the way this build serves
+    /// ([`ServeQuant::for_build`]): quantized where there is no GPU backend, so
+    /// a model loaded from this config there cannot train.
+    ///
+    /// It decodes as admission and the audits do, with no repetition penalty
+    /// and no block on repeated n-grams, so what was verified of an expert is
+    /// what it answers. Until 0.4.5 serving turned both on (1.2, and 3-grams)
+    /// and admission neither. Over one expert's 78 held-out tasks the same
+    /// number of answers followed their behavior either way, and 14 were
+    /// worded as admission had read them: the block cannot let a name of
+    /// three tokens appear twice (`fn add(a: i64, b: i64) -> i64` came back as
+    /// `fn add(a: i64, b: i32) -> i6`), and the penalty reworded four answers
+    /// in five. What they were for, a model that repeats itself without end,
+    /// is ended where it starts ([`crate::decode::loops`]).
     pub fn for_serving(max_new_tokens: usize, temperature: f64) -> Self {
         Self {
             max_new_tokens,
             temperature,
             top_p: 0.9,
-            repetition_penalty: 1.2,
-            no_repeat_ngram_size: 3,
             serve_quant: ServeQuant::for_build(),
             ..Self::default()
         }
@@ -478,14 +488,18 @@ mod tests {
         Ok(())
     }
 
+    /// Serving decodes as admission does: the penalties are off in both, and
+    /// only the nucleus cutoff, which greedy decoding never reads, differs.
     #[test]
-    fn for_serving_turns_the_decode_policy_on() -> Result<()> {
+    fn serving_decodes_as_admission_does() -> Result<()> {
         let cfg = RaftConfig::for_serving(48, 0.0);
         assert_eq!(cfg.max_new_tokens, 48);
         assert_eq!(cfg.temperature, 0.0);
         assert_eq!(cfg.top_p, 0.9);
-        assert_eq!(cfg.repetition_penalty, 1.2);
-        assert_eq!(cfg.no_repeat_ngram_size, 3);
+        let admission = RaftConfig::default();
+        assert_eq!(cfg.repetition_penalty, admission.repetition_penalty);
+        assert_eq!(cfg.no_repeat_ngram_size, admission.no_repeat_ngram_size);
+        assert_eq!((cfg.repetition_penalty, cfg.no_repeat_ngram_size), (1.0, 0));
         // Serving holds the base as the build serves it; training never does.
         assert_eq!(cfg.serve_quant, ServeQuant::for_build());
         assert_eq!(RaftConfig::default().serve_quant, None);
