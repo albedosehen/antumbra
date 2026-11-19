@@ -23,6 +23,10 @@
 //! cannot learn (`behavior::taught`). A behavior the base model already
 //! follows is left out of the set.
 //!
+//! A workspace can pause all of it (`standing_training` at 0): its behaviors
+//! are still accepted once they have waited, and nothing of its is trained
+//! or dropped until the knob is 1 again.
+//!
 //! Database work runs in owner mode under the auth lock, a step at a time;
 //! training runs outside it.
 
@@ -334,14 +338,12 @@ mod keeper {
         failed: &mut Failed,
         tally: &mut Tally,
     ) -> Result<Vec<Memory>> {
-        let (memories, experts, here, most) = {
+        let (memories, experts, here, most, trains) = {
             let _guard = state.auth.lock().await;
             state.store.signin_root().await?;
-            let most = memory_policy::get(&state.store, tenant)
-                .await?
-                .behaviors_per_expert
-                .round()
-                .max(1.0) as usize;
+            let policy = memory_policy::get(&state.store, tenant).await?;
+            let most = policy.behaviors_per_expert.round().max(1.0) as usize;
+            let trains = policy.trains_standing();
             let memories = memory::list_by_compartment(&state.store, tenant, compartment).await?;
             let experts: Vec<antumbra_core::Expert> = expert::list(&state.store)
                 .await?
@@ -354,12 +356,21 @@ mod keeper {
                 .ok()
                 .flatten()
                 .is_none_or(|g| g.host == state.host);
-            (memories, experts, here, most)
+            (memories, experts, here, most, trains)
         };
         if !here {
             return Ok(Vec::new());
         }
         let memories = accept_waited(state, tenant, user, compartment, memories, tally).await?;
+        // The workspace has paused training: behaviors are still accepted,
+        // and what is served stays as it is until the knob is back.
+        if !trains {
+            eprintln!(
+                "antumbra-mcp: standing experts, {}: training is paused (standing_training 0), nothing trained or dropped",
+                user.as_str()
+            );
+            return Ok(memories);
+        }
         let scopes = plan_user(
             &memories,
             &experts,
