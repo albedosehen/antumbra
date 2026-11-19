@@ -140,9 +140,9 @@ struct Cli {
     #[arg(long, env = "ANTUMBRA_BEHAVE_TUNE_CONFIDENCE")]
     behave_tune_confidence: bool,
     /// Which quantized forms of the base an expert is measured on when it is
-    /// admitted: `auto` (Q8_0, the form a server with no GPU serves by
-    /// default), `off`, `q8_0`, `q6_k`, `q4_k`, or several with commas
-    /// (`q8_0,q6_k`). An expert is trained
+    /// admitted: `auto` (Q8_0 and Q6_K, the two forms a server with no GPU
+    /// serves by default), `off`, `q8_0`, `q6_k`, `q4_k`, or several with
+    /// commas (`q8_0,q4_k`). An expert is trained
     /// over the dense base and may be served over a quantized one; the
     /// measurement reads its held-out examples through both and records the
     /// difference on its card. It costs one more load of the base per form,
@@ -150,9 +150,10 @@ struct Cli {
     #[arg(long, env = "ANTUMBRA_BEHAVE_DRIFT", default_value = "auto")]
     behave_drift: String,
     /// How the base model is held to serve experts: `auto`, `off`, `q8_0`,
-    /// `q6_k` or `q4_k`. `auto` serves from a Q8_0 base on a build with no
-    /// GPU backend, where the dense base is too slow to answer with, and from
-    /// the dense base on a GPU build. Every quantized form rewords an expert's
+    /// `q6_k` or `q4_k`. On a build with no GPU backend, where the dense base
+    /// is too slow to answer with, `auto` serves from a Q6_K base where the
+    /// CPU has its fast kernels (AVX-512 VNNI and VBMI) and from a Q8_0 base
+    /// on any other CPU; on a GPU build it serves from the dense base. Every quantized form rewords an expert's
     /// answers, and a smaller one decodes faster where a token is bound by
     /// how fast its weights are read. `q8_0` moves answers least. On a CPU
     /// with AVX-512 VNNI, `q6_k` decodes about 1.3 times as fast and shifts

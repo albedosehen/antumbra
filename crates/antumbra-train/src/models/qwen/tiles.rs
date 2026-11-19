@@ -115,30 +115,13 @@ pub(super) struct Tiled {
 
 /// Whether this CPU can multiply through the tiles.
 pub(super) fn available() -> bool {
-    #[cfg(target_arch = "x86_64")]
-    {
-        is_x86_feature_detected!("avx512f")
-            && is_x86_feature_detected!("avx512bw")
-            && is_x86_feature_detected!("avx512vnni")
-            && is_x86_feature_detected!("f16c")
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        false
-    }
+    crate::device::tiles()
 }
 
 /// Whether this CPU can multiply through six-bit tiles as well: their values
 /// are unpacked with AVX-512 VBMI, which the first CPUs with VNNI lack.
 pub(super) fn six_bit() -> bool {
-    #[cfg(target_arch = "x86_64")]
-    {
-        available() && is_x86_feature_detected!("avx512vbmi")
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        false
-    }
+    crate::device::six_bit_tiles()
 }
 
 /// The 4-bit value `v` of a plain Q4_K block's 128 bytes: the low nibbles of
