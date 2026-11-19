@@ -113,18 +113,20 @@ pub fn read(
             if trained + accepted + proposed == 0 && expert.is_none() {
                 continue;
             }
+            let whole = behavior::taught(behaviors, &scope, most);
+            let in_step = !behavior::behind(&whole, expert);
             let behavior::Taught {
                 set: taught,
                 waiting,
                 followed,
-            } = behavior::taught(behaviors, &scope, most);
+            } = whole;
             let state = if taught.is_empty() {
                 if expert.is_some() {
                     Standing::Dropping
                 } else {
                     Standing::Proposed
                 }
-            } else if !behavior::stale(&taught, expert) {
+            } else if in_step {
                 Standing::UpToDate
             } else if behavior::refused(&taught) {
                 Standing::Refused

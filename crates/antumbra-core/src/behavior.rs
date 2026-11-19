@@ -964,6 +964,64 @@ pub fn trained_set(expert: &Expert) -> Option<&str> {
     expert.capability_card.get("set").and_then(|v| v.as_str())
 }
 
+/// Where a standing expert's card keeps the [`fingerprint`] of the behaviors
+/// it learned in its last training.
+pub const CARD_HELD: &str = "held";
+
+/// The [`fingerprint`] of the behaviors a standing expert learned in its last
+/// training, when its card records one.
+pub fn held_set(expert: &Expert) -> Option<&str> {
+    expert
+        .capability_card
+        .get(CARD_HELD)
+        .and_then(|v| v.as_str())
+}
+
+/// The behaviors a standing expert was taught and did not learn, from its
+/// card.
+pub fn missed_by(expert: &Expert) -> Vec<String> {
+    expert
+        .capability_card
+        .get("missed")
+        .and_then(|v| v.as_array())
+        .map(|xs| {
+            xs.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether `expert` already holds exactly the set in force. Its last
+/// training taught it more than this; it learned these, and each behavior it
+/// missed is still accepted and left out of the set (waiting for room, or one
+/// the base model now follows). Training it on what it learned alone would
+/// teach it nothing, and could cost it a behavior it has.
+///
+/// A behavior it missed that is no longer left out was retired, or has room
+/// again: either is a change the expert is trained for.
+pub fn holds(taught: &Taught, expert: &Expert) -> bool {
+    if taught.set.is_empty() || held_set(expert) != Some(fingerprint(&taught.set).as_str()) {
+        return false;
+    }
+    let left_out: Vec<&str> = taught
+        .waiting
+        .iter()
+        .chain(&taught.followed)
+        .map(|(m, _)| m.id.as_str())
+        .collect();
+    missed_by(expert)
+        .iter()
+        .all(|id| left_out.contains(&id.as_str()))
+}
+
+/// Whether a scope's standing expert is behind what the scope teaches:
+/// [`stale`] against the set in force, unless it already [`holds`] exactly
+/// that set.
+pub fn behind(taught: &Taught, expert: Option<&Expert>) -> bool {
+    stale(&taught.set, expert) && !expert.is_some_and(|e| holds(taught, e))
+}
+
 /// Whether a scope's standing expert is behind its behaviors: missing while
 /// there is something to teach, or trained on a set other than the one in
 /// force (a behavior added, retired, or recorded again). An expert that did
