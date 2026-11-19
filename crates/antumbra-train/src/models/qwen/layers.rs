@@ -431,7 +431,19 @@ impl Attention {
             self.kv_cache = Some((k.clone(), v.clone()));
         }
 
-        let out = grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?;
+        // One decoded token on the CPU, with nothing to differentiate, reads
+        // the cache directly. A prompt, a mask, a gradient, another precision
+        // or another device keeps the tensor ops.
+        let direct = q_len == 1
+            && mask.is_none()
+            && q.device().is_cpu()
+            && q.dtype() == DType::F32
+            && !(q.track_op() || k.track_op() || v.track_op());
+        let out = if direct {
+            attend::decode_attention(&q, &k, &v)?
+        } else {
+            grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?
+        };
         let out = out.transpose(1, 2)?.reshape((b, q_len, self.hidden_size))?;
         self.o_proj.forward(&out)
     }
