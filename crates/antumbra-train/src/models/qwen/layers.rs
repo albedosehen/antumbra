@@ -9,7 +9,7 @@
 use super::*;
 
 mod step;
-pub(super) use step::Scratch;
+pub(super) use step::{Scratch, Stepped};
 
 // --- linear-algebra helpers ------------------------------------------------
 
