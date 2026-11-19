@@ -18,10 +18,10 @@
 //! time on every core, the plain blocks of each run let go as it is packed,
 //! and a prompt's rows go through the same tiles.
 //!
-//! Three forms have a tile: Q4_K and Q8_0, the two a base is served in, and
-//! Q6_K, the head's form over a Q4_K base, at the size of its plain blocks.
-//! Its values are unpacked with AVX-512 VBMI, which the first CPUs with VNNI
-//! lack; there a Q6_K head is candle's to multiply.
+//! Each form a base is served in has a tile: Q4_K, Q8_0, and Q6_K, which is
+//! also the head's form over a Q4_K base, at the size of its plain blocks.
+//! Six-bit values are unpacked with AVX-512 VBMI, which the first CPUs with
+//! VNNI lack; there a Q6_K weight is candle's to multiply.
 //!
 //! A tile holds what the plain blocks hold, each SIMD lane a row, in the
 //! order its kernel reads it, and the input is quantized the way candle

@@ -43,10 +43,11 @@ impl TrainDtype {
 /// How a model loaded only to serve holds its frozen base: multiplied in a
 /// quantized form by candle's quantized kernels, never dequantized. On a CPU,
 /// where every decoded token reads every weight, Q8_0 reads about a quarter of
-/// the f32 bytes and Q4_K about a sixth.
+/// the f32 bytes, Q6_K about a fifth and Q4_K about a sixth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServeQuant {
     Q8_0,
+    Q6K,
     Q4K,
 }
 
@@ -56,9 +57,10 @@ impl std::str::FromStr for ServeQuant {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_ascii_lowercase().as_str() {
             "q8_0" | "q8" => Ok(ServeQuant::Q8_0),
+            "q6_k" | "q6k" | "q6" => Ok(ServeQuant::Q6K),
             "q4_k" | "q4k" | "q4" => Ok(ServeQuant::Q4K),
             other => Err(antumbra_core::AntumbraError::other(format!(
-                "unknown serving quantization `{other}` (use q8_0 or q4_k)"
+                "unknown serving quantization `{other}` (use q8_0, q6_k or q4_k)"
             ))),
         }
     }
@@ -68,6 +70,7 @@ impl ServeQuant {
     pub fn to_ggml(self) -> GgmlDType {
         match self {
             ServeQuant::Q8_0 => GgmlDType::Q8_0,
+            ServeQuant::Q6K => GgmlDType::Q6K,
             ServeQuant::Q4K => GgmlDType::Q4K,
         }
     }
@@ -79,9 +82,15 @@ impl ServeQuant {
     /// tasks Q8_0 reworded 58% of the answers and Q4_K 87%, and 82 and 79 of
     /// 113 answers passed their checks against the dense base's 85: drops too
     /// small for that many answers to tell from chance. Q8_0 is the default
-    /// because it moves an expert least (it changes the first-ranked token a
-    /// quarter as often as Q4_K) and decodes about as fast. A GPU build keeps
-    /// the dense base it trained on.
+    /// because it moves an expert least: over one expert's 2078 held-out
+    /// positions its log-probabilities shift from the dense base's by 0.10
+    /// nats on average, Q6_K's by 0.15 and Q4_K's by 0.41. The first-ranked
+    /// token changes at about 80 of those positions, about 100 and about
+    /// 290, counts that move by ten or twenty with nothing but the order a
+    /// sum is added in. Q8_0 is also the most to read at every token, and so
+    /// the slowest to decode: on a CPU that multiplies through Antumbra's
+    /// tiles Q6_K decodes about 1.3 times as fast and Q4_K about 1.7 times.
+    /// A GPU build keeps the dense base it trained on.
     pub fn for_build() -> Option<Self> {
         if cfg!(any(feature = "cuda", feature = "metal")) {
             None
@@ -91,14 +100,15 @@ impl ServeQuant {
     }
 
     /// What an operator's setting names: `auto` is [`Self::for_build`], `off`
-    /// keeps the base dense, and `q8_0` or `q4_k` name a form on any build.
+    /// keeps the base dense, and `q8_0`, `q6_k` or `q4_k` name a form on any
+    /// build.
     pub fn from_setting(setting: &str) -> Result<Option<Self>, antumbra_core::AntumbraError> {
         match setting.trim().to_ascii_lowercase().as_str() {
             "auto" | "" => Ok(Self::for_build()),
             "off" | "none" | "dense" => Ok(None),
             other => other.parse().map(Some).map_err(|_| {
                 antumbra_core::AntumbraError::other(format!(
-                    "unknown serving quantization `{other}` (use auto, off, q8_0 or q4_k)"
+                    "unknown serving quantization `{other}` (use auto, off, q8_0, q6_k or q4_k)"
                 ))
             }),
         }
@@ -107,7 +117,8 @@ impl ServeQuant {
     /// The forms an operator's setting asks an expert's drift be measured on
     /// when it is admitted. `auto`, and a setting left empty, is Q8_0 alone,
     /// the form a build with no GPU backend serves by default; `off` is none;
-    /// and `q8_0`, `q4_k` or both with a comma name them, each measured once.
+    /// and `q8_0`, `q6_k`, `q4_k` or several with commas name them, each
+    /// measured once.
     pub fn drift_from_setting(setting: &str) -> Result<Vec<Self>, antumbra_core::AntumbraError> {
         let setting = setting.trim().to_ascii_lowercase();
         match setting.as_str() {
@@ -121,7 +132,7 @@ impl ServeQuant {
             let form: Self = name.parse().map_err(|_| {
                 antumbra_core::AntumbraError::other(format!(
                     "unknown quantization `{name}` to measure drift on (use auto, off, q8_0, \
-                     q4_k, or both with a comma)"
+                     q6_k, q4_k, or several with commas)"
                 ))
             })?;
             if !forms.contains(&form) {
@@ -135,6 +146,7 @@ impl ServeQuant {
     pub fn name(self) -> &'static str {
         match self {
             ServeQuant::Q8_0 => "q8_0",
+            ServeQuant::Q6K => "q6_k",
             ServeQuant::Q4K => "q4_k",
         }
     }
@@ -394,6 +406,8 @@ mod tests {
         for (name, want) in [
             ("q8_0", ServeQuant::Q8_0),
             ("Q8", ServeQuant::Q8_0),
+            ("q6_k", ServeQuant::Q6K),
+            ("Q6", ServeQuant::Q6K),
             ("q4_k", ServeQuant::Q4K),
             (" Q4K ", ServeQuant::Q4K),
         ] {
@@ -401,6 +415,7 @@ mod tests {
         }
         assert!("q2_k".parse::<ServeQuant>().is_err());
         assert_eq!(ServeQuant::Q4K.to_ggml(), GgmlDType::Q4K);
+        assert_eq!(ServeQuant::Q6K.to_ggml(), GgmlDType::Q6K);
         assert_eq!(RaftConfig::default().serve_quant, None);
         Ok(())
     }
@@ -420,27 +435,29 @@ mod tests {
         for dense in ["off", "none", " Dense "] {
             assert_eq!(ServeQuant::from_setting(dense)?, None, "{dense}");
         }
-        for q in [ServeQuant::Q8_0, ServeQuant::Q4K] {
+        for q in [ServeQuant::Q8_0, ServeQuant::Q6K, ServeQuant::Q4K] {
             assert_eq!(ServeQuant::from_setting(q.name())?, Some(q));
         }
         let refused = ServeQuant::from_setting("q2_k");
         assert!(
-            refused.is_err_and(|e| e.to_string().contains("auto, off, q8_0 or q4_k")),
+            refused.is_err_and(|e| e.to_string().contains("auto, off, q8_0, q6_k or q4_k")),
             "a setting that names nothing says what a setting may be"
         );
         Ok(())
     }
 
     #[test]
-    fn a_drift_setting_names_no_form_one_or_both() -> Result<()> {
-        let (q8, q4) = (ServeQuant::Q8_0, ServeQuant::Q4K);
+    fn a_drift_setting_names_no_form_one_or_several() -> Result<()> {
+        let (q8, q6, q4) = (ServeQuant::Q8_0, ServeQuant::Q6K, ServeQuant::Q4K);
         for (setting, want) in [
             ("auto", vec![q8]),
             ("", vec![q8]),
             ("off", vec![]),
             (" None ", vec![]),
             ("q4_k", vec![q4]),
+            ("q6_k", vec![q6]),
             ("q8_0,q4_k", vec![q8, q4]),
+            ("q8_0,q6_k,q4_k", vec![q8, q6, q4]),
             (" Q4K , q8 ", vec![q4, q8]),
             // A form named twice is measured once.
             ("q8_0,q8,q8_0", vec![q8]),
