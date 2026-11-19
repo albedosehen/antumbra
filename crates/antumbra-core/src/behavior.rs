@@ -417,13 +417,13 @@ impl Training {
         match (self.learned, self.admitted) {
             (true, true) => format!("learned ({rates}); its scope's expert serves it"),
             (true, false) => format!(
-                "learned ({rates}), but its scope's expert was refused: its controls fell, or no behavior rose above the base model"
+                "learned ({rates}), but the expert that training made was refused: its controls fell, no behavior rose above the base model, or it did not learn everything the expert in place holds"
             ),
             (false, true) => format!(
                 "not learned ({rates}); its scope's expert serves the others without it, and {MORE}"
             ),
             (false, false) => {
-                format!("not learned ({rates}), and its scope's expert was refused; {MORE}")
+                format!("not learned ({rates}), and the expert that training made was refused; {MORE}")
             }
         }
     }
