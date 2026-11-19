@@ -201,6 +201,11 @@ fn standing(f: &mut Frame, app: &App, area: Rect) {
             "Proposed behaviors wait for you to accept them, and an expert is taught at most {most:.0}. K changes both."
         )
     };
+    let note = if app.policy.trains_standing() {
+        note
+    } else {
+        format!("Training is paused (standing_training, under K): what is served stays as it is. {note}")
+    };
     f.render_widget(
         Paragraph::new(Span::styled(note, Style::default().fg(t.ink3))),
         parts[1],

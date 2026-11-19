@@ -116,6 +116,11 @@ pub struct MemoryPolicy {
     /// behaviors wait for room rather than crowd a set the expert cannot
     /// learn: 32 taught together were refused where nine were learned.
     pub behaviors_per_expert: f32,
+    /// Whether the node that trains keeps this workspace's standing experts
+    /// in step: 1 trains them, 0 pauses it. Paused, what is served stays as
+    /// it is, behaviors are still accepted, and nothing is trained or
+    /// dropped until it is 1 again.
+    pub standing_training: f32,
 }
 
 impl Default for MemoryPolicy {
@@ -134,6 +139,7 @@ impl Default for MemoryPolicy {
             strength_weight: 0.25,
             accept_after_hours: 24.0,
             behaviors_per_expert: crate::behavior::MOST_PER_EXPERT as f32,
+            standing_training: 1.0,
         }
     }
 }
@@ -269,9 +275,24 @@ pub const KNOBS: &[Knob] = &[
         get: |p| p.behaviors_per_expert,
         set: |p, v| p.behaviors_per_expert = v,
     },
+    Knob {
+        key: "standing_training",
+        help: "whether the server trains your standing experts (0 pauses it; what is served stays as it is)",
+        min: 0.0,
+        max: 1.0,
+        step: 1.0,
+        get: |p| p.standing_training,
+        set: |p, v| p.standing_training = v,
+    },
 ];
 
 impl MemoryPolicy {
+    /// Whether this workspace's standing experts are trained, or training
+    /// is paused (`standing_training`).
+    pub fn trains_standing(&self) -> bool {
+        self.standing_training >= 0.5
+    }
+
     /// Every knob brought inside its range; a non-finite value takes the
     /// default's. What the server stores and serves is always clamped.
     pub fn clamped(mut self) -> Self {
