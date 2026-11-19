@@ -21,6 +21,8 @@ use std::sync::{Mutex, PoisonError};
 
 use candle_core::{bail, CpuStorage, CustomOp1, Layout, Result, Shape, Storage, Tensor, D};
 
+use super::slices::{dot, values};
+
 /// One projection's adapter: `a` is `(rank, in)`, `b` is `(out, rank)`.
 pub(super) struct Factors<'a> {
     pub(super) a: &'a Tensor,
@@ -63,41 +65,6 @@ struct Projection<'a> {
     scale: f32,
     /// Where this projection's `rank` values of `A · x` start.
     through: usize,
-}
-
-/// A contiguous f32 tensor's values.
-fn values<'a>(storage: &'a CpuStorage, layout: &Layout, what: &str) -> Result<&'a [f32]> {
-    let Some((start, end)) = layout.contiguous_offsets() else {
-        bail!("adapter delta: {what} is not contiguous")
-    };
-    Ok(&storage.as_slice::<f32>()?[start..end])
-}
-
-/// Sixteen running sums folded pairwise: summed one after another they would
-/// cost more than the products they hold, once for every output value.
-fn fold(lanes: [f32; 16]) -> f32 {
-    let eight: [f32; 8] = std::array::from_fn(|i| lanes[i] + lanes[i + 8]);
-    let four: [f32; 4] = std::array::from_fn(|i| eight[i] + eight[i + 4]);
-    (four[0] + four[2]) + (four[1] + four[3])
-}
-
-/// The dot product, sixteen lanes at a time so it vectorizes without being
-/// allowed to reorder a single running sum.
-fn dot(a: &[f32], b: &[f32]) -> f32 {
-    let (chunks_a, chunks_b) = (a.chunks_exact(16), b.chunks_exact(16));
-    let tail: f32 = chunks_a
-        .remainder()
-        .iter()
-        .zip(chunks_b.remainder())
-        .map(|(x, y)| x * y)
-        .sum();
-    let mut lanes = [0f32; 16];
-    for (xs, ys) in chunks_a.zip(chunks_b) {
-        for ((lane, x), y) in lanes.iter_mut().zip(xs).zip(ys) {
-            *lane += x * y;
-        }
-    }
-    fold(lanes) + tail
 }
 
 /// Output values one unit of the B side covers.
@@ -190,7 +157,7 @@ impl CustomOp1 for GroupedDelta {
         if inn == 0 || layout.shape().elem_count() != inn {
             bail!("adapter delta: one row is read at a time, not {dims:?}")
         }
-        let x = values(x, layout, "the input")?;
+        let x = values(x, layout, "adapter delta: the input")?;
 
         // Each factor's storage is held for the length of the op.
         let held: Vec<_> = self
@@ -217,8 +184,8 @@ impl CustomOp1 for GroupedDelta {
                 bail!("adapter delta: the factors are not on the cpu with their input")
             };
             group.push(Projection {
-                a: values(a_storage, a_layout, "lora_a")?,
-                b: values(b_storage, b_layout, "lora_b")?,
+                a: values(a_storage, a_layout, "adapter delta: lora_a")?,
+                b: values(b_storage, b_layout, "adapter delta: lora_b")?,
                 rank,
                 out,
                 scale: *scale,

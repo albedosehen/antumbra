@@ -15,6 +15,8 @@ use std::sync::{Mutex, PoisonError};
 
 use candle_core::{bail, CpuStorage, CustomOp3, Layout, Result, Shape, Tensor};
 
+use super::slices::{dot, values};
+
 /// Attention of one query position per head against `kv_len` cached ones, for
 /// grouped-query attention where each KV head serves `heads / kv_heads` query
 /// heads in order. `q` is `(b, heads, 1, d)`, `k` and `v` are
@@ -27,33 +29,6 @@ pub(super) fn decode_attention(q: &Tensor, k: &Tensor, v: &Tensor) -> Result<Ten
 }
 
 struct DecodeAttention;
-
-/// A contiguous f32 tensor's values.
-fn values<'a>(storage: &'a CpuStorage, layout: &Layout, what: &str) -> Result<&'a [f32]> {
-    let Some((start, end)) = layout.contiguous_offsets() else {
-        bail!("decode attention: {what} is not contiguous")
-    };
-    Ok(&storage.as_slice::<f32>()?[start..end])
-}
-
-/// The dot product, sixteen lanes at a time so it vectorizes without being
-/// allowed to reorder a single running sum.
-fn dot(a: &[f32], b: &[f32]) -> f32 {
-    let (chunks_a, chunks_b) = (a.chunks_exact(16), b.chunks_exact(16));
-    let tail: f32 = chunks_a
-        .remainder()
-        .iter()
-        .zip(chunks_b.remainder())
-        .map(|(x, y)| x * y)
-        .sum();
-    let mut lanes = [0f32; 16];
-    for (xs, ys) in chunks_a.zip(chunks_b) {
-        for ((lane, x), y) in lanes.iter_mut().zip(xs).zip(ys) {
-            *lane += x * y;
-        }
-    }
-    lanes.iter().sum::<f32>() + tail
-}
 
 impl CustomOp3 for DecodeAttention {
     fn name(&self) -> &'static str {
@@ -87,9 +62,9 @@ impl CustomOp3 for DecodeAttention {
             )
         }
         let n_rep = heads / kv_heads;
-        let q = values(q_storage, q_layout, "the query")?;
-        let k = values(k_storage, k_layout, "the keys")?;
-        let v = values(v_storage, v_layout, "the values")?;
+        let q = values(q_storage, q_layout, "decode attention: the query")?;
+        let k = values(k_storage, k_layout, "decode attention: the keys")?;
+        let v = values(v_storage, v_layout, "decode attention: the values")?;
         let scale = 1f32 / (d as f32).sqrt();
 
         let mut out = vec![0f32; b * heads * d];

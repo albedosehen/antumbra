@@ -325,6 +325,14 @@ impl RmsNorm {
     }
 
     pub(super) fn forward(&self, x: &Tensor) -> CResult<Tensor> {
+        // In f32 on the CPU with nothing to differentiate, one pass.
+        if x.device().is_cpu()
+            && x.dtype() == DType::F32
+            && self.weight.dtype() == DType::F32
+            && !x.track_op()
+        {
+            return rowwise::rms_norm(x, &self.weight, self.eps);
+        }
         let in_dtype = x.dtype();
         let x = x.to_dtype(DType::F32)?;
         let variance = x.sqr()?.mean_keepdim(D::Minus1)?;
@@ -588,8 +596,19 @@ impl Mlp {
 
     pub(super) fn forward(&self, xs: &Tensor) -> CResult<Tensor> {
         let [gate, up] = LoraLinear::forward_group(xs, [&self.gate_proj, &self.up_proj])?;
-        let lhs = self.act.forward(&gate)?;
-        let [out] = LoraLinear::forward_group(&(lhs * up)?, [&self.down_proj])?;
+        // In f32 on the CPU with nothing to differentiate, the gate is one
+        // pass over both sides.
+        let one_pass = matches!(self.act, Activation::Silu)
+            && gate.device().is_cpu()
+            && gate.dtype() == DType::F32
+            && up.dtype() == DType::F32
+            && !(gate.track_op() || up.track_op());
+        let gated = if one_pass {
+            rowwise::silu_times(&gate, &up)?
+        } else {
+            (self.act.forward(&gate)? * up)?
+        };
+        let [out] = LoraLinear::forward_group(&gated, [&self.down_proj])?;
         Ok(out)
     }
 
