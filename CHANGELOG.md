@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.4.3 - 2026-11-18
+
+Two fixes to what 0.4.2 left a training server doing, a knob that pauses that training, decoding on a CPU at about twice the speed, and a setup that leaves alone an agent that is not installed. On a server running 0.4.2, a scope's standing expert was trained again on the behaviors it had just learned and came back holding fewer, and each pass after that could replace an expert with one that held less.
+
+### Before you upgrade
+
+- **A standing expert is replaced only by one that learned everything it holds** ([#459](https://github.com/albedosehen/antumbra/pull/459)). A training that adds a behavior and loses one the expert had is now refused, and the expert in place stays. A scope grows more slowly for it, and never shrinks by being trained.
+- **An expert minted by 0.4.2 may be trained once more** ([#455](https://github.com/albedosehen/antumbra/pull/455)). Its card does not say what it learned, so a scope whose set changed since is trained on it as before; the card that training writes carries it.
+- **Setup no longer connects an agent from its config directory alone** ([#460](https://github.com/albedosehen/antumbra/pull/460)). A machine with a bare `~/.copilot`, which 0.4.1 took for Copilot, is not connected unless `copilot` is on the PATH, the directory holds Copilot CLI's `settings.json` or `config.json`, or you name it with `--agent copilot`.
+
+### Server
+
+- **An expert that already holds exactly its set is not trained again** ([#455](https://github.com/albedosehen/antumbra/pull/455)). Since 0.4.2 a behavior an expert missed goes to the back of its scope's line; for a scope at its ceiling the missed ones then left the set, the set read as changed, and the expert was trained on the behaviors it already served. A behavior is judged learned on two or three held-out tasks, so that training was a fresh draw: one expert that had learned 13 of 15 was trained on those 13 and came back holding 9. A standing expert's card now keeps what it learned, and a scope whose set is exactly that is in step. Retiring a behavior, recording one again, or one never tried taking the room still trains it.
+- **An expert that learned less of what the one in place holds does not replace it** ([#459](https://github.com/albedosehen/antumbra/pull/459)). Admission asked only that a new expert was not worse than the base model. It is now also refused when it did not learn every behavior the expert in place holds and the set still teaches, before its adapter is placed or archived. The expert in place and its file are untouched, the behaviors new to that set have had their turn and go behind the ones not yet tried, and the same set is not trained again.
+- **`standing_training` pauses a workspace's training** ([#457](https://github.com/albedosehen/antumbra/pull/457)). A workspace knob, 1 unless changed, under `K` in the console. At 0 the server still accepts the workspace's behaviors once they have waited, and trains and drops nothing of its: what is served stays as it is. It is read at each pass, so a change takes hold within ten minutes with no restart, and the server's log says a workspace is paused.
+
+### Serving on a CPU
+
+- **A decoded token costs about half what it did** ([#456](https://github.com/albedosehen/antumbra/pull/456)). A profile of the decode step found the whole KV cache copied in every layer for every token, attention and an adapter's products run a row at a time on one thread, and an exponential taken for every value of the MLP's gate on one thread. On one laptop CPU with a 1.5B base at Q4_K, decode goes from 11.8 to 21.5 tokens a second with no expert and from 10.1 to 18.3 with one; at Q8_0, from 10.5 to 17.0 and from 8.8 to 14.8. Answers are unchanged, and so is the time to read a prompt. Training and every GPU path are as they were.
+
+### CLI
+
+- **Setup leaves alone an agent that left only its config directory** ([#460](https://github.com/albedosehen/antumbra/pull/460)). An agent is found when its program is on the PATH, or when its config directory holds its own config file. An agent that was removed leaves its directory behind, and setup used to connect it. Setup's last lines now say which agents it connected because it found them, and that `--agent` chooses them.
+- **`antumbra setup check` does not fail on a Codex that is not installed** ([#460](https://github.com/albedosehen/antumbra/pull/460)). A server that could not be registered because `codex` is not on the PATH is said with what to install, and the check passes. It used to fail with "run setup again", which could not help.
+
+### The console
+
+- **The Training page says when training is paused, and shows a full scope as in step** ([#457](https://github.com/albedosehen/antumbra/pull/457), [#455](https://github.com/albedosehen/antumbra/pull/455)). A scope whose expert holds exactly its set no longer reads as waiting to be trained.
+
+### Known limits
+
+- **A scope with many behaviors waiting is still trained once a pass until each has had its turn,** and more of those trainings now change nothing: one that misses a behavior the expert held is discarded. `standing_training` pauses them. A scope taught by more than one expert is what lets it grow past this.
+- **On Linux, reading a prompt with an expert on a CPU is slow with default thread settings.** That pass still hands work to a second thread pool. `RAYON_NUM_THREADS=1` with `CANDLE_NUM_THREADS` set to the core count restored it in one measurement; decode is not affected.
+
 ## 0.4.2 - 2026-11-18
 
 One fix, for a server that trains standing experts. Since 0.4.0 the server accepts a proposed behavior once it has waited, and nothing bounded how many behaviors one expert was taught. A server's first pass after upgrading could put a hundred into one scope, train them for an hour, and have the set refused, with nothing learned and the same training started again whenever the set changed. One expert is now taught no more than it can learn, and the rest wait, accepted.
