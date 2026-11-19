@@ -65,7 +65,11 @@ fn default_true() -> bool {
     true
 }
 
+mod adapt;
+mod attend;
 mod layers;
+mod rowwise;
+mod slices;
 use layers::*;
 
 // --- the model -------------------------------------------------------------
