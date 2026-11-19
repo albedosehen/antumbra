@@ -69,6 +69,7 @@ mod adapt;
 mod attend;
 mod kv;
 mod layers;
+mod pack;
 mod phases;
 mod rowwise;
 mod slices;
@@ -83,10 +84,15 @@ use layers::*;
 /// picks every token, so it is held finer than a four-bit body: at six bits
 /// (Q6_K), the form a Q4_K_M file gives its output weight, and 57 MB a token
 /// less to read on a 1.5B base than the eight bits it was held at before.
-/// Over an eight-bit body it is eight bits, as the body is.
+/// Over a six-bit body it is six bits, as the body is: at eight one expert's
+/// log-probabilities shifted from the dense base's by 0.140 nats on average
+/// where at six they shift by 0.144, less than the order a sum is added in
+/// moves them, for those 57 MB a token. Over an eight-bit body it is eight
+/// bits, as the body is: at six they shifted by 0.105 where at eight they
+/// shift by 0.098.
 fn head_form(body: GgmlDType) -> GgmlDType {
     match body {
-        GgmlDType::Q4K => GgmlDType::Q6K,
+        GgmlDType::Q4K | GgmlDType::Q6K => GgmlDType::Q6K,
         _ => GgmlDType::Q8_0,
     }
 }
@@ -106,8 +112,8 @@ pub struct QwenLora {
     /// Whether the model was loaded to serve: its base is quantized and
     /// carries no gradient.
     serves: bool,
-    /// The rows a decoded token is computed in where it is stepped through
-    /// plain rows, kept from one token to the next.
+    /// What rows are computed in where they are stepped through as plain
+    /// values, kept from one token to the next.
     scratch: Scratch,
     device: Device,
     dtype: DType,
@@ -233,6 +239,14 @@ impl QwenLora {
     fn clear_cache(&mut self) {
         for l in self.layers.iter_mut() {
             l.clear_cache();
+        }
+    }
+
+    /// The adapter's factors were set: the copies plain rows read of them
+    /// are let go, and made again when rows are next read.
+    fn adapters_changed(&mut self) {
+        for l in self.layers.iter_mut() {
+            l.forget_packs();
         }
     }
 
@@ -474,6 +488,9 @@ impl QwenCausalLm {
     /// cast to the model's dtype, so an expert trained in bf16 on the GPU loads
     /// into the f32 model the CPU runs.
     pub fn load_adapter(&mut self, path: &str) -> Result<()> {
+        // Whatever the load did or did not set, no copy of the factors
+        // outlives it.
+        self.model.adapters_changed();
         crate::compose::restore_adapter(&self.model.varmap, path)
     }
 
@@ -576,6 +593,7 @@ impl QwenCausalLm {
     /// trained rank, with alpha raised in step, serves one adapter exactly as a
     /// model at the trained rank would, and a blend without a rebuild.
     pub fn load_blend(&mut self, specs: &[(String, f32)]) -> Result<()> {
+        self.model.adapters_changed();
         // A poisoned lock holds the same map of vars, none half-set: taken as is.
         let vars = self
             .model
@@ -583,26 +601,7 @@ impl QwenCausalLm {
             .data()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(device) = vars.values().next().map(|v| v.device().clone()) else {
-            return Err(AntumbraError::other(
-                "load blend: the model has no LoRA factors",
-            ));
-        };
-        let rank = vars
-            .iter()
-            .find(|(k, _)| k.ends_with("lora_a"))
-            .map(|(_, v)| v.dim(0).unwrap_or(0))
-            .unwrap_or(0);
-        let parts = specs
-            .iter()
-            .map(|(p, w)| {
-                let factors = candle_core::safetensors::load(p, &device)
-                    .map_err(|e| AntumbraError::other(format!("load adapter `{p}`: {e}")))?;
-                Ok((factors, *w))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let blended = crate::compose::blend(&parts, Some(rank))?;
-        crate::compose::set_factors(&vars, &blended, "load blend")
+        crate::compose::set_blend(&vars, specs)
     }
 
     /// Wrap a raw prompt in the Qwen chat template for an `-Instruct` base, so
@@ -655,14 +654,10 @@ impl QwenCausalLm {
             let step = std::time::Instant::now();
             let ctx_len = if index == 0 { tokens.len() } else { 1 };
             let start = tokens.len() - ctx_len;
-            // A token after the first is one row: through plain rows where
-            // the model decodes that way, as tensors otherwise. The prompt
-            // is read as tensors.
-            let stepped = match &tokens[start..] {
-                [token] if index > 0 => self.model.step(*token, start).map_err(ce)?,
-                _ => None,
-            };
-            let logits_vec: Vec<f32> = match stepped {
+            // The prompt, then each token after it: through plain rows
+            // where the model reads rows that way, as tensors otherwise.
+            let stepped = self.model.step(&tokens[start..], start).map_err(ce)?;
+            let mut logits_vec: Vec<f32> = match stepped {
                 Some(logits) => logits,
                 None => {
                     let input = Tensor::new(&tokens[start..], &self.model.device)
@@ -685,8 +680,14 @@ impl QwenCausalLm {
                 }
             };
             // Decode policy over the generated continuation only (not the prompt).
-            let next =
-                crate::decode::pick_token(logits_vec, &tokens[prompt_len..], &policy, &mut rng);
+            let next = crate::decode::pick_token_in(
+                &mut logits_vec,
+                &tokens[prompt_len..],
+                &policy,
+                &mut rng,
+            );
+            // The room the logits are in goes back for the next token's.
+            self.model.keep(logits_vec);
             timing.record(index, ctx_len, step.elapsed());
             if next == self.eos {
                 break;

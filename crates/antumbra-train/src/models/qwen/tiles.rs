@@ -18,10 +18,10 @@
 //! time on every core, the plain blocks of each run let go as it is packed,
 //! and a prompt's rows go through the same tiles.
 //!
-//! Three forms have a tile: Q4_K and Q8_0, the two a base is served in, and
-//! Q6_K, the head's form over a Q4_K base, at the size of its plain blocks.
-//! Its values are unpacked with AVX-512 VBMI, which the first CPUs with VNNI
-//! lack; there a Q6_K head is candle's to multiply.
+//! Each form a base is served in has a tile: Q4_K, Q8_0, and Q6_K, which is
+//! also the head's form over a Q4_K base, at the size of its plain blocks.
+//! Six-bit values are unpacked with AVX-512 VBMI, which the first CPUs with
+//! VNNI lack; there a Q6_K weight is candle's to multiply.
 //!
 //! A tile holds what the plain blocks hold, each SIMD lane a row, in the
 //! order its kernel reads it, and the input is quantized the way candle
@@ -430,22 +430,24 @@ impl Tiled {
         }
     }
 
-    /// The sixteens `first..last` of this weight's rows times the row `row`
-    /// was quantized from, written to `out[16 * first..16 * last]`: a unit of
-    /// work in a dispatch of the caller's.
+    /// The sixteens `first..last` of this weight's rows times each of the
+    /// rows `rows` were quantized from: row `i`'s products are written to
+    /// `out[i * self.rows() + 16 * first..][..16 * (last - first)]`. A unit
+    /// of work in a dispatch of the caller's.
     ///
-    /// SAFETY (for the caller): `row` holds this weight's `cols` values,
-    /// `out` has room for its `rows` products, the sixteens are among its
-    /// own, and no other thread writes those products.
+    /// SAFETY (for the caller): each of `rows` holds this weight's `cols`
+    /// values, `out` has room for its `rows` products for every one of
+    /// them, the sixteens are among its own, and no other thread writes
+    /// those products.
     pub(super) unsafe fn multiply_sixteens(
         &self,
         first: usize,
         last: usize,
-        row: &Row,
+        rows: &[Row],
         out: *mut f32,
     ) {
-        debug_assert!(row.qs.len() == self.cols && last <= self.sixteens());
-        kernels::sixteens(self, first, last, std::slice::from_ref(row), out);
+        debug_assert!(rows.iter().all(|r| r.qs.len() == self.cols) && last <= self.sixteens());
+        kernels::sixteens(self, first, last, rows, out);
     }
 }
 
@@ -836,6 +838,69 @@ mod kernels {
         _mm512_fnmadd_ps(_mm512_cvtepi32_ps(mins), _mm512_mul_ps(dmin, by), acc)
     }
 
+    /// [`q4k_block`] for three rows of input at once, each row's products
+    /// added to its own of `acc`: to the bit what the block gives each row
+    /// alone. A prompt's rows are bound by this arithmetic, not by memory,
+    /// and a third of it a row at a time is splitting each byte of the tile
+    /// into its two values, which is the same for every row: here it is done
+    /// once for the three.
+    #[target_feature(enable = "avx512f,avx512bw,avx512vnni,f16c")]
+    unsafe fn q4k_block3(
+        tile: &TileQ4K,
+        rows: [&Row; 3],
+        block: usize,
+        acc: [__m512; 3],
+    ) -> [__m512; 3] {
+        let mask = _mm512_set1_epi8(0x0F);
+        let qs = tile.qs.as_ptr();
+        let act = rows.map(|row| row.qs.as_ptr().add(block * QK_K));
+        let mut isum = [[_mm512_setzero_si512(); 8]; 3];
+        for g in 0..4 {
+            for s in 0..8 {
+                let w = _mm512_loadu_si512(qs.add((g * 8 + s) * ROWS * 4) as *const __m512i);
+                let low = _mm512_and_si512(w, mask);
+                let high = _mm512_and_si512(_mm512_srli_epi16(w, 4), mask);
+                for (isum, act) in isum.iter_mut().zip(act) {
+                    let sum = &mut isum[s];
+                    *sum = _mm512_dpbusd_epi32(*sum, low, four(act, s * 32 + g * 8));
+                    *sum = _mm512_dpbusd_epi32(*sum, high, four(act, s * 32 + g * 8 + 4));
+                }
+            }
+        }
+        let mut scale = [_mm512_setzero_si512(); 8];
+        for (s, scale) in scale.iter_mut().enumerate() {
+            *scale =
+                _mm512_cvtepu8_epi32(_mm_loadu_si128(tile.scales[s].as_ptr() as *const __m128i));
+        }
+        let mut min = [_mm512_setzero_si512(); 4];
+        for (pair, min) in min.iter_mut().enumerate() {
+            *min = _mm512_cvtepu8_epi16(_mm256_loadu_si256(
+                tile.mins[pair].as_ptr() as *const __m256i
+            ));
+        }
+        let d = _mm512_cvtph_ps(_mm256_loadu_si256(tile.d.as_ptr() as *const __m256i));
+        let dmin = _mm512_cvtph_ps(_mm256_loadu_si256(tile.dmin.as_ptr() as *const __m256i));
+        let mut out = acc;
+        for ((out, isum), row) in out.iter_mut().zip(&isum).zip(rows) {
+            let mut scaled = _mm512_setzero_si512();
+            for (isum, scale) in isum.iter().zip(&scale) {
+                scaled = _mm512_add_epi32(scaled, _mm512_mullo_epi32(*isum, *scale));
+            }
+            let sums = row.sums.as_ptr().add(block * 16);
+            let mut mins = _mm512_setzero_si512();
+            for (pair, min) in min.iter().enumerate() {
+                let first = *sums.add(4 * pair) + *sums.add(4 * pair + 1);
+                let second = *sums.add(4 * pair + 2) + *sums.add(4 * pair + 3);
+                let sum = _mm512_set1_epi32((first & 0xFFFF) | (second << 16));
+                mins = _mm512_add_epi32(mins, _mm512_madd_epi16(*min, sum));
+            }
+            let by = _mm512_set1_ps(*row.d.get_unchecked(block));
+            let with = _mm512_fmadd_ps(_mm512_cvtepi32_ps(scaled), _mm512_mul_ps(d, by), *out);
+            *out = _mm512_fnmadd_ps(_mm512_cvtepi32_ps(mins), _mm512_mul_ps(dmin, by), with);
+        }
+        out
+    }
+
     /// Where each byte of a group of 4 values goes for its fields to be cut
     /// out: a row's three bytes to the low three of its four, the last of
     /// them repeated above, where it is not read.
@@ -898,6 +963,60 @@ mod kernels {
         )
     }
 
+    /// [`q6k_block`] for `N` rows of input at once, each row's products added
+    /// to its own of `acc`: to the bit what the block gives each row alone.
+    /// Cutting a tile's six-bit values out of its bytes is as much work as
+    /// multiplying them, and it is the same for every row: here it is done
+    /// once for them all.
+    #[target_feature(enable = "avx512f,avx512bw,avx512vnni,avx512vbmi,f16c")]
+    unsafe fn q6k_block_of<const N: usize>(
+        tile: &TileQ6,
+        rows: [&Row; N],
+        block: usize,
+        acc: [__m512; N],
+    ) -> [__m512; N] {
+        let spread = _mm512_loadu_si512(SPREAD.as_ptr() as *const __m512i);
+        let fields = _mm512_set1_epi64(i64::from_le_bytes([0, 6, 12, 18, 32, 38, 44, 50]));
+        let six = _mm512_set1_epi8(0x3F);
+        let qs = tile.qs.as_ptr();
+        let act = rows.map(|row| row.qs.as_ptr().add(block * QK_K));
+        let sums = rows.map(|row| row.sums.as_ptr().add(block * 16));
+        let mut total = [_mm512_setzero_si512(); N];
+        for run in 0..16 {
+            let mut isum = [_mm512_setzero_si512(); N];
+            for g in 0..4 {
+                // 48 bytes are a group; the mask keeps the load inside them.
+                let packed = _mm512_maskz_loadu_epi8(
+                    0x0000_FFFF_FFFF_FFFF,
+                    qs.add((run * 4 + g) * ROWS * 3) as *const i8,
+                );
+                let q = _mm512_and_si512(
+                    _mm512_multishift_epi64_epi8(fields, _mm512_permutexvar_epi8(spread, packed)),
+                    six,
+                );
+                for (isum, act) in isum.iter_mut().zip(act) {
+                    *isum = _mm512_dpbusd_epi32(*isum, q, four(act, run * 16 + g * 4));
+                }
+            }
+            let scale =
+                _mm512_cvtepi8_epi32(_mm_loadu_si128(tile.scales[run].as_ptr() as *const __m128i));
+            for ((total, isum), sums) in total.iter_mut().zip(isum).zip(sums) {
+                let centered = _mm512_sub_epi32(isum, _mm512_set1_epi32(32 * *sums.add(run)));
+                *total = _mm512_add_epi32(*total, _mm512_mullo_epi32(centered, scale));
+            }
+        }
+        let d = _mm512_cvtph_ps(_mm256_loadu_si256(tile.d.as_ptr() as *const __m256i));
+        let mut out = acc;
+        for ((out, total), row) in out.iter_mut().zip(total).zip(rows) {
+            *out = _mm512_fmadd_ps(
+                _mm512_cvtepi32_ps(total),
+                _mm512_mul_ps(d, _mm512_set1_ps(*row.d.get_unchecked(block))),
+                *out,
+            );
+        }
+        out
+    }
+
     /// Sixteen rows' products with one block of 32 input values, added to
     /// `acc`. The weights are stored 128 up, so the input's sum over the
     /// block, 128 times, comes back off.
@@ -927,6 +1046,133 @@ mod kernels {
         _mm512_fmadd_ps(f, _mm512_mul_ps(d, _mm512_set1_ps(d_act)), acc)
     }
 
+    /// Rows whose running sums are kept at once while a sixteen's tiles go
+    /// by.
+    const TOGETHER: usize = 32;
+
+    /// Sixteen `t` of `w` against the one row `row`.
+    #[target_feature(enable = "avx512f,avx512bw,avx512vnni,f16c")]
+    unsafe fn sixteen_of(w: &Tiled, t: usize, row: &Row) -> __m512 {
+        let mut acc = _mm512_setzero_ps();
+        match &w.tiles {
+            Tiles::Q4K(tiles) => {
+                let kb = w.cols / QK_K;
+                for (b, tile) in tiles[t * kb..(t + 1) * kb].iter().enumerate() {
+                    acc = q4k_block(
+                        tile,
+                        row.qs.as_ptr().add(b * QK_K),
+                        *row.d.get_unchecked(b),
+                        row.sums.as_ptr().add(b * 16),
+                        acc,
+                    );
+                }
+            }
+            Tiles::Q6K(tiles) => {
+                let kb = w.cols / QK_K;
+                for (b, tile) in tiles[t * kb..(t + 1) * kb].iter().enumerate() {
+                    // Six-bit tiles are only made where `six_bit` found
+                    // the one feature more this is built for.
+                    acc = q6k_block(
+                        tile,
+                        row.qs.as_ptr().add(b * QK_K),
+                        *row.d.get_unchecked(b),
+                        row.sums.as_ptr().add(b * 16),
+                        acc,
+                    );
+                }
+            }
+            Tiles::Q8_0(tiles) => {
+                let nb = w.cols / QK8_0;
+                for (b, tile) in tiles[t * nb..(t + 1) * nb].iter().enumerate() {
+                    acc = q8_block(
+                        tile,
+                        row.qs.as_ptr().add(b * QK8_0),
+                        *row.d.get_unchecked(b / 8),
+                        *row.sums.get_unchecked(2 * b) + *row.sums.get_unchecked(2 * b + 1),
+                        acc,
+                    );
+                }
+            }
+        }
+        acc
+    }
+
+    /// Sixteen `t` of `w` against each of `rows` (no more than
+    /// [`TOGETHER`]), into `acc`: each row's products as [`sixteen_of`]
+    /// gives them, to the bit. The sixteen's tiles go by once, each against
+    /// every row before the next: a wide weight's sixteen is more tiles than
+    /// the nearest cache holds, and a row at a time read them all again for
+    /// every row.
+    #[target_feature(enable = "avx512f,avx512bw,avx512vnni,f16c")]
+    unsafe fn sixteen_of_each(w: &Tiled, t: usize, rows: &[Row], acc: &mut [__m512]) {
+        match &w.tiles {
+            Tiles::Q4K(tiles) => {
+                let kb = w.cols / QK_K;
+                for (b, tile) in tiles[t * kb..(t + 1) * kb].iter().enumerate() {
+                    let mut i = 0;
+                    while i + 3 <= rows.len() {
+                        let three = q4k_block3(
+                            tile,
+                            [&rows[i], &rows[i + 1], &rows[i + 2]],
+                            b,
+                            [acc[i], acc[i + 1], acc[i + 2]],
+                        );
+                        acc[i..i + 3].copy_from_slice(&three);
+                        i += 3;
+                    }
+                    for (acc, row) in acc[i..].iter_mut().zip(&rows[i..]) {
+                        *acc = q4k_block(
+                            tile,
+                            row.qs.as_ptr().add(b * QK_K),
+                            *row.d.get_unchecked(b),
+                            row.sums.as_ptr().add(b * 16),
+                            *acc,
+                        );
+                    }
+                }
+            }
+            Tiles::Q6K(tiles) => {
+                let kb = w.cols / QK_K;
+                for (b, tile) in tiles[t * kb..(t + 1) * kb].iter().enumerate() {
+                    let mut i = 0;
+                    while i + 4 <= rows.len() {
+                        let four = q6k_block_of::<4>(
+                            tile,
+                            [&rows[i], &rows[i + 1], &rows[i + 2], &rows[i + 3]],
+                            b,
+                            [acc[i], acc[i + 1], acc[i + 2], acc[i + 3]],
+                        );
+                        acc[i..i + 4].copy_from_slice(&four);
+                        i += 4;
+                    }
+                    for (acc, row) in acc[i..].iter_mut().zip(&rows[i..]) {
+                        *acc = q6k_block(
+                            tile,
+                            row.qs.as_ptr().add(b * QK_K),
+                            *row.d.get_unchecked(b),
+                            row.sums.as_ptr().add(b * 16),
+                            *acc,
+                        );
+                    }
+                }
+            }
+            Tiles::Q8_0(tiles) => {
+                let nb = w.cols / QK8_0;
+                for (b, tile) in tiles[t * nb..(t + 1) * nb].iter().enumerate() {
+                    for (acc, row) in acc.iter_mut().zip(rows) {
+                        *acc = q8_block(
+                            tile,
+                            row.qs.as_ptr().add(b * QK8_0),
+                            *row.d.get_unchecked(b / 8),
+                            *row.sums.get_unchecked(2 * b) + *row.sums.get_unchecked(2 * b + 1),
+                            *acc,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// The sixteens `first..last` of `w` against every row, written to `out`.
     ///
     /// SAFETY (for the caller): the CPU has the features named, `out` has
@@ -935,49 +1181,19 @@ mod kernels {
     #[target_feature(enable = "avx512f,avx512bw,avx512vnni,f16c")]
     unsafe fn sixteens_of(w: &Tiled, first: usize, last: usize, rows: &[Row], out: &Out) {
         for t in first..last {
-            for (i, row) in rows.iter().enumerate() {
-                let mut acc = _mm512_setzero_ps();
-                match &w.tiles {
-                    Tiles::Q4K(tiles) => {
-                        let kb = w.cols / QK_K;
-                        for (b, tile) in tiles[t * kb..(t + 1) * kb].iter().enumerate() {
-                            acc = q4k_block(
-                                tile,
-                                row.qs.as_ptr().add(b * QK_K),
-                                *row.d.get_unchecked(b),
-                                row.sums.as_ptr().add(b * 16),
-                                acc,
-                            );
-                        }
-                    }
-                    Tiles::Q6K(tiles) => {
-                        let kb = w.cols / QK_K;
-                        for (b, tile) in tiles[t * kb..(t + 1) * kb].iter().enumerate() {
-                            // Six-bit tiles are only made where `six_bit`
-                            // found the one feature more this is built for.
-                            acc = q6k_block(
-                                tile,
-                                row.qs.as_ptr().add(b * QK_K),
-                                *row.d.get_unchecked(b),
-                                row.sums.as_ptr().add(b * 16),
-                                acc,
-                            );
-                        }
-                    }
-                    Tiles::Q8_0(tiles) => {
-                        let nb = w.cols / QK8_0;
-                        for (b, tile) in tiles[t * nb..(t + 1) * nb].iter().enumerate() {
-                            acc = q8_block(
-                                tile,
-                                row.qs.as_ptr().add(b * QK8_0),
-                                *row.d.get_unchecked(b / 8),
-                                *row.sums.get_unchecked(2 * b) + *row.sums.get_unchecked(2 * b + 1),
-                                acc,
-                            );
-                        }
-                    }
+            if let [row] = rows {
+                _mm512_storeu_ps(out.at.add(t * ROWS), sixteen_of(w, t, row));
+                continue;
+            }
+            for (run, some) in rows.chunks(TOGETHER).enumerate() {
+                let mut acc = [_mm512_setzero_ps(); TOGETHER];
+                sixteen_of_each(w, t, some, &mut acc[..some.len()]);
+                for (i, acc) in acc[..some.len()].iter().enumerate() {
+                    _mm512_storeu_ps(
+                        out.at.add((run * TOGETHER + i) * out.width + t * ROWS),
+                        *acc,
+                    );
                 }
-                _mm512_storeu_ps(out.at.add(i * out.width + t * ROWS), acc);
             }
         }
     }
@@ -1243,7 +1459,14 @@ mod tests {
             for (first, last) in [(3, 4), (0, 1), (1, 3)] {
                 // SAFETY: the row holds the weight's 1024 values, `parts` its
                 // 64 products, and nothing else writes them.
-                unsafe { tiled.multiply_sixteens(first, last, &row, parts.as_mut_ptr()) };
+                unsafe {
+                    tiled.multiply_sixteens(
+                        first,
+                        last,
+                        std::slice::from_ref(&row),
+                        parts.as_mut_ptr(),
+                    )
+                };
             }
             assert_eq!(parts, whole, "{dtype:?}");
             let mut short = vec![0f32; 48];

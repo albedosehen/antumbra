@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.4.4 - 2026-11-19
+
+Serving on a CPU, measured on the model the server actually holds. A request with one expert decodes about a third faster at Q4_K than under 0.4.3, its prompt is read at two to three times the speed, and a blend is set in an eighth of the time. Q6_K joins Q8_0 and Q4_K as a form to serve a base in. A server with a GPU serves as it did.
+
+### Before you upgrade
+
+- **An expert served on a CPU can word a long answer as 0.4.3 did not** ([#463](https://github.com/albedosehen/antumbra/pull/463)). Answers are the same on every run of one build. But a prompt is now read by the arithmetic a decoded token is read by, in another order than before, and the values in between are held in eight bits: within a few layers the two readings are apart by what that rounding is worth, and where two tokens were close the other one can come first. The two are equally far from the dense base. Over one expert's 2078 held-out positions the mean shift in log-probability is 0.098 nats read either way at Q8_0, and 0.41 and 0.42 at Q4_K. Answers on a GPU are untouched.
+- **`q6_k` is a new value of `--serve-quant` and `--behave-drift`, and `auto` is Q8_0 as before** ([#464](https://github.com/albedosehen/antumbra/pull/464)). Nothing is served or measured differently unless you set it.
+
+### Serving on a CPU
+
+All figures are from one laptop CPU (8 cores, AVX-512 VNNI) with a 1.5B base, 0.4.3 and this release in runs minutes apart, llama.cpp b12359 at its best thread count beside them.
+
+- **A prompt is read through the kernels a decoded token is read through** ([#463](https://github.com/albedosehen/antumbra/pull/463)). Its rows go through the plain-row step up to 32 at once: a weight is read from memory once for all of them, and each row is computed exactly as it would be alone, so a prompt read at once and its tokens read one at a time give the same logits to the bit. A prompt of 24 tokens is read at 165 tokens a second at Q4_K where 0.4.3 read it at 107, and at 155 at Q8_0 where it read 84; with an expert on, at 153 and 150 where it read 72 and 62. llama.cpp reads it at about 100 and 78.
+- **An expert costs a decoded token what its own bytes cost** ([#463](https://github.com/albedosehen/antumbra/pull/463)). Its factors are read at half precision, which holds what a bf16-trained expert holds, and laid out so a vector holds sixteen results and nothing is summed across it. And the ranks that add nothing are no longer read: the server holds a model with room for three experts, and a request with one expert read three experts' bytes at every token, two of them zeros. On that model a request with one expert decodes at 35.0 tokens a second at Q4_K where it decoded at 27.0, and with three at 34.4 where it decoded at 27.9; at Q8_0, 20.8 and 21.3 where it decoded at 18.9 and 17.7. On a model at the trained rank an expert decodes at 36.3 against llama.cpp's 23.3 with the same adapter at Q4_K, and 21.4 against 18.1 at Q8_0.
+- **A blend is set in an eighth of the time** ([#463](https://github.com/albedosehen/antumbra/pull/463)). A request whose blend is not the resident one waited while every factor went through five tensors on one thread: 404 ms for one expert and 819 ms for three. Each factor now goes from its file's bytes straight into the model, on every core, with the values the tensors gave to the bit: 50 ms and 101 ms. Through the engine, a request that changes the blend is answered in 1.2 s at Q4_K where it took 2.6 s, and in 2.0 s at Q8_0 where it took 2.8 s.
+- **Q6_K: a third form, between the two** ([#464](https://github.com/albedosehen/antumbra/pull/464)). `--serve-quant q6_k` (`ANTUMBRA_SERVE_QUANT`) serves a base with body and head at six bits, about 1.27 GB to read a token where Q8_0 reads 1.64 and Q4_K 0.95. It decodes at 28.6 tokens a second where Q8_0 decodes at 22.1 and Q4_K at 37.9; llama.cpp on a Q6_K file of the same base decodes at 25.1. Over one expert's 2078 held-out positions its log-probabilities shift from the dense base's by 0.145 nats on average, where Q8_0's shift by 0.098 and Q4_K's by 0.413. The default is unchanged.
+- **Read an expert's drift by its mean shift** ([#464](https://github.com/albedosehen/antumbra/pull/464)). A card's count of positions that rank another token first moves by ten or twenty in two thousand with nothing but the order a sum is added in: one expert on one Q8_0 base changed 69 positions read as a batch and 90 read a token at a time, at the same mean shift. `docs/running-the-trainer.md` says so beside what a card records.
+
+### Known limits
+
+- **All of this needs AVX-512 VNNI,** as decoding through Antumbra's own kernels did in 0.4.3: without it a prompt and an adapter go through candle as before. Setting a blend is faster on any CPU. Six-bit tiles also need AVX-512 VBMI; a CPU with VNNI and without it multiplies a Q6_K base through candle's kernels.
+- **The thread settings 0.4.3's notes named for Linux are no longer needed on a CPU with AVX-512 VNNI.** With the settings as they come, a prompt with an expert is read at 152 tokens a second where 0.4.3 read it at 28. Without AVX-512 VNNI the prompt pass still goes through tensors and `RAYON_NUM_THREADS=1` with `CANDLE_NUM_THREADS` at the core count still helps.
+- **An expert still costs a token its bytes:** 37 MB for one expert and 111 MB for three, beside the 0.95 GB a Q4_K base reads. With three experts that is a tenth of the decode rate.
+- **The laptop these figures are from ran below its full clock.** That weighs on reading a prompt, which is bound by arithmetic, more than on decoding, which is bound by how fast memory is read.
+
 ## 0.4.3 - 2026-11-19
 
 Two fixes to what 0.4.2 left a training server doing, a knob that pauses that training, decoding on a CPU at two to three times the speed, and a setup that leaves alone an agent that is not installed. On a server running 0.4.2, a scope's standing expert was trained again on the behaviors it had just learned and came back holding fewer, and each pass after that could replace an expert with one that held less.

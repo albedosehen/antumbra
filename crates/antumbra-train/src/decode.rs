@@ -41,6 +41,20 @@ pub fn pick_token(
     policy: &DecodePolicy,
     rng: &mut StdRng,
 ) -> u32 {
+    pick_token_in(&mut logits, generated, policy, rng)
+}
+
+/// [`pick_token`] over logits that stay with the caller, who has them back
+/// with the policy's penalties applied. A model that decodes token after
+/// token keeps the room they are in: over a vocabulary of 150 thousand that
+/// is 600 KB, which asked for and given back at every token is a trip to the
+/// operating system each way.
+pub fn pick_token_in(
+    logits: &mut [f32],
+    generated: &[u32],
+    policy: &DecodePolicy,
+    rng: &mut StdRng,
+) -> u32 {
     // Repetition penalty: at most once per distinct generated token.
     if policy.repetition_penalty > 1.0 {
         let p = policy.repetition_penalty as f32;
@@ -69,7 +83,7 @@ pub fn pick_token(
 
     // Greedy: deterministic, but the penalties above already broke loops.
     if policy.temperature <= 0.0 {
-        return argmax(&logits);
+        return argmax(logits);
     }
 
     // Temperature softmax (shifted for numerical stability).
@@ -78,7 +92,7 @@ pub fn pick_token(
     let mut probs: Vec<f32> = logits.iter().map(|l| ((l - max) / temp).exp()).collect();
     let sum: f32 = probs.iter().sum();
     if sum <= 0.0 || !sum.is_finite() {
-        return argmax(&logits);
+        return argmax(logits);
     }
     for p in probs.iter_mut() {
         *p /= sum;
@@ -90,7 +104,7 @@ pub fn pick_token(
 
     match WeightedIndex::new(&probs) {
         Ok(dist) => dist.sample(rng) as u32,
-        Err(_) => argmax(&logits),
+        Err(_) => argmax(logits),
     }
 }
 

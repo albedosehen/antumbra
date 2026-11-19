@@ -141,21 +141,26 @@ struct Cli {
     behave_tune_confidence: bool,
     /// Which quantized forms of the base an expert is measured on when it is
     /// admitted: `auto` (Q8_0, the form a server with no GPU serves by
-    /// default), `off`, `q8_0`, `q4_k`, or `q8_0,q4_k`. An expert is trained
+    /// default), `off`, `q8_0`, `q6_k`, `q4_k`, or several with commas
+    /// (`q8_0,q6_k`). An expert is trained
     /// over the dense base and may be served over a quantized one; the
     /// measurement reads its held-out examples through both and records the
     /// difference on its card. It costs one more load of the base per form,
     /// per admitted training, and nothing is refused on it.
     #[arg(long, env = "ANTUMBRA_BEHAVE_DRIFT", default_value = "auto")]
     behave_drift: String,
-    /// How the base model is held to serve experts: `auto`, `off`, `q8_0` or
-    /// `q4_k`. `auto` serves from a Q8_0 base on a build with no GPU backend,
-    /// where the dense base is too slow to answer with, and from the dense
-    /// base on a GPU build. Both quantized forms reword an expert's answers;
-    /// `q8_0` moves them least, and `q4_k` is a smaller base that moves them
-    /// about four times as much. On held-out behavior tasks 82 and 79 of 113
-    /// answers passed their checks, against the dense base's 85. `off` keeps
-    /// the base dense anywhere. Experts are never quantized.
+    /// How the base model is held to serve experts: `auto`, `off`, `q8_0`,
+    /// `q6_k` or `q4_k`. `auto` serves from a Q8_0 base on a build with no
+    /// GPU backend, where the dense base is too slow to answer with, and from
+    /// the dense base on a GPU build. Every quantized form rewords an expert's
+    /// answers, and a smaller one decodes faster where a token is bound by
+    /// how fast its weights are read. `q8_0` moves answers least. On a CPU
+    /// with AVX-512 VNNI, `q6_k` decodes about 1.3 times as fast and shifts
+    /// an expert's log-probabilities half again as far, and `q4_k` about 1.7
+    /// times as fast and four times as far. On held-out behavior tasks 82
+    /// answers of 113 passed their checks at `q8_0` and 79 at `q4_k`,
+    /// against the dense base's 85. `off` keeps the base dense anywhere.
+    /// Experts are never quantized.
     #[arg(long, env = "ANTUMBRA_SERVE_QUANT", default_value = "auto")]
     serve_quant: String,
     /// Shift every seeded stream a training draws from: the same set trained

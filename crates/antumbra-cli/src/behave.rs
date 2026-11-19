@@ -56,8 +56,9 @@ pub struct BehaveArgs {
     #[arg(long, default_value_t = 0.9)]
     pub regression_confidence: f64,
     /// Which quantized forms of the base an admitted expert is measured on:
-    /// `auto` (Q8_0), `off`, `q8_0`, `q4_k`, or `q8_0,q4_k`. Each form is one
-    /// more load of the base, and what it finds goes on the expert's card.
+    /// `auto` (Q8_0), `off`, `q8_0`, `q6_k`, `q4_k`, or several with commas.
+    /// Each form is one more load of the base, and what it finds goes on the
+    /// expert's card.
     #[arg(long, default_value = "auto")]
     pub drift: String,
 }

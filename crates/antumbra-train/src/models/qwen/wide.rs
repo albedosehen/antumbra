@@ -1,11 +1,12 @@
-//! A decoded token's arithmetic on plain f32 rows in 512-bit vectors, for the
-//! CPUs that multiply through tiles ([`super::tiles::available`]).
+//! The arithmetic on plain f32 rows in 512-bit vectors, for the CPUs that
+//! multiply through tiles ([`super::tiles::available`]).
 //!
 //! Between a token's products there is the MLP's gate, an exponential for
 //! every value of its width, and attention, a score against every cached
 //! position and a weighted sum of the cached values. A value at a time, or
 //! eight at a time without a vector exponential, they are most of what one
-//! thread does while the others wait for it. Each kernel here has a plain
+//! thread does while the others wait for it. An adapter's factors, held at
+//! half precision, are multiplied here as well. Each kernel here has a plain
 //! twin it is held to.
 
 use std::arch::x86_64::*;
@@ -215,6 +216,199 @@ pub(super) unsafe fn weigh(
         32 => weigh_of::<2>(scores, stride, most, values, acc, sums),
         64 => weigh_of::<4>(scores, stride, most, values, acc, sums),
         _ => weigh_of::<8>(scores, stride, most, values, acc, sums),
+    }
+}
+
+/// `values` at half precision, each the nearest half with ties to even, into
+/// `out`, over as many values as the two share.
+///
+/// SAFETY (for the caller): the CPU has AVX-512F.
+#[target_feature(enable = "avx512f")]
+pub(super) unsafe fn to_halves(values: &[f32], out: &mut [u16]) {
+    const NEAREST: i32 = _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC;
+    let n = values.len().min(out.len());
+    let mut i = 0;
+    while i + 16 <= n {
+        let halves = _mm512_cvtps_ph::<NEAREST>(_mm512_loadu_ps(values.as_ptr().add(i)));
+        _mm256_storeu_si256(out.as_mut_ptr().add(i) as *mut __m256i, halves);
+        i += 16;
+    }
+    if i < n {
+        // The last few through room of their own, so nothing past either
+        // slice is read or written.
+        let (mut last, mut halves) = ([0f32; 16], [0u16; 16]);
+        last[..n - i].copy_from_slice(&values[i..n]);
+        _mm256_storeu_si256(
+            halves.as_mut_ptr() as *mut __m256i,
+            _mm512_cvtps_ph::<NEAREST>(_mm512_loadu_ps(last.as_ptr())),
+        );
+        out[i..n].copy_from_slice(&halves[..n - i]);
+    }
+}
+
+/// Sixteen halves at `a` as floats.
+#[target_feature(enable = "avx512f")]
+unsafe fn halves(a: *const u16) -> __m512 {
+    _mm512_cvtph_ps(_mm256_loadu_si256(a as *const __m256i))
+}
+
+/// Running sums a row's products with `A` are kept in, so one step does not
+/// wait on the step before it.
+const SUMS: usize = 8;
+
+/// Rows of input whose running sums are kept at once.
+const TOGETHER: usize = 8;
+
+#[target_feature(enable = "avx512f")]
+unsafe fn summed(sums: &[__m512; SUMS]) -> __m512 {
+    _mm512_add_ps(
+        _mm512_add_ps(
+            _mm512_add_ps(sums[0], sums[1]),
+            _mm512_add_ps(sums[2], sums[3]),
+        ),
+        _mm512_add_ps(
+            _mm512_add_ps(sums[4], sums[5]),
+            _mm512_add_ps(sums[6], sums[7]),
+        ),
+    )
+}
+
+/// Sixteen rank rows of an adapter's `A` over `n` columns, times those
+/// columns of each of `rows` rows of input. `a` holds a column at a time,
+/// the sixteen rows' values of it as halves; row `i`'s values of the columns
+/// are at `x + i * stride`, and its sixteen sums are written at
+/// `out + i * out_stride`.
+///
+/// A column's vector times one value of the input adds to all sixteen sums
+/// at once, so nothing is ever summed across a vector's lanes; and a column
+/// is made floats once for every row there is. Each row's sums are the sums
+/// it would have alone, to the bit: column `c` is added to running sum
+/// `c % 8` in the order of the columns, whatever rows are beside it.
+///
+/// SAFETY (for the caller): the CPU has AVX-512F; `a` holds `16 * n`
+/// halves; each row of `x` holds `n` values; and each place in `out` is room
+/// for sixteen.
+#[target_feature(enable = "avx512f")]
+pub(super) unsafe fn through_cols(
+    a: *const u16,
+    n: usize,
+    x: *const f32,
+    stride: usize,
+    rows: usize,
+    out: *mut f32,
+    out_stride: usize,
+) {
+    if rows == 1 {
+        // One row keeps its sums in registers.
+        let mut sums = [_mm512_setzero_ps(); SUMS];
+        let mut c = 0;
+        while c + SUMS <= n {
+            for (j, sum) in sums.iter_mut().enumerate() {
+                *sum = _mm512_fmadd_ps(
+                    halves(a.add((c + j) * 16)),
+                    _mm512_set1_ps(*x.add(c + j)),
+                    *sum,
+                );
+            }
+            c += SUMS;
+        }
+        for (j, sum) in sums[..n - c].iter_mut().enumerate() {
+            *sum = _mm512_fmadd_ps(
+                halves(a.add((c + j) * 16)),
+                _mm512_set1_ps(*x.add(c + j)),
+                *sum,
+            );
+        }
+        _mm512_storeu_ps(out, summed(&sums));
+        return;
+    }
+    let mut first = 0;
+    while first < rows {
+        let some = (rows - first).min(TOGETHER);
+        let x = x.add(first * stride);
+        let mut sums = [[_mm512_setzero_ps(); SUMS]; TOGETHER];
+        let mut c = 0;
+        while c + SUMS <= n {
+            let mut cols = [_mm512_setzero_ps(); SUMS];
+            for (j, col) in cols.iter_mut().enumerate() {
+                *col = halves(a.add((c + j) * 16));
+            }
+            for (i, sums) in sums[..some].iter_mut().enumerate() {
+                let x = x.add(i * stride + c);
+                for (j, sum) in sums.iter_mut().enumerate() {
+                    *sum = _mm512_fmadd_ps(cols[j], _mm512_set1_ps(*x.add(j)), *sum);
+                }
+            }
+            c += SUMS;
+        }
+        for j in 0..n - c {
+            let col = halves(a.add((c + j) * 16));
+            for (i, sums) in sums[..some].iter_mut().enumerate() {
+                sums[j] = _mm512_fmadd_ps(col, _mm512_set1_ps(*x.add(i * stride + c + j)), sums[j]);
+            }
+        }
+        for (i, sums) in sums[..some].iter().enumerate() {
+            _mm512_storeu_ps(out.add((first + i) * out_stride), summed(sums));
+        }
+        first += some;
+    }
+}
+
+/// To `sixteens` sixteens of products of each of `rows` rows, an adapter's
+/// `B` times that row's `A · x`. `b` holds a sixteen of products at a time,
+/// for each of the `rank` ranks the sixteen's factors as halves; row `i`'s
+/// `rank` values of `A · x` are at `t + i * rank`, and its products at
+/// `out + i * stride`.
+///
+/// A rank's vector times that rank's value adds to all sixteen products at
+/// once, and a sixteen's factors are made floats once for every row there
+/// is. Each row's products are what it would get alone, to the bit: the
+/// ranks are added in their order into two sums, the even and the odd, and
+/// the two to the products, sixteen ranks at a time.
+///
+/// SAFETY (for the caller): the CPU has AVX-512F; `b` holds
+/// `16 * rank * sixteens` halves; `t` holds `rank` values for every row; and
+/// each row's place in `out` holds `16 * sixteens` values that nothing else
+/// reads or writes meanwhile.
+#[target_feature(enable = "avx512f")]
+pub(super) unsafe fn add_sixteens(
+    b: *const u16,
+    rank: usize,
+    sixteens: usize,
+    t: *const f32,
+    rows: usize,
+    out: *mut f32,
+    stride: usize,
+) {
+    for s in 0..sixteens {
+        let b = b.add(s * rank * 16);
+        let mut first = 0;
+        while first < rank {
+            let some = (rank - first).min(16);
+            let mut factors = [_mm512_setzero_ps(); 16];
+            for (r, factor) in factors[..some].iter_mut().enumerate() {
+                *factor = halves(b.add((first + r) * 16));
+            }
+            for i in 0..rows {
+                let t = t.add(i * rank + first);
+                let (mut even, mut odd) = (_mm512_setzero_ps(), _mm512_setzero_ps());
+                let mut r = 0;
+                while r + 2 <= some {
+                    even = _mm512_fmadd_ps(factors[r], _mm512_set1_ps(*t.add(r)), even);
+                    odd = _mm512_fmadd_ps(factors[r + 1], _mm512_set1_ps(*t.add(r + 1)), odd);
+                    r += 2;
+                }
+                if r < some {
+                    even = _mm512_fmadd_ps(factors[r], _mm512_set1_ps(*t.add(r)), even);
+                }
+                let at = out.add(i * stride + s * 16);
+                _mm512_storeu_ps(
+                    at,
+                    _mm512_add_ps(_mm512_loadu_ps(at), _mm512_add_ps(even, odd)),
+                );
+            }
+            first += some;
+        }
     }
 }
 

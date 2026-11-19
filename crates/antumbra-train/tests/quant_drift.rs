@@ -168,7 +168,7 @@ async fn a_quantized_base_is_measured_against_the_dense_one() -> Outcome<()> {
         passed(&dense)
     );
 
-    for form in [ServeQuant::Q8_0, ServeQuant::Q4K] {
+    for form in [ServeQuant::Q8_0, ServeQuant::Q6K, ServeQuant::Q4K] {
         let quant = pass(Some(form), &adapter, &held, &cfg).await?;
         let mut drift = Drift::default();
         let mut flipped = vec![0usize; behaviors.len()];
