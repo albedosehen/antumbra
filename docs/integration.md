@@ -197,7 +197,7 @@ It never fails the agent: whatever goes wrong is said on standard error, and not
 
 ### Which agents, and what setup writes for each
 
-`antumbra setup` connects Claude Code and every other agent it finds on the machine: one whose program is on the PATH, or whose config directory is there. `--agent` names them instead (`--agent gemini`, `--agent claude,codex`, `--agent opencode`, `--agent all`; the names are `claude`, `gemini`, `codex`, `copilot`, `goose` and `opencode`), and `--no-claude` leaves Claude Code out.
+`antumbra setup` connects Claude Code and every other agent it finds on the machine: one whose program is on the PATH, or whose config directory holds its own config file (Gemini CLI's `settings.json`, Codex's `config.toml`, Copilot CLI's `settings.json` or `config.json`, goose's `config.yaml`, OpenCode's `opencode.json` or `opencode.jsonc`). A config directory with none of those is what an agent that was removed leaves behind, and is not counted. Setup's last lines say which agents it connected because it found them. `--agent` names them instead (`--agent gemini`, `--agent claude,codex`, `--agent opencode`, `--agent all`; the names are `claude`, `gemini`, `codex`, `copilot`, `goose` and `opencode`), and `--no-claude` leaves Claude Code out.
 
 Setup touches as little of a person's own files as each agent allows. Where an agent reads a directory of Antumbra's own, that is all setup writes: nothing the person wrote is edited, and connecting again replaces it (Gemini CLI, goose's plugin, and OpenCode's). Where an agent reads only its user's files, setup adds to them as it does for Claude Code: with the agent's own command, or as text, adding only, with a backup, and never twice (Codex, Copilot CLI's list of MCP servers, and one line of goose's config). Either way `antumbra setup check` reads back what was written.
 
@@ -226,7 +226,7 @@ Setup touches as little of a person's own files as each agent allows. Where an a
 
 At a turn's end Gemini CLI shows the reminder to you as a warning that the agent was blocked. That is the reminder reaching the agent, which is then asked once more and stops.
 
-**Codex.** The bridge is registered with Codex's own `codex mcp add antumbra -- antumbra mcp bridge --agent codex`, which writes `[mcp_servers.antumbra]` into `~/.codex/config.toml` (or where `CODEX_HOME` says). The hooks, on `SessionStart`, `UserPromptSubmit` and `Stop`, go into `hooks.json` beside any of your own. One thing is Codex's own to decide, and setup does not go around it:
+**Codex.** The bridge is registered with Codex's own `codex mcp add antumbra -- antumbra mcp bridge --agent codex`, which writes `[mcp_servers.antumbra]` into `~/.codex/config.toml` (or where `CODEX_HOME` says). Without `codex` on the PATH (Codex named with `--agent` on a machine that does not have it), setup prints that command, and `antumbra setup check` says the server waits on Codex being installed without failing. The hooks, on `SessionStart`, `UserPromptSubmit` and `Stop`, go into `hooks.json` beside any of your own. One thing is Codex's own to decide, and setup does not go around it:
 
 - **Codex skips a hook until you approve it.** Start Codex, type `/hooks`, and approve Antumbra's three. Until then a session has Antumbra's tools and the bridge's instructions, and none of the three touchpoints; setup says so when it adds them, and Codex says nothing when it skips them. Approval is asked again when a hook's command changes, which it does when `antumbra` moves on or off the PATH.
 

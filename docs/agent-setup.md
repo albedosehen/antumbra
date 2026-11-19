@@ -113,7 +113,7 @@ Exit code 0 and `Everything is in place.` means done. Anything else is listed wi
 
 ## 5. Tell the person
 
-An agent loads hooks and MCP servers when a session starts, so **they need to start a new session** in each agent setup connected (its last lines name them). The new session opens with what Antumbra remembers, and what they work on goes back in.
+An agent loads hooks and MCP servers when a session starts, so **they need to start a new session** in each agent setup connected (its last lines name them, and say which it connected because it found them on the machine). The new session opens with what Antumbra remembers, and what they work on goes back in.
 
 Gemini CLI connects no MCP server in a folder the person has not trusted, and asks before an Antumbra tool runs. Both are theirs to decide; `docs/integration.md` has the policy file that allows the tools.
 
