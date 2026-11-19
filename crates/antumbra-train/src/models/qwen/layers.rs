@@ -8,6 +8,9 @@
 
 use super::*;
 
+mod step;
+pub(super) use step::Scratch;
+
 // --- linear-algebra helpers ------------------------------------------------
 
 /// `x · Wᵀ` with candle's broadcast-over-batch-dims convention (mirrors
@@ -93,10 +96,25 @@ pub(super) fn repeat_kv(x: Tensor, n_rep: usize) -> CResult<Tensor> {
 /// reads the quantized bytes and no more. That product has no backward, so it
 /// would also cut the gradient to every earlier layer's factors; a served
 /// model does not train.
+///
+/// `Tiled` is a served weight held as Antumbra's own tiles, on a CPU that can
+/// multiply through them (`tiles`): fewer bytes to read than candle's, and
+/// the one copy of the weight.
 pub(super) enum BaseWeight {
     Dense(Tensor),
     Quantized(QTensor),
     Served(QMatMul),
+    Tiled(tiles::Tiled),
+}
+
+/// The one product of a group of one.
+pub(super) fn one(mut products: Vec<Tensor>) -> CResult<Tensor> {
+    match (products.pop(), products.is_empty()) {
+        (Some(product), true) => Ok(product),
+        _ => Err(candle_core::Error::msg(
+            "one weight was multiplied and not one product came back",
+        )),
+    }
 }
 
 pub(super) struct LoraLinear {
@@ -199,7 +217,25 @@ impl LoraLinear {
                 frozen_matmul_t(x, &q.dequantize(x.device())?.to_dtype(x.dtype())?)
             }
             BaseWeight::Served(q) => served_matmul(q, x),
+            BaseWeight::Tiled(t) => one(tiles::forward(&[t], x)?),
         }
+    }
+
+    /// The frozen bases of `group` times `x`. Weights held as tiles are
+    /// multiplied together: `x` is quantized once for all of them, and they
+    /// are one dispatch.
+    fn base_products<const N: usize>(x: &Tensor, group: [&LoraLinear; N]) -> CResult<Vec<Tensor>> {
+        let tiled: Vec<&tiles::Tiled> = group
+            .iter()
+            .filter_map(|l| match &l.base {
+                BaseWeight::Tiled(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+        if tiled.len() == N {
+            return tiles::forward(&tiled, x);
+        }
+        group.iter().map(|l| l.base_product(x)).collect()
     }
 
     fn with_bias(&self, out: Tensor) -> CResult<Tensor> {
@@ -234,7 +270,8 @@ impl LoraLinear {
             && x.dtype() == DType::F32
             && !x.track_op()
             && group.iter().all(|l| l.reads_directly());
-        let outs: Vec<Tensor> = if direct {
+        let bases = Self::base_products(x, group)?;
+        let deltas: Vec<Option<Tensor>> = if direct {
             let factors: Vec<adapt::Factors> = group
                 .iter()
                 .map(|l| adapt::Factors {
@@ -243,33 +280,54 @@ impl LoraLinear {
                     scale: l.scale,
                 })
                 .collect();
-            let deltas = adapt::grouped_delta(x, &factors)?;
-            group
-                .iter()
-                .zip(deltas)
-                .map(|(l, delta)| l.with_bias((l.base_product(x)? + delta)?))
-                .collect::<CResult<_>>()?
+            adapt::grouped_delta(x, &factors)?
+                .into_iter()
+                .map(Some)
+                .collect()
         } else {
-            group.iter().map(|l| l.forward(x)).collect::<CResult<_>>()?
+            group.iter().map(|l| l.delta(x)).collect::<CResult<_>>()?
         };
+        let outs: Vec<Tensor> = group
+            .iter()
+            .zip(bases)
+            .zip(deltas)
+            .map(|((l, base), delta)| {
+                l.with_bias(match delta {
+                    Some(delta) => (base + delta)?,
+                    None => base,
+                })
+            })
+            .collect::<CResult<_>>()?;
         outs.try_into()
             .map_err(|_| candle_core::Error::msg("a projection group lost an output"))
     }
 
-    pub(super) fn forward(&self, x: &Tensor) -> CResult<Tensor> {
-        let mut out = self.base_product(x)?;
-        if self.enabled {
-            // Detaching the factors when grad is off keeps generation off the
-            // autograd graph: same values, no retained activations or dequant.
-            let (a, b) = if self.grad {
-                (self.a.clone(), self.b.clone())
-            } else {
-                (self.a.detach(), self.b.detach())
-            };
-            let lora = matmul_t(&matmul_t(x, &a)?, &b)?.affine(self.scale, 0.0)?;
-            out = (out + lora)?;
+    /// The adapter's delta as tensor ops, with its gradient when training;
+    /// nothing when the adapter is off.
+    fn delta(&self, x: &Tensor) -> CResult<Option<Tensor>> {
+        if !self.enabled {
+            return Ok(None);
         }
-        self.with_bias(out)
+        // Detaching the factors when grad is off keeps generation off the
+        // autograd graph: same values, no retained activations or dequant.
+        let (a, b) = if self.grad {
+            (self.a.clone(), self.b.clone())
+        } else {
+            (self.a.detach(), self.b.detach())
+        };
+        Ok(Some(
+            matmul_t(&matmul_t(x, &a)?, &b)?.affine(self.scale, 0.0)?,
+        ))
+    }
+
+    /// One projection alone: what a group is tested against.
+    #[cfg(test)]
+    pub(super) fn forward(&self, x: &Tensor) -> CResult<Tensor> {
+        let base = self.base_product(x)?;
+        self.with_bias(match self.delta(x)? {
+            Some(delta) => (base + delta)?,
+            None => base,
+        })
     }
 
     pub(super) fn set_enabled(&mut self, on: bool) {
@@ -299,12 +357,23 @@ impl LoraLinear {
         let w = match &self.base {
             BaseWeight::Dense(w) => w.clone(),
             BaseWeight::Quantized(q) => q.dequantize(&Device::Cpu)?,
-            BaseWeight::Served(_) => return Ok(()),
+            BaseWeight::Served(_) | BaseWeight::Tiled(_) => return Ok(()),
         };
         let device = w.device().clone();
         let cpu = w.to_device(&Device::Cpu)?.to_dtype(DType::F32)?;
-        let q = QTensor::quantize_onto(&cpu, dtype, &device)?;
-        self.base = BaseWeight::Served(QMatMul::from_qtensor(q)?);
+        // Tiled where this CPU can multiply through tiles, quantized on
+        // every core with the plain blocks never held whole; otherwise
+        // candle's own.
+        let tiled = match device.is_cpu() {
+            true => tiles::Tiled::quantize(&cpu, dtype)?,
+            false => None,
+        };
+        self.base = match tiled {
+            Some(tiled) => BaseWeight::Tiled(tiled),
+            None => BaseWeight::Served(QMatMul::from_qtensor(QTensor::quantize_onto(
+                &cpu, dtype, &device,
+            )?)?),
+        };
         Ok(())
     }
 }
@@ -401,6 +470,11 @@ pub(super) struct Attention {
     hidden_size: usize,
     rotary: Arc<RotaryEmbedding>,
     kv_cache: Option<(Tensor, Tensor)>,
+    /// In f32 on the CPU, one generating sequence's cache as plain rows: a
+    /// decoded token's keys and values are written onto the end of it, where
+    /// joining them to the cache copied every position so far in every layer
+    /// for every token, and attention reads it where it lies.
+    kv_store: Option<kv::KvStore>,
 }
 
 impl Attention {
@@ -460,6 +534,8 @@ impl Attention {
             hidden_size: h,
             rotary,
             kv_cache: None,
+            kv_store: (base.device().is_cpu() && base.dtype() == DType::F32)
+                .then(|| kv::KvStore::new(num_kv_heads, head_dim)),
         })
     }
 
@@ -485,26 +561,47 @@ impl Attention {
 
         let (q, k) = self.rotary.apply(&q, &k, offset)?;
 
-        let (k, v) = match &self.kv_cache {
-            Some((pk, pv)) if use_cache => (Tensor::cat(&[pk, &k], 2)?, Tensor::cat(&[pv, &v], 2)?),
-            _ => (k, v),
-        };
-        if use_cache {
-            self.kv_cache = Some((k.clone(), v.clone()));
-        }
-
-        // One decoded token on the CPU, with nothing to differentiate, reads
-        // the cache directly. A prompt, a mask, a gradient, another precision
-        // or another device keeps the tensor ops.
-        let direct = q_len == 1
-            && mask.is_none()
-            && q.device().is_cpu()
-            && q.dtype() == DType::F32
+        // One sequence generating in f32 on the CPU, with nothing to
+        // differentiate, keeps its keys and values as plain rows. A batch, a
+        // gradient, another precision or another device keeps them as
+        // tensors.
+        let plain = use_cache
+            && b == 1
+            && self.kv_cache.is_none()
             && !(q.track_op() || k.track_op() || v.track_op());
-        let out = if direct {
-            attend::decode_attention(&q, &k, &v)?
-        } else {
-            grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?
+        let out = match &mut self.kv_store {
+            Some(store) if plain => {
+                store.append_tensors(&k, &v)?;
+                if q_len == 1 && mask.is_none() {
+                    // One decoded token reads the cache where it lies.
+                    attend::one(&q, store)?
+                } else {
+                    // A prompt reads several positions at once, as tensors:
+                    // its own rows when they are all there is.
+                    let (k, v) = match store.len() == q_len {
+                        true => (k, v),
+                        false => store.tensors()?,
+                    };
+                    grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?
+                }
+            }
+            store => {
+                if use_cache && store.as_ref().is_some_and(|s| !s.is_empty()) {
+                    candle_core::bail!(
+                        "a sequence cached as plain rows cannot go on as a batch or with a gradient"
+                    )
+                }
+                let (k, v) = match &self.kv_cache {
+                    Some((pk, pv)) if use_cache => {
+                        (Tensor::cat(&[pk, &k], 2)?, Tensor::cat(&[pv, &v], 2)?)
+                    }
+                    _ => (k, v),
+                };
+                if use_cache {
+                    self.kv_cache = Some((k.clone(), v.clone()));
+                }
+                grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?
+            }
         };
         let out = out.transpose(1, 2)?.reshape((b, q_len, self.hidden_size))?;
         let [out] = LoraLinear::forward_group(&out, [&self.o_proj])?;
@@ -513,6 +610,9 @@ impl Attention {
 
     pub(super) fn clear_cache(&mut self) {
         self.kv_cache = None;
+        if let Some(store) = &mut self.kv_store {
+            store.reset();
+        }
     }
 
     pub(super) fn set_lora(&mut self, on: bool) {
