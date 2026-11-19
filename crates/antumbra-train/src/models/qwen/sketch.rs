@@ -33,9 +33,10 @@
 //! of their bytes as they cut a six-bit tile's. Sampling, penalties, and
 //! everything that reads log-probabilities keep the whole head.
 //!
-//! On one laptop CPU a 1.5B base decodes 7 to 9% more tokens a second for
-//! it: 31.2 where it decoded 29.1 at Q6_K, 39.7 where 36.6 at Q4_K, and 23.7
-//! where 21.6 at Q8_0.
+//! On one laptop CPU a 1.5B base decodes 7 to 10% more tokens a second for
+//! it: 29.9 where it decoded 27.9 at Q6_K, 38.7 where 36.1 at Q4_K, and 23.5
+//! where 21.4 at Q8_0, medians of twelve rounds. With an expert on: 28.8
+//! where 26.4, 37.3 where 34.5, and 21.7 where 20.7.
 
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
