@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.3 - 2026-11-18
+## 0.4.3 - 2026-11-19
 
 Two fixes to what 0.4.2 left a training server doing, a knob that pauses that training, decoding on a CPU at two to three times the speed, and a setup that leaves alone an agent that is not installed. On a server running 0.4.2, a scope's standing expert was trained again on the behaviors it had just learned and came back holding fewer, and each pass after that could replace an expert with one that held less.
 
