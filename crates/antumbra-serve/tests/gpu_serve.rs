@@ -48,7 +48,7 @@ async fn multi_adapter_serve_generates_on_gpu() -> anyhow::Result<()> {
         "adapter file must exist (set ANTUMBRA_GPU_ADAPTER): {adapter}"
     );
 
-    // Serve the learned mode: greedy + repetition penalty + n-gram block + nucleus.
+    // Serve the learned mode: greedy, as admission decodes.
     let cfg = RaftConfig::for_serving(48, 0.0);
     let expert = ExpertId::new("expert:gpu-probe");
     let mut engine = MultiAdapterServe::new(&base, cfg);
