@@ -65,6 +65,7 @@ fn default_true() -> bool {
     true
 }
 
+mod adapt;
 mod attend;
 mod layers;
 use layers::*;

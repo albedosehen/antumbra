@@ -188,17 +188,76 @@ impl LoraLinear {
         })
     }
 
-    pub(super) fn forward(&self, x: &Tensor) -> CResult<Tensor> {
+    /// The frozen base's product with `x`, before the adapter and the bias.
+    fn base_product(&self, x: &Tensor) -> CResult<Tensor> {
         // The base is frozen, so its product computes no gradient for the
         // weight: candle's plain matmul would build one for every base
         // weight on every training step and never use it.
-        let mut out = match &self.base {
-            BaseWeight::Dense(w) => frozen_matmul_t(x, w)?,
+        match &self.base {
+            BaseWeight::Dense(w) => frozen_matmul_t(x, w),
             BaseWeight::Quantized(q) => {
-                frozen_matmul_t(x, &q.dequantize(x.device())?.to_dtype(x.dtype())?)?
+                frozen_matmul_t(x, &q.dequantize(x.device())?.to_dtype(x.dtype())?)
             }
-            BaseWeight::Served(q) => served_matmul(q, x)?,
+            BaseWeight::Served(q) => served_matmul(q, x),
+        }
+    }
+
+    fn with_bias(&self, out: Tensor) -> CResult<Tensor> {
+        match &self.base_b {
+            Some(bias) => out.broadcast_add(bias),
+            None => Ok(out),
+        }
+    }
+
+    /// Whether this projection's delta can be read straight from its factors:
+    /// the adapter is on, in f32 on the CPU, with nothing to differentiate.
+    fn reads_directly(&self) -> bool {
+        self.enabled
+            && !self.grad
+            && self.a.device().is_cpu()
+            && self.a.dtype() == DType::F32
+            && self.b.dtype() == DType::F32
+    }
+
+    /// Every projection in `group` applied to the same `x`: what `forward`
+    /// gives each. For one decoded row on the CPU with nothing to
+    /// differentiate, the group's adapter deltas are computed together, in
+    /// one pass over their factors on every core; a prompt's rows, training
+    /// and every other device are each projection's own forward.
+    pub(super) fn forward_group<const N: usize>(
+        x: &Tensor,
+        group: [&LoraLinear; N],
+    ) -> CResult<[Tensor; N]> {
+        let one_row = x.dims().last().is_some_and(|inn| x.elem_count() == *inn);
+        let direct = one_row
+            && x.device().is_cpu()
+            && x.dtype() == DType::F32
+            && !x.track_op()
+            && group.iter().all(|l| l.reads_directly());
+        let outs: Vec<Tensor> = if direct {
+            let factors: Vec<adapt::Factors> = group
+                .iter()
+                .map(|l| adapt::Factors {
+                    a: &l.a,
+                    b: &l.b,
+                    scale: l.scale,
+                })
+                .collect();
+            let deltas = adapt::grouped_delta(x, &factors)?;
+            group
+                .iter()
+                .zip(deltas)
+                .map(|(l, delta)| l.with_bias((l.base_product(x)? + delta)?))
+                .collect::<CResult<_>>()?
+        } else {
+            group.iter().map(|l| l.forward(x)).collect::<CResult<_>>()?
         };
+        outs.try_into()
+            .map_err(|_| candle_core::Error::msg("a projection group lost an output"))
+    }
+
+    pub(super) fn forward(&self, x: &Tensor) -> CResult<Tensor> {
+        let mut out = self.base_product(x)?;
         if self.enabled {
             // Detaching the factors when grad is off keeps generation off the
             // autograd graph: same values, no retained activations or dequant.
@@ -210,10 +269,7 @@ impl LoraLinear {
             let lora = matmul_t(&matmul_t(x, &a)?, &b)?.affine(self.scale, 0.0)?;
             out = (out + lora)?;
         }
-        match &self.base_b {
-            Some(bias) => out.broadcast_add(bias),
-            None => Ok(out),
-        }
+        self.with_bias(out)
     }
 
     pub(super) fn set_enabled(&mut self, on: bool) {
@@ -407,9 +463,7 @@ impl Attention {
         use_cache: bool,
     ) -> CResult<Tensor> {
         let (b, q_len, _) = xs.dims3()?;
-        let q = self.q_proj.forward(xs)?;
-        let k = self.k_proj.forward(xs)?;
-        let v = self.v_proj.forward(xs)?;
+        let [q, k, v] = LoraLinear::forward_group(xs, [&self.q_proj, &self.k_proj, &self.v_proj])?;
 
         let q = q
             .reshape((b, q_len, self.num_heads, self.head_dim))?
@@ -445,7 +499,8 @@ impl Attention {
             grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?
         };
         let out = out.transpose(1, 2)?.reshape((b, q_len, self.hidden_size))?;
-        self.o_proj.forward(&out)
+        let [out] = LoraLinear::forward_group(&out, [&self.o_proj])?;
+        Ok(out)
     }
 
     pub(super) fn clear_cache(&mut self) {
@@ -532,9 +587,10 @@ impl Mlp {
     }
 
     pub(super) fn forward(&self, xs: &Tensor) -> CResult<Tensor> {
-        let lhs = self.act.forward(&self.gate_proj.forward(xs)?)?;
-        let rhs = self.up_proj.forward(xs)?;
-        self.down_proj.forward(&(lhs * rhs)?)
+        let [gate, up] = LoraLinear::forward_group(xs, [&self.gate_proj, &self.up_proj])?;
+        let lhs = self.act.forward(&gate)?;
+        let [out] = LoraLinear::forward_group(&(lhs * up)?, [&self.down_proj])?;
+        Ok(out)
     }
 
     pub(super) fn set_lora(&mut self, on: bool) {
@@ -791,6 +847,44 @@ mod tests {
             let lora = matmul_t(&matmul_t(&x, &a)?, &b)?.affine(2.0, 0.0)?;
             assert!(largest_gap(&(with - without)?, &lora)? < 1e-4, "{dtype:?}");
         }
+        Ok(())
+    }
+
+    /// Projections applied as a group give what each gives alone: one decoded
+    /// row through the grouped deltas, over a dense base and a served one, and
+    /// a prompt's rows, a silenced adapter or a training one through each
+    /// projection's own forward.
+    #[test]
+    fn a_group_of_linears_gives_what_each_gives_alone() -> CResult<()> {
+        let dev = Device::Cpu;
+        let (in_f, rank) = (256, 4);
+        let make = |out_f: usize| -> CResult<LoraLinear> {
+            let w = Tensor::randn(0f32, 1.0, (out_f, in_f), &dev)?;
+            let a = Tensor::randn(0f32, 0.1, (rank, in_f), &dev)?;
+            let b = Tensor::randn(0f32, 0.1, (out_f, rank), &dev)?;
+            Ok(linear(BaseWeight::Dense(w), &a, &b))
+        };
+        let (mut one, mut two) = (make(8)?, make(24)?);
+        let row = Tensor::randn(0f32, 1.0, (1, 1, in_f), &dev)?;
+        let rows = Tensor::randn(0f32, 1.0, (1, 3, in_f), &dev)?;
+
+        let [first, second] = LoraLinear::forward_group(&row, [&one, &two])?;
+        assert!(largest_gap(&first, &one.forward(&row)?)? < 1e-4);
+        assert!(largest_gap(&second, &two.forward(&row)?)? < 1e-4);
+        let [many] = LoraLinear::forward_group(&rows, [&two])?;
+        assert_eq!(largest_gap(&many, &two.forward(&rows)?)?, 0.0, "a prompt");
+
+        one.serve_quantized(GgmlDType::Q8_0)?;
+        let [served] = LoraLinear::forward_group(&row, [&one])?;
+        assert!(largest_gap(&served, &one.forward(&row)?)? < 1e-4, "served");
+
+        two.set_enabled(false);
+        let [bare] = LoraLinear::forward_group(&row, [&two])?;
+        assert_eq!(largest_gap(&bare, &two.forward(&row)?)?, 0.0, "silenced");
+        two.set_enabled(true);
+        two.set_grad(true);
+        let [tracked] = LoraLinear::forward_group(&row, [&two])?;
+        assert_eq!(largest_gap(&tracked, &two.forward(&row)?)?, 0.0, "training");
         Ok(())
     }
 
