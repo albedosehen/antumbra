@@ -8,6 +8,9 @@
 
 use super::*;
 
+mod step;
+pub(super) use step::Scratch;
+
 // --- linear-algebra helpers ------------------------------------------------
 
 /// `x · Wᵀ` with candle's broadcast-over-batch-dims convention (mirrors
@@ -30,7 +33,48 @@ pub(super) fn served_matmul(w: &QMatMul, x: &Tensor) -> CResult<Tensor> {
         .to_dtype(dtype)
 }
 
-/// GQA: repeat each KV head `n_rep` times to match the query heads.
+/// Grouped-query attention: `q` is `(b, heads, q_len, head_dim)`, `k` and `v`
+/// are `(b, kv_heads, kv_len, head_dim)`, and each KV head serves `n_rep`
+/// query heads in order. Returns `(b, heads, q_len, head_dim)`.
+///
+/// The query heads that share a KV head are stacked as rows against it, so
+/// every product is the one a K or V repeated `n_rep` times would give, and
+/// nothing of the cache's length is copied to make it. K is multiplied
+/// through a transposed view, which the product reads in place. Repeating K
+/// and V copied the whole cache six times over on this base, and making the
+/// transposed K contiguous copied it again element by element, in every
+/// layer for every token: on a CPU that copy alone was about a quarter of a
+/// decoded token.
+pub(super) fn grouped_attention(
+    q: &Tensor,
+    k: &Tensor,
+    v: &Tensor,
+    mask: Option<&Tensor>,
+    n_rep: usize,
+) -> CResult<Tensor> {
+    let (b, heads, q_len, head_dim) = q.dims4()?;
+    let (_, kv_heads, kv_len, _) = k.dims4()?;
+    let rows = n_rep * q_len;
+    let q = q.contiguous()?.reshape((b, kv_heads, rows, head_dim))?;
+    let scale = 1f64 / (head_dim as f64).sqrt();
+    let attn = (q.matmul(&k.contiguous()?.t()?)? * scale)?;
+    let attn = match mask {
+        // The mask is per query position, so it is added with the stacked
+        // heads set apart again.
+        Some(m) => attn
+            .reshape((b, kv_heads, n_rep, q_len, kv_len))?
+            .broadcast_add(m)?
+            .reshape((b, kv_heads, rows, kv_len))?,
+        None => attn,
+    };
+    let attn = candle_nn::ops::softmax_last_dim(&attn)?;
+    attn.matmul(&v.contiguous()?)?
+        .reshape((b, heads, q_len, head_dim))
+}
+
+/// GQA by repeating each KV head `n_rep` times to match the query heads: what
+/// [`grouped_attention`] replaced, kept as the reference it is tested against.
+#[cfg(test)]
 pub(super) fn repeat_kv(x: Tensor, n_rep: usize) -> CResult<Tensor> {
     if n_rep == 1 {
         return Ok(x);
@@ -52,10 +96,25 @@ pub(super) fn repeat_kv(x: Tensor, n_rep: usize) -> CResult<Tensor> {
 /// reads the quantized bytes and no more. That product has no backward, so it
 /// would also cut the gradient to every earlier layer's factors; a served
 /// model does not train.
+///
+/// `Tiled` is a served weight held as Antumbra's own tiles, on a CPU that can
+/// multiply through them (`tiles`): fewer bytes to read than candle's, and
+/// the one copy of the weight.
 pub(super) enum BaseWeight {
     Dense(Tensor),
     Quantized(QTensor),
     Served(QMatMul),
+    Tiled(tiles::Tiled),
+}
+
+/// The one product of a group of one.
+pub(super) fn one(mut products: Vec<Tensor>) -> CResult<Tensor> {
+    match (products.pop(), products.is_empty()) {
+        (Some(product), true) => Ok(product),
+        _ => Err(candle_core::Error::msg(
+            "one weight was multiplied and not one product came back",
+        )),
+    }
 }
 
 pub(super) struct LoraLinear {
@@ -147,32 +206,128 @@ impl LoraLinear {
         })
     }
 
-    pub(super) fn forward(&self, x: &Tensor) -> CResult<Tensor> {
+    /// The frozen base's product with `x`, before the adapter and the bias.
+    fn base_product(&self, x: &Tensor) -> CResult<Tensor> {
         // The base is frozen, so its product computes no gradient for the
         // weight: candle's plain matmul would build one for every base
         // weight on every training step and never use it.
-        let mut out = match &self.base {
-            BaseWeight::Dense(w) => frozen_matmul_t(x, w)?,
+        match &self.base {
+            BaseWeight::Dense(w) => frozen_matmul_t(x, w),
             BaseWeight::Quantized(q) => {
-                frozen_matmul_t(x, &q.dequantize(x.device())?.to_dtype(x.dtype())?)?
+                frozen_matmul_t(x, &q.dequantize(x.device())?.to_dtype(x.dtype())?)
             }
-            BaseWeight::Served(q) => served_matmul(q, x)?,
-        };
-        if self.enabled {
-            // Detaching the factors when grad is off keeps generation off the
-            // autograd graph: same values, no retained activations or dequant.
-            let (a, b) = if self.grad {
-                (self.a.clone(), self.b.clone())
-            } else {
-                (self.a.detach(), self.b.detach())
-            };
-            let lora = matmul_t(&matmul_t(x, &a)?, &b)?.affine(self.scale, 0.0)?;
-            out = (out + lora)?;
+            BaseWeight::Served(q) => served_matmul(q, x),
+            BaseWeight::Tiled(t) => one(tiles::forward(&[t], x)?),
         }
+    }
+
+    /// The frozen bases of `group` times `x`. Weights held as tiles are
+    /// multiplied together: `x` is quantized once for all of them, and they
+    /// are one dispatch.
+    fn base_products<const N: usize>(x: &Tensor, group: [&LoraLinear; N]) -> CResult<Vec<Tensor>> {
+        let tiled: Vec<&tiles::Tiled> = group
+            .iter()
+            .filter_map(|l| match &l.base {
+                BaseWeight::Tiled(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+        if tiled.len() == N {
+            return tiles::forward(&tiled, x);
+        }
+        group.iter().map(|l| l.base_product(x)).collect()
+    }
+
+    fn with_bias(&self, out: Tensor) -> CResult<Tensor> {
         match &self.base_b {
             Some(bias) => out.broadcast_add(bias),
             None => Ok(out),
         }
+    }
+
+    /// Whether this projection's delta can be read straight from its factors:
+    /// the adapter is on, in f32 on the CPU, with nothing to differentiate.
+    fn reads_directly(&self) -> bool {
+        self.enabled
+            && !self.grad
+            && self.a.device().is_cpu()
+            && self.a.dtype() == DType::F32
+            && self.b.dtype() == DType::F32
+    }
+
+    /// Every projection in `group` applied to the same `x`: what `forward`
+    /// gives each. For one decoded row on the CPU with nothing to
+    /// differentiate, the group's adapter deltas are computed together, in
+    /// one pass over their factors on every core; a prompt's rows, training
+    /// and every other device are each projection's own forward.
+    pub(super) fn forward_group<const N: usize>(
+        x: &Tensor,
+        group: [&LoraLinear; N],
+    ) -> CResult<[Tensor; N]> {
+        let one_row = x.dims().last().is_some_and(|inn| x.elem_count() == *inn);
+        let direct = one_row
+            && x.device().is_cpu()
+            && x.dtype() == DType::F32
+            && !x.track_op()
+            && group.iter().all(|l| l.reads_directly());
+        let bases = Self::base_products(x, group)?;
+        let deltas: Vec<Option<Tensor>> = if direct {
+            let factors: Vec<adapt::Factors> = group
+                .iter()
+                .map(|l| adapt::Factors {
+                    a: &l.a,
+                    b: &l.b,
+                    scale: l.scale,
+                })
+                .collect();
+            adapt::grouped_delta(x, &factors)?
+                .into_iter()
+                .map(Some)
+                .collect()
+        } else {
+            group.iter().map(|l| l.delta(x)).collect::<CResult<_>>()?
+        };
+        let outs: Vec<Tensor> = group
+            .iter()
+            .zip(bases)
+            .zip(deltas)
+            .map(|((l, base), delta)| {
+                l.with_bias(match delta {
+                    Some(delta) => (base + delta)?,
+                    None => base,
+                })
+            })
+            .collect::<CResult<_>>()?;
+        outs.try_into()
+            .map_err(|_| candle_core::Error::msg("a projection group lost an output"))
+    }
+
+    /// The adapter's delta as tensor ops, with its gradient when training;
+    /// nothing when the adapter is off.
+    fn delta(&self, x: &Tensor) -> CResult<Option<Tensor>> {
+        if !self.enabled {
+            return Ok(None);
+        }
+        // Detaching the factors when grad is off keeps generation off the
+        // autograd graph: same values, no retained activations or dequant.
+        let (a, b) = if self.grad {
+            (self.a.clone(), self.b.clone())
+        } else {
+            (self.a.detach(), self.b.detach())
+        };
+        Ok(Some(
+            matmul_t(&matmul_t(x, &a)?, &b)?.affine(self.scale, 0.0)?,
+        ))
+    }
+
+    /// One projection alone: what a group is tested against.
+    #[cfg(test)]
+    pub(super) fn forward(&self, x: &Tensor) -> CResult<Tensor> {
+        let base = self.base_product(x)?;
+        self.with_bias(match self.delta(x)? {
+            Some(delta) => (base + delta)?,
+            None => base,
+        })
     }
 
     pub(super) fn set_enabled(&mut self, on: bool) {
@@ -202,12 +357,23 @@ impl LoraLinear {
         let w = match &self.base {
             BaseWeight::Dense(w) => w.clone(),
             BaseWeight::Quantized(q) => q.dequantize(&Device::Cpu)?,
-            BaseWeight::Served(_) => return Ok(()),
+            BaseWeight::Served(_) | BaseWeight::Tiled(_) => return Ok(()),
         };
         let device = w.device().clone();
         let cpu = w.to_device(&Device::Cpu)?.to_dtype(DType::F32)?;
-        let q = QTensor::quantize_onto(&cpu, dtype, &device)?;
-        self.base = BaseWeight::Served(QMatMul::from_qtensor(q)?);
+        // Tiled where this CPU can multiply through tiles, quantized on
+        // every core with the plain blocks never held whole; otherwise
+        // candle's own.
+        let tiled = match device.is_cpu() {
+            true => tiles::Tiled::quantize(&cpu, dtype)?,
+            false => None,
+        };
+        self.base = match tiled {
+            Some(tiled) => BaseWeight::Tiled(tiled),
+            None => BaseWeight::Served(QMatMul::from_qtensor(QTensor::quantize_onto(
+                &cpu, dtype, &device,
+            )?)?),
+        };
         Ok(())
     }
 }
@@ -228,6 +394,14 @@ impl RmsNorm {
     }
 
     pub(super) fn forward(&self, x: &Tensor) -> CResult<Tensor> {
+        // In f32 on the CPU with nothing to differentiate, one pass.
+        if x.device().is_cpu()
+            && x.dtype() == DType::F32
+            && self.weight.dtype() == DType::F32
+            && !x.track_op()
+        {
+            return rowwise::rms_norm(x, &self.weight, self.eps);
+        }
         let in_dtype = x.dtype();
         let x = x.to_dtype(DType::F32)?;
         let variance = x.sqr()?.mean_keepdim(D::Minus1)?;
@@ -296,6 +470,11 @@ pub(super) struct Attention {
     hidden_size: usize,
     rotary: Arc<RotaryEmbedding>,
     kv_cache: Option<(Tensor, Tensor)>,
+    /// In f32 on the CPU, one generating sequence's cache as plain rows: a
+    /// decoded token's keys and values are written onto the end of it, where
+    /// joining them to the cache copied every position so far in every layer
+    /// for every token, and attention reads it where it lies.
+    kv_store: Option<kv::KvStore>,
 }
 
 impl Attention {
@@ -355,6 +534,8 @@ impl Attention {
             hidden_size: h,
             rotary,
             kv_cache: None,
+            kv_store: (base.device().is_cpu() && base.dtype() == DType::F32)
+                .then(|| kv::KvStore::new(num_kv_heads, head_dim)),
         })
     }
 
@@ -366,9 +547,7 @@ impl Attention {
         use_cache: bool,
     ) -> CResult<Tensor> {
         let (b, q_len, _) = xs.dims3()?;
-        let q = self.q_proj.forward(xs)?;
-        let k = self.k_proj.forward(xs)?;
-        let v = self.v_proj.forward(xs)?;
+        let [q, k, v] = LoraLinear::forward_group(xs, [&self.q_proj, &self.k_proj, &self.v_proj])?;
 
         let q = q
             .reshape((b, q_len, self.num_heads, self.head_dim))?
@@ -382,31 +561,58 @@ impl Attention {
 
         let (q, k) = self.rotary.apply(&q, &k, offset)?;
 
-        let (k, v) = match &self.kv_cache {
-            Some((pk, pv)) if use_cache => (Tensor::cat(&[pk, &k], 2)?, Tensor::cat(&[pv, &v], 2)?),
-            _ => (k, v),
+        // One sequence generating in f32 on the CPU, with nothing to
+        // differentiate, keeps its keys and values as plain rows. A batch, a
+        // gradient, another precision or another device keeps them as
+        // tensors.
+        let plain = use_cache
+            && b == 1
+            && self.kv_cache.is_none()
+            && !(q.track_op() || k.track_op() || v.track_op());
+        let out = match &mut self.kv_store {
+            Some(store) if plain => {
+                store.append_tensors(&k, &v)?;
+                if q_len == 1 && mask.is_none() {
+                    // One decoded token reads the cache where it lies.
+                    attend::one(&q, store)?
+                } else {
+                    // A prompt reads several positions at once, as tensors:
+                    // its own rows when they are all there is.
+                    let (k, v) = match store.len() == q_len {
+                        true => (k, v),
+                        false => store.tensors()?,
+                    };
+                    grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?
+                }
+            }
+            store => {
+                if use_cache && store.as_ref().is_some_and(|s| !s.is_empty()) {
+                    candle_core::bail!(
+                        "a sequence cached as plain rows cannot go on as a batch or with a gradient"
+                    )
+                }
+                let (k, v) = match &self.kv_cache {
+                    Some((pk, pv)) if use_cache => {
+                        (Tensor::cat(&[pk, &k], 2)?, Tensor::cat(&[pv, &v], 2)?)
+                    }
+                    _ => (k, v),
+                };
+                if use_cache {
+                    self.kv_cache = Some((k.clone(), v.clone()));
+                }
+                grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?
+            }
         };
-        if use_cache {
-            self.kv_cache = Some((k.clone(), v.clone()));
-        }
-
-        let k = repeat_kv(k, self.num_kv_groups)?.contiguous()?;
-        let v = repeat_kv(v, self.num_kv_groups)?.contiguous()?;
-
-        let scale = 1f64 / (self.head_dim as f64).sqrt();
-        let attn = (q.contiguous()?.matmul(&k.transpose(2, 3)?.contiguous()?)? * scale)?;
-        let attn = match mask {
-            Some(m) => attn.broadcast_add(m)?,
-            None => attn,
-        };
-        let attn = candle_nn::ops::softmax_last_dim(&attn)?;
-        let out = attn.matmul(&v)?;
         let out = out.transpose(1, 2)?.reshape((b, q_len, self.hidden_size))?;
-        self.o_proj.forward(&out)
+        let [out] = LoraLinear::forward_group(&out, [&self.o_proj])?;
+        Ok(out)
     }
 
     pub(super) fn clear_cache(&mut self) {
         self.kv_cache = None;
+        if let Some(store) = &mut self.kv_store {
+            store.reset();
+        }
     }
 
     pub(super) fn set_lora(&mut self, on: bool) {
@@ -489,9 +695,21 @@ impl Mlp {
     }
 
     pub(super) fn forward(&self, xs: &Tensor) -> CResult<Tensor> {
-        let lhs = self.act.forward(&self.gate_proj.forward(xs)?)?;
-        let rhs = self.up_proj.forward(xs)?;
-        self.down_proj.forward(&(lhs * rhs)?)
+        let [gate, up] = LoraLinear::forward_group(xs, [&self.gate_proj, &self.up_proj])?;
+        // In f32 on the CPU with nothing to differentiate, the gate is one
+        // pass over both sides.
+        let one_pass = matches!(self.act, Activation::Silu)
+            && gate.device().is_cpu()
+            && gate.dtype() == DType::F32
+            && up.dtype() == DType::F32
+            && !(gate.track_op() || up.track_op());
+        let gated = if one_pass {
+            rowwise::silu_times(&gate, &up)?
+        } else {
+            (self.act.forward(&gate)? * up)?
+        };
+        let [out] = LoraLinear::forward_group(&gated, [&self.down_proj])?;
+        Ok(out)
     }
 
     pub(super) fn set_lora(&mut self, on: bool) {
@@ -629,6 +847,68 @@ mod tests {
             .to_scalar::<f32>()
     }
 
+    /// Attention as it was computed before: K and V repeated to the query
+    /// heads' count, one product per head.
+    fn repeated_attention(
+        q: &Tensor,
+        k: &Tensor,
+        v: &Tensor,
+        mask: Option<&Tensor>,
+        n_rep: usize,
+    ) -> CResult<Tensor> {
+        let head_dim = q.dim(3)?;
+        let k = repeat_kv(k.clone(), n_rep)?.contiguous()?;
+        let v = repeat_kv(v.clone(), n_rep)?.contiguous()?;
+        let scale = 1f64 / (head_dim as f64).sqrt();
+        let attn = (q.contiguous()?.matmul(&k.transpose(2, 3)?.contiguous()?)? * scale)?;
+        let attn = match mask {
+            Some(m) => attn.broadcast_add(m)?,
+            None => attn,
+        };
+        candle_nn::ops::softmax_last_dim(&attn)?.matmul(&v)
+    }
+
+    /// Stacking the query heads that share a KV head gives what repeating K
+    /// and V gives: one decoded token against a cache, and a whole prompt
+    /// under its causal mask.
+    #[test]
+    fn grouped_attention_is_attention_over_repeated_keys_and_values() -> CResult<()> {
+        let dev = Device::Cpu;
+        let (kv_heads, n_rep, head_dim) = (2, 3, 8);
+        let draw =
+            |heads: usize, len: usize| Tensor::randn(0f32, 1.0, (1, heads, len, head_dim), &dev);
+
+        // A decode step: one new position, five in the cache.
+        let (q, k, v) = (
+            draw(kv_heads * n_rep, 1)?,
+            draw(kv_heads, 5)?,
+            draw(kv_heads, 5)?,
+        );
+        let grouped = grouped_attention(&q, &k, &v, None, n_rep)?;
+        assert_eq!(grouped.dims(), &[1, kv_heads * n_rep, 1, head_dim]);
+        let gap = largest_gap(&grouped, &repeated_attention(&q, &k, &v, None, n_rep)?)?;
+        assert!(gap < 1e-5, "a decode step differs by {gap}");
+
+        // A prompt of four positions after one cached, under the causal mask:
+        // position i sees the cached one and positions up to its own.
+        let (q, k, v) = (
+            draw(kv_heads * n_rep, 4)?,
+            draw(kv_heads, 5)?,
+            draw(kv_heads, 5)?,
+        );
+        let mask: Vec<f32> = (0..4)
+            .flat_map(|i| (0..5).map(move |j| if j > i + 1 { f32::NEG_INFINITY } else { 0.0 }))
+            .collect();
+        let mask = Tensor::from_vec(mask, (4, 5), &dev)?;
+        let grouped = grouped_attention(&q, &k, &v, Some(&mask), n_rep)?;
+        let gap = largest_gap(
+            &grouped,
+            &repeated_attention(&q, &k, &v, Some(&mask), n_rep)?,
+        )?;
+        assert!(gap < 1e-5, "a masked prompt differs by {gap}");
+        Ok(())
+    }
+
     /// A fresh adapter's factors, as a layer registers them, on the CPU.
     fn fresh_factors() -> CResult<VarMap> {
         let varmap = VarMap::new();
@@ -686,6 +966,44 @@ mod tests {
             let lora = matmul_t(&matmul_t(&x, &a)?, &b)?.affine(2.0, 0.0)?;
             assert!(largest_gap(&(with - without)?, &lora)? < 1e-4, "{dtype:?}");
         }
+        Ok(())
+    }
+
+    /// Projections applied as a group give what each gives alone: one decoded
+    /// row through the grouped deltas, over a dense base and a served one, and
+    /// a prompt's rows, a silenced adapter or a training one through each
+    /// projection's own forward.
+    #[test]
+    fn a_group_of_linears_gives_what_each_gives_alone() -> CResult<()> {
+        let dev = Device::Cpu;
+        let (in_f, rank) = (256, 4);
+        let make = |out_f: usize| -> CResult<LoraLinear> {
+            let w = Tensor::randn(0f32, 1.0, (out_f, in_f), &dev)?;
+            let a = Tensor::randn(0f32, 0.1, (rank, in_f), &dev)?;
+            let b = Tensor::randn(0f32, 0.1, (out_f, rank), &dev)?;
+            Ok(linear(BaseWeight::Dense(w), &a, &b))
+        };
+        let (mut one, mut two) = (make(8)?, make(24)?);
+        let row = Tensor::randn(0f32, 1.0, (1, 1, in_f), &dev)?;
+        let rows = Tensor::randn(0f32, 1.0, (1, 3, in_f), &dev)?;
+
+        let [first, second] = LoraLinear::forward_group(&row, [&one, &two])?;
+        assert!(largest_gap(&first, &one.forward(&row)?)? < 1e-4);
+        assert!(largest_gap(&second, &two.forward(&row)?)? < 1e-4);
+        let [many] = LoraLinear::forward_group(&rows, [&two])?;
+        assert_eq!(largest_gap(&many, &two.forward(&rows)?)?, 0.0, "a prompt");
+
+        one.serve_quantized(GgmlDType::Q8_0)?;
+        let [served] = LoraLinear::forward_group(&row, [&one])?;
+        assert!(largest_gap(&served, &one.forward(&row)?)? < 1e-4, "served");
+
+        two.set_enabled(false);
+        let [bare] = LoraLinear::forward_group(&row, [&two])?;
+        assert_eq!(largest_gap(&bare, &two.forward(&row)?)?, 0.0, "silenced");
+        two.set_enabled(true);
+        two.set_grad(true);
+        let [tracked] = LoraLinear::forward_group(&row, [&two])?;
+        assert_eq!(largest_gap(&tracked, &two.forward(&row)?)?, 0.0, "training");
         Ok(())
     }
 

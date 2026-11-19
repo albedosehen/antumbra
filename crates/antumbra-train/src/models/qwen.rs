@@ -65,19 +65,50 @@ fn default_true() -> bool {
     true
 }
 
+mod adapt;
+mod attend;
+mod kv;
 mod layers;
+mod phases;
+mod rowwise;
+mod slices;
+mod tiles;
+#[cfg(target_arch = "x86_64")]
+mod wide;
 use layers::*;
 
 // --- the model -------------------------------------------------------------
+
+/// The form the head is served in over a body served in `body`. The head
+/// picks every token, so it is held finer than a four-bit body: at six bits
+/// (Q6_K), the form a Q4_K_M file gives its output weight, and 57 MB a token
+/// less to read on a 1.5B base than the eight bits it was held at before.
+/// Over an eight-bit body it is eight bits, as the body is.
+fn head_form(body: GgmlDType) -> GgmlDType {
+    match body {
+        GgmlDType::Q4K => GgmlDType::Q6K,
+        _ => GgmlDType::Q8_0,
+    }
+}
 
 pub struct QwenLora {
     embed_tokens: Embedding,
     layers: Vec<DecoderLayer>,
     norm: RmsNorm,
     lm_head_w: Tensor,
-    /// The head as a model loaded to serve reads it (Q8_0), in place of the
-    /// dense `lm_head_w`. `Some` exactly when the model was loaded to serve.
+    /// The head as a model loaded to serve reads it ([`head_form`]), in place
+    /// of the dense `lm_head_w`. Either this or `lm_head_t` is `Some` exactly
+    /// when the model was loaded to serve.
     lm_head_q: Option<QMatMul>,
+    /// The served head as tiles, in place of `lm_head_q`, on a CPU that can
+    /// multiply through them.
+    lm_head_t: Option<tiles::Tiled>,
+    /// Whether the model was loaded to serve: its base is quantized and
+    /// carries no gradient.
+    serves: bool,
+    /// The rows a decoded token is computed in where it is stepped through
+    /// plain rows, kept from one token to the next.
+    scratch: Scratch,
     device: Device,
     dtype: DType,
     varmap: VarMap,
@@ -86,7 +117,8 @@ pub struct QwenLora {
 impl QwenLora {
     /// With `serve`, every projection's base is quantized to that type as its
     /// layer loads (so the dense base is never held whole) and multiplied in
-    /// that form, and the head is held as Q8_0: the model can only serve.
+    /// that form, and the head is held in the form that goes with it
+    /// ([`head_form`]): the model can only serve.
     fn build(
         cfg: &Config,
         base: &VarBuilder,
@@ -123,15 +155,24 @@ impl QwenLora {
             embed_tokens.embeddings().clone()
         };
         // Tied to the embeddings, the head is the largest weight there is, and
-        // read whole every token; the lookup still needs the dense rows. Q8_0,
-        // not the body's Q4_K: the head picks every token.
-        let lm_head_q = match serve {
-            Some(_) => {
+        // read whole every token; the lookup still needs the dense rows.
+        let (lm_head_q, lm_head_t) = match serve {
+            Some(body) => {
+                let form = head_form(body);
                 let cpu = lm_head_w.to_device(&Device::Cpu)?.to_dtype(DType::F32)?;
-                let q = QTensor::quantize_onto(&cpu, GgmlDType::Q8_0, base.device())?;
-                Some(QMatMul::from_qtensor(q)?)
+                let tiled = match base.device().is_cpu() {
+                    true => tiles::Tiled::quantize(&cpu, form)?,
+                    false => None,
+                };
+                match tiled {
+                    Some(tiled) => (None, Some(tiled)),
+                    None => {
+                        let q = QTensor::quantize_onto(&cpu, form, base.device())?;
+                        (Some(QMatMul::from_qtensor(q)?), None)
+                    }
+                }
             }
-            None => None,
+            None => (None, None),
         };
         Ok(Self {
             embed_tokens,
@@ -139,6 +180,9 @@ impl QwenLora {
             norm,
             lm_head_w,
             lm_head_q,
+            lm_head_t,
+            serves: serve.is_some(),
+            scratch: Scratch::default(),
             device: base.device().clone(),
             dtype: base.dtype(),
             varmap,
@@ -148,6 +192,9 @@ impl QwenLora {
     /// Logits from hidden states, through the quantized head when the model
     /// was loaded to serve.
     fn logits(&self, hidden: &Tensor) -> CResult<Tensor> {
+        if let Some(tiled) = &self.lm_head_t {
+            return one(tiles::forward(&[tiled], hidden)?);
+        }
         match &self.lm_head_q {
             Some(q) => served_matmul(q, hidden),
             None => frozen_matmul_t(hidden, &self.lm_head_w),
@@ -515,7 +562,7 @@ impl QwenCausalLm {
     /// product has no backward, so the step would reach every layer's factors
     /// with the wrong gradient.
     fn ensure_trainable(&self) -> Result<()> {
-        if self.model.lm_head_q.is_some() {
+        if self.model.serves {
             return Err(AntumbraError::other(
                 "this model was loaded to serve, with a quantized base that carries no gradient; it cannot train",
             ));
@@ -608,24 +655,36 @@ impl QwenCausalLm {
             let step = std::time::Instant::now();
             let ctx_len = if index == 0 { tokens.len() } else { 1 };
             let start = tokens.len() - ctx_len;
-            let input = Tensor::new(&tokens[start..], &self.model.device)
-                .map_err(ce)?
-                .unsqueeze(0)
-                .map_err(ce)?;
-            let hidden = self.model.hidden(&input, start, true).map_err(ce)?;
-            let last = hidden.narrow(1, ctx_len - 1, 1).map_err(ce)?;
-            let logits = self
-                .model
-                .logits(&last)
-                .map_err(ce)?
-                .squeeze(0)
-                .map_err(ce)?
-                .squeeze(0)
-                .map_err(ce)?
-                .to_dtype(DType::F32)
-                .map_err(ce)?;
+            // A token after the first is one row: through plain rows where
+            // the model decodes that way, as tensors otherwise. The prompt
+            // is read as tensors.
+            let stepped = match &tokens[start..] {
+                [token] if index > 0 => self.model.step(*token, start).map_err(ce)?,
+                _ => None,
+            };
+            let logits_vec: Vec<f32> = match stepped {
+                Some(logits) => logits,
+                None => {
+                    let input = Tensor::new(&tokens[start..], &self.model.device)
+                        .map_err(ce)?
+                        .unsqueeze(0)
+                        .map_err(ce)?;
+                    let hidden = self.model.hidden(&input, start, true).map_err(ce)?;
+                    let last = hidden.narrow(1, ctx_len - 1, 1).map_err(ce)?;
+                    self.model
+                        .logits(&last)
+                        .map_err(ce)?
+                        .squeeze(0)
+                        .map_err(ce)?
+                        .squeeze(0)
+                        .map_err(ce)?
+                        .to_dtype(DType::F32)
+                        .map_err(ce)?
+                        .to_vec1()
+                        .map_err(ce)?
+                }
+            };
             // Decode policy over the generated continuation only (not the prompt).
-            let logits_vec: Vec<f32> = logits.to_vec1().map_err(ce)?;
             let next =
                 crate::decode::pick_token(logits_vec, &tokens[prompt_len..], &policy, &mut rng);
             timing.record(index, ctx_len, step.elapsed());

@@ -927,6 +927,94 @@ fn a_set_never_drops_what_the_expert_already_learned() {
     );
 }
 
+/// An expert as its training leaves it: taught `set` with `missed` among
+/// them not learned, its card recording both prints.
+fn trained_on(set: &[(Memory, Spec)], missed: &[&str]) -> Expert {
+    let learned: Vec<(Memory, Spec)> = set
+        .iter()
+        .filter(|(m, _)| !missed.contains(&m.id.as_str()))
+        .cloned()
+        .collect();
+    let mut expert = standing_expert(EVERYWHERE, &ids(&learned));
+    expert.capability_card["set"] = serde_json::json!(fingerprint(set));
+    expert.capability_card[CARD_HELD] = serde_json::json!(fingerprint(&learned));
+    expert.capability_card["missed"] = serde_json::json!(missed);
+    expert
+}
+
+#[test]
+fn an_expert_that_holds_the_set_in_force_is_not_behind_it() {
+    // Four taught at a ceiling of three (three it held already), one missed.
+    let before = vec![
+        recorded_at("memory:a", Status::Trained, 400),
+        recorded_at("memory:b", Status::Trained, 300),
+        recorded_at("memory:c", Status::Trained, 200),
+        recorded_at("memory:d", Status::Trained, 100),
+    ];
+    let expert = trained_on(&taught(&before, EVERYWHERE, 3).set, &["memory:d"]);
+
+    // After it, the missed one is accepted again and has no room: the set in
+    // force is the three it learned.
+    let after = |d: Memory| {
+        vec![
+            recorded_at("memory:a", Status::Trained, 400),
+            recorded_at("memory:b", Status::Trained, 300),
+            recorded_at("memory:c", Status::Trained, 200),
+            d,
+        ]
+    };
+    let missed = || noted(recorded_at("memory:d", Status::Accepted, 100), 0.0, false);
+    let now = taught(&after(missed()), EVERYWHERE, 3);
+    assert_eq!(ids(&now.set), ["memory:a", "memory:b", "memory:c"]);
+    assert_eq!(ids(&now.waiting), ["memory:d"]);
+    assert!(
+        stale(&now.set, Some(&expert)),
+        "not the set it was trained on"
+    );
+    assert!(holds(&now, &expert), "but exactly what it learned of it");
+    assert!(!behind(&now, Some(&expert)));
+
+    // The missed one retired: a change the expert is trained for.
+    let retired = taught(
+        &after(recorded_at("memory:d", Status::Retired, 100)),
+        EVERYWHERE,
+        3,
+    );
+    assert!(
+        behind(&retired, Some(&expert)),
+        "what it missed was retired"
+    );
+
+    // Room for the missed one again: it is taught again.
+    let roomy = taught(&after(missed()), EVERYWHERE, 4);
+    assert_eq!(roomy.set.len(), 4);
+    assert!(!behind(&roomy, Some(&expert)), "the set it was trained on");
+    let mut wider = after(missed());
+    wider.push(recorded_at("memory:e", Status::Accepted, 50));
+    assert!(
+        behind(&taught(&wider, EVERYWHERE, 4), Some(&expert)),
+        "one never tried takes the room"
+    );
+
+    // One it learned retired, or recorded again: not what it holds.
+    let mut fewer = after(missed());
+    fewer[2] = recorded_at("memory:c", Status::Retired, 200);
+    assert!(behind(&taught(&fewer, EVERYWHERE, 3), Some(&expert)));
+    let mut again = after(missed());
+    again[1].content = format!("{} ", again[1].content);
+    assert!(behind(&taught(&again, EVERYWHERE, 3), Some(&expert)));
+
+    // An expert minted before its card kept what it learned is judged by the
+    // set it was trained on, as before.
+    let mut older = expert.clone();
+    if let Some(card) = older.capability_card.as_object_mut() {
+        card.remove(CARD_HELD);
+    }
+    assert!(behind(&now, Some(&older)));
+    assert!(behind(&now, None), "no expert at all");
+    assert!(!behind(&Taught::default(), None), "and nothing to teach");
+}
+
 #[test]
 fn a_behavior_the_base_already_follows_is_left_out_of_the_set() {
     let all = vec![

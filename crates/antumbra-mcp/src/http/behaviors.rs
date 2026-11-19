@@ -23,6 +23,10 @@
 //! cannot learn (`behavior::taught`). A behavior the base model already
 //! follows is left out of the set.
 //!
+//! A workspace can pause all of it (`standing_training` at 0): its behaviors
+//! are still accepted once they have waited, and nothing of its is trained
+//! or dropped until the knob is 1 again.
+//!
 //! Database work runs in owner mode under the auth lock, a step at a time;
 //! training runs outside it.
 
@@ -91,21 +95,23 @@ pub(super) fn plan_user(
     behavior::scopes(memories, experts)
         .into_iter()
         .map(|scope| {
-            let behavior::Taught {
-                set: taught,
-                waiting,
-                ..
-            } = behavior::taught(memories, &scope, most);
+            let whole = behavior::taught(memories, &scope, most);
             let expert = experts
                 .iter()
                 .find(|e| e.standing_scope() == Some(scope.as_str()))
                 .cloned();
             let key = (tenant.to_string(), user.to_string(), scope.clone());
-            let need = need(&taught, expert.as_ref(), failed.get(&key));
+            let need = match expert.as_ref() {
+                // It learned exactly this set and what it missed still
+                // waits: training it on the same behaviors again would teach
+                // it nothing, and could cost it one it has.
+                Some(expert) if behavior::holds(&whole, expert) => Need::Nothing,
+                expert => need(&whole.set, expert, failed.get(&key)),
+            };
             ScopePlan {
                 scope,
-                taught,
-                waiting: waiting.len(),
+                taught: whole.set,
+                waiting: whole.waiting.len(),
                 expert,
                 need,
             }
@@ -332,14 +338,12 @@ mod keeper {
         failed: &mut Failed,
         tally: &mut Tally,
     ) -> Result<Vec<Memory>> {
-        let (memories, experts, here, most) = {
+        let (memories, experts, here, most, trains) = {
             let _guard = state.auth.lock().await;
             state.store.signin_root().await?;
-            let most = memory_policy::get(&state.store, tenant)
-                .await?
-                .behaviors_per_expert
-                .round()
-                .max(1.0) as usize;
+            let policy = memory_policy::get(&state.store, tenant).await?;
+            let most = policy.behaviors_per_expert.round().max(1.0) as usize;
+            let trains = policy.trains_standing();
             let memories = memory::list_by_compartment(&state.store, tenant, compartment).await?;
             let experts: Vec<antumbra_core::Expert> = expert::list(&state.store)
                 .await?
@@ -352,12 +356,21 @@ mod keeper {
                 .ok()
                 .flatten()
                 .is_none_or(|g| g.host == state.host);
-            (memories, experts, here, most)
+            (memories, experts, here, most, trains)
         };
         if !here {
             return Ok(Vec::new());
         }
         let memories = accept_waited(state, tenant, user, compartment, memories, tally).await?;
+        // The workspace has paused training: behaviors are still accepted,
+        // and what is served stays as it is until the knob is back.
+        if !trains {
+            eprintln!(
+                "antumbra-mcp: standing experts, {}: training is paused (standing_training 0), nothing trained or dropped",
+                user.as_str()
+            );
+            return Ok(memories);
+        }
         let scopes = plan_user(
             &memories,
             &experts,
@@ -428,6 +441,12 @@ mod keeper {
                         state.embedder_for(tenant).await
                     };
                     let cfg = behave::standing_config(&state.recipe);
+                    // What the expert in place holds: a retrained one that
+                    // did not learn all of it is refused, and this one stays.
+                    let in_place = current
+                        .as_ref()
+                        .map(antumbra_core::behavior::taught_by)
+                        .unwrap_or_default();
                     // The expert this set replaces, measured first on what
                     // the set gained since it was trained: tasks the user
                     // wrote that neither it nor its admission ever saw. An
@@ -482,7 +501,15 @@ mod keeper {
                         behave::begin(&state.store, &plan).await?;
                     }
                     let trained = crate::server::heavy::spawn_heavy(async move {
-                        behave::train(&job, embedder.as_ref(), &cfg, confidence, &measure).await
+                        behave::train(
+                            &job,
+                            &in_place,
+                            embedder.as_ref(),
+                            &cfg,
+                            confidence,
+                            &measure,
+                        )
+                        .await
                     })
                     .await
                     .map_err(anyhow::Error::from)

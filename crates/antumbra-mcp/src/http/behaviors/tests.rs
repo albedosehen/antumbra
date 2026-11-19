@@ -289,3 +289,77 @@ fn a_scope_is_trained_on_no_more_than_its_ceiling() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+/// A scope whose expert holds more than the ceiling, after a training that
+/// missed one: what it missed has no room, so the set in force is what it
+/// learned. It needs nothing. Trained on that set alone it would learn
+/// nothing and could lose a behavior it has; before its card kept what it
+/// learned, it was trained on it all the same.
+#[test]
+fn a_full_expert_is_not_trained_again_on_what_it_already_learned() -> anyhow::Result<()> {
+    use antumbra_core::behavior::{mark_training, Training, CARD_HELD};
+    let at = |n: i64, status: Status| {
+        let mut m = recorded(
+            &format!("memory:{n}"),
+            &format!("Rule {n}."),
+            status,
+            "everywhere",
+        );
+        m.created_at = chrono::Utc::now() - chrono::Duration::minutes(10 - n);
+        m
+    };
+    // Trained on the three it held, at a ceiling of two; the third missed.
+    let before: Vec<Memory> = (1..=3).map(|n| at(n, Status::Trained)).collect();
+    let set = behavior::taught(&before, "everywhere", 2).set;
+    assert_eq!(set.len(), 3, "a set never drops what the expert held");
+    let mut missed = at(3, Status::Accepted);
+    mark_training(
+        &mut missed.evidence,
+        &Training {
+            set: fingerprint(&set),
+            base: 0.0,
+            expert: 0.5,
+            learned: false,
+            admitted: true,
+            held: 2,
+            worse: 0.1,
+        },
+    );
+    let after = vec![at(1, Status::Trained), at(2, Status::Trained), missed];
+    let mut expert = standing("everywhere", &["memory:1", "memory:2"]);
+    expert.capability_card["set"] = serde_json::json!(fingerprint(&set));
+    expert.capability_card["missed"] = serde_json::json!(["memory:3"]);
+
+    // Its card does not say what it learned: judged by the set it was
+    // trained on, it is behind the two in force and trained on them.
+    let plan = |expert: &Expert, memories: &[Memory]| {
+        plan_user(
+            memories,
+            std::slice::from_ref(expert),
+            &Failed::new(),
+            "ws:a",
+            "user:a",
+            2,
+        )
+        .into_iter()
+        .find(|p| p.scope == "everywhere")
+        .ok_or_else(|| anyhow::anyhow!("everywhere was not planned"))
+    };
+    let older = plan(&expert, &after)?;
+    assert_eq!(older.taught.len(), 2);
+    assert_eq!(older.waiting, 1);
+    assert!(matches!(older.need, Need::Train(_)));
+
+    // Its card says it learned exactly those two: nothing to train.
+    expert.capability_card[CARD_HELD] = serde_json::json!(fingerprint(&older.taught));
+    assert_eq!(plan(&expert, &after)?.need, Need::Nothing);
+
+    // The one it missed retired, or one it learned: trained.
+    let mut retired = after.clone();
+    retired[2] = at(3, Status::Retired);
+    assert!(matches!(plan(&expert, &retired)?.need, Need::Train(_)));
+    let mut fewer = after.clone();
+    fewer[1] = at(2, Status::Retired);
+    assert!(matches!(plan(&expert, &fewer)?.need, Need::Train(_)));
+    Ok(())
+}

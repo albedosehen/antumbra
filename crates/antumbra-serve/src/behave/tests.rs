@@ -431,6 +431,19 @@ async fn an_expert_is_minted_with_what_it_learned_and_left_be_until_its_set_chan
     );
     let set = behavior::fingerprint(&plan.taught);
     assert_eq!(behavior::trained_set(&e), Some(set.as_str()));
+    // And what it learned of that set, as a set of its own: the set in force
+    // once the one it missed has no room.
+    let learned: Vec<_> = plan
+        .taught
+        .iter()
+        .filter(|(m, _)| m.id.as_str() == "memory:learned")
+        .cloned()
+        .collect();
+    assert_eq!(
+        behavior::held_set(&e),
+        Some(behavior::fingerprint(&learned).as_str())
+    );
+    assert_eq!(behavior::missed_by(&e), ["memory:missed"]);
     // The card keeps each behavior's scores at admission, for the audit.
     assert!(behavior::card_worse(&e.capability_card, &["memory:missed"]).is_some());
     assert!(
@@ -1348,5 +1361,118 @@ async fn a_training_is_kept_as_an_evaluation_whether_admitted_or_refused() -> an
     };
     assert_eq!(metrics["admitted"], false);
     assert_eq!(metrics["reasons"][0], "the controls fell");
+    Ok(())
+}
+
+/// An admitted verdict over `(behavior, whether it was learned)`.
+fn verdict_of(scores: &[(&str, bool)]) -> Verdict {
+    use antumbra_train::behave::BehaviorScore;
+    Verdict {
+        admitted: true,
+        behaviors: scores
+            .iter()
+            .map(|(id, learned)| BehaviorScore {
+                id: (*id).into(),
+                base: 0.0,
+                expert: if *learned { 1.0 } else { 0.33 },
+                admitted: *learned,
+                held: 3,
+                worse: 0.1,
+            })
+            .collect(),
+        controls: Vec::new(),
+        reasons: Vec::new(),
+    }
+}
+
+#[test]
+fn an_expert_that_did_not_learn_what_the_one_in_place_holds_is_refused() {
+    let ids = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let taught = ids(&["memory:a", "memory:b", "memory:new"]);
+    let in_place = ids(&["memory:a", "memory:b", "memory:gone"]);
+
+    // Everything in place that is still taught, and the new one: admitted.
+    // What it held that is no longer taught is not counted against it.
+    let mut all = verdict_of(&[("memory:a", true), ("memory:b", true), ("memory:new", true)]);
+    keep_in_place(&mut all, &taught, &in_place);
+    assert!(all.admitted && all.reasons.is_empty());
+
+    // The new one learned and one in place lost: refused, saying which.
+    let mut lost = verdict_of(&[
+        ("memory:a", true),
+        ("memory:b", false),
+        ("memory:new", true),
+    ]);
+    keep_in_place(&mut lost, &taught, &in_place);
+    assert!(!lost.admitted);
+    assert_eq!(
+        lost.reasons,
+        ["it did not learn 1 of the 2 behavior(s) the expert in place holds (memory:b), so that expert stays"]
+    );
+    assert_eq!(lost.learned(), ["memory:a", "memory:new"], "still said");
+
+    // No expert in place: nothing to keep, whatever it missed.
+    let mut first = verdict_of(&[("memory:a", false), ("memory:b", true)]);
+    keep_in_place(&mut first, &taught, &[]);
+    assert!(first.admitted);
+
+    // One refused already is left with its own reasons.
+    let mut refused = verdict_of(&[("memory:a", false)]);
+    refused.admitted = false;
+    refused.reasons = vec!["control-cmd fell from 1.00 to 0.50".into()];
+    keep_in_place(&mut refused, &taught, &in_place);
+    assert_eq!(refused.reasons, ["control-cmd fell from 1.00 to 0.50"]);
+}
+
+#[tokio::test]
+async fn a_retraining_that_lost_a_held_behavior_leaves_the_expert_in_place() -> anyhow::Result<()> {
+    // An expert holding memory:learned, memory:missed accepted beside it.
+    let (store, plan, trained) = learned_and_missed(true).await?;
+    let retrained = trained.clone();
+    let (id, _) = minted(mint(&store, &plan, trained, "rig").await?)?;
+    let before = expert_in(&store, &id).await?;
+
+    // Trained again the draw goes the other way: it learns the one it missed
+    // and loses the one it held.
+    let again = plan_again(&store).await?;
+    let mut verdict = retrained.verdict.clone();
+    for score in verdict.behaviors.iter_mut() {
+        score.admitted = !score.admitted;
+    }
+    keep_in_place(
+        &mut verdict,
+        &again.behaviors(),
+        &behavior::taught_by(&before),
+    );
+    assert!(!verdict.admitted);
+    let report = mint(
+        &store,
+        &again,
+        Trained {
+            verdict,
+            ..retrained
+        },
+        "rig",
+    )
+    .await?;
+    assert!(report.expert.is_none(), "nothing is minted");
+
+    // The expert in place is as it was, and still holds what it held.
+    let after = expert_in(&store, &id).await?;
+    assert_eq!(behavior::taught_by(&after), ["memory:learned"]);
+    assert_eq!(after.artifact_uri, before.artifact_uri);
+    assert_eq!(after.capability_card, before.capability_card);
+    let (status, t) = stored(&store, "memory:learned").await?;
+    assert_eq!(status, Status::Trained, "still in the expert in place");
+    assert!(!t.admitted);
+    // The one new to it has had its turn, and says why nothing serves it.
+    let (status, t) = stored(&store, "memory:missed").await?;
+    assert_eq!(status, Status::Accepted);
+    assert_eq!((t.learned, t.admitted), (true, false));
+    assert!(t
+        .describe()
+        .contains("it did not learn everything the expert in place holds"));
+    // And the same set is not trained again.
+    assert!(behavior::refused(&plan_again(&store).await?.taught));
     Ok(())
 }

@@ -33,18 +33,18 @@ If it is missing, install it from a release with the installer for their OS. The
 
 ```sh
 # macOS and Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.2/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.3/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.4.2/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.4.3/antumbra-cli-installer.ps1 | iex
 ```
 
 To check the archive before anything runs before anything runs, download it and the `.sha256` the release carries beside it, compare, and unpack the binary onto your PATH (the installer does the same comparison, against the sums built into the pinned script):
 
 ```bash
-v=v0.4.2; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
+v=v0.4.3; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
 curl --proto '=https' --tlsv1.2 -LsSfO "https://github.com/albedosehen/antumbra/releases/download/$v/antumbra-cli-$t.tar.xz"{,.sha256}
 shasum -a 256 -c "antumbra-cli-$t.tar.xz.sha256" && tar -xJf "antumbra-cli-$t.tar.xz"
 ```
@@ -113,7 +113,7 @@ Exit code 0 and `Everything is in place.` means done. Anything else is listed wi
 
 ## 5. Tell the person
 
-An agent loads hooks and MCP servers when a session starts, so **they need to start a new session** in each agent setup connected (its last lines name them). The new session opens with what Antumbra remembers, and what they work on goes back in.
+An agent loads hooks and MCP servers when a session starts, so **they need to start a new session** in each agent setup connected (its last lines name them, and say which it connected because it found them on the machine). The new session opens with what Antumbra remembers, and what they work on goes back in.
 
 Gemini CLI connects no MCP server in a folder the person has not trusted, and asks before an Antumbra tool runs. Both are theirs to decide; `docs/integration.md` has the policy file that allows the tools.
 

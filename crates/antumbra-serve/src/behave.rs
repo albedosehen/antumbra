@@ -191,6 +191,42 @@ pub struct Trained {
     pub misses: Vec<(String, Missed)>,
 }
 
+/// Refuse an expert that would be admitted but did not learn every behavior
+/// the expert in place holds. A training is a fresh draw for each behavior
+/// in its set, judged on a few held-out tasks, so one that teaches a scope
+/// something new can come back without something it had: admitted, it would
+/// replace an expert that holds more of what was already learned.
+///
+/// `taught` is the set trained and `in_place` what the scope's standing
+/// expert holds. A behavior it holds that is no longer taught (retired, or
+/// recorded again) is not counted: the new expert is meant to drop it.
+/// Refused this way the expert in place stays as it is, every behavior in
+/// the set notes the training, and the set is not trained again until it
+/// changes; the behaviors new to it have had their turn and go behind the
+/// ones not yet tried.
+pub fn keep_in_place(verdict: &mut Verdict, taught: &[String], in_place: &[String]) {
+    if !verdict.admitted {
+        return;
+    }
+    let learned = verdict.learned();
+    let held = in_place.iter().filter(|id| taught.contains(id)).count();
+    let lost: Vec<&str> = in_place
+        .iter()
+        .map(String::as_str)
+        .filter(|id| taught.iter().any(|t| t == id) && !learned.contains(id))
+        .collect();
+    if lost.is_empty() {
+        return;
+    }
+    let reason = format!(
+        "it did not learn {} of the {held} behavior(s) the expert in place holds ({}), so that expert stays",
+        lost.len(),
+        lost.join(", ")
+    );
+    verdict.admitted = false;
+    verdict.reasons.push(reason);
+}
+
 /// Score the base, train beside its own replay, and score again. Touches no
 /// store. `cfg` sets the base model, epochs and learning rate; scoring is
 /// greedy, one answer per task.
@@ -202,8 +238,13 @@ pub struct Trained {
 /// An admitted expert is then read through each of the `measure` forms of
 /// the base, after the verdict and changing nothing about it
 /// ([`drift::measure`]): one more load of the base for each form.
+///
+/// `in_place` is what the scope's standing expert holds, none when it has no
+/// expert: an expert that did not learn all of it is refused
+/// ([`keep_in_place`]).
 pub async fn train(
     plan: &Plan,
+    in_place: &[String],
     embedder: &dyn Embedder,
     cfg: &RaftConfig,
     confidence: f64,
@@ -260,12 +301,15 @@ pub async fn train(
 
     let out = capture_corrections(&mut model, &verifier, &tasks, &[], &run, &cfg, &[]).await?;
     let scores = eval_pass_rate(&mut model, &verifier, &held, &run, 1).await?;
-    let verdict = course::admit(
+    let mut verdict = course::admit(
         &plan.behaviors(),
         &base.per_task,
         &scores.per_task,
         confidence,
     );
+    // Before the adapter is placed, archived or measured: one refused here
+    // stays a candidate.
+    keep_in_place(&mut verdict, &plan.behaviors(), in_place);
     let (adapter_uri, seal) = adapter::place(&out.adapter_uri, &adapter_dir, verdict.admitted)?;
 
     // The expert routes by the tasks of the behaviors it learned.
@@ -936,6 +980,15 @@ pub async fn mint(
         })).collect::<Vec<_>>(),
     });
     card[behavior::CARD_EXAMPLES] = serde_json::Value::Object(examples);
+    // What it learned of the set, as a set of its own: when the ones it missed
+    // have no room, that is the set in force, and it is in step with it.
+    let held: Vec<_> = plan
+        .taught
+        .iter()
+        .filter(|(m, _)| learned.contains(&m.id.as_str()))
+        .cloned()
+        .collect();
+    card[behavior::CARD_HELD] = serde_json::json!(behavior::fingerprint(&held));
     // Each behavior's held-out scores at admission: the bet an audit checks.
     let scores: serde_json::Map<String, serde_json::Value> = verdict
         .behaviors
@@ -1033,7 +1086,11 @@ pub async fn train_behaviors(
         return Ok(None);
     };
     begin(store, &plan).await?;
-    let trained = match train(&plan, embedder, cfg, confidence, measure).await {
+    let in_place = expert::get(store, &expert_id(tenant, user, scope))
+        .await?
+        .map(|e| behavior::taught_by(&e))
+        .unwrap_or_default();
+    let trained = match train(&plan, &in_place, embedder, cfg, confidence, measure).await {
         Ok(t) => t,
         Err(e) => {
             abandon(store, &plan).await?;

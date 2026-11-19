@@ -180,10 +180,11 @@ pub struct Finding {
     pub said: String,
     /// What to do about it, when it is not as it should be.
     pub fix: Option<String>,
-    /// Whether what was found still works: a file an earlier build wrote, or
-    /// one edited in place. It is said with what to do, and does not fail the
-    /// check, which is how a hook script of Claude Code's that differs from
-    /// this build's is treated.
+    /// Whether the check still passes: what was found works (a file an
+    /// earlier build wrote, or one edited in place), or it waits on a program
+    /// that is not installed, which running setup again cannot change. Either
+    /// is said with what to do, and does not fail the check, which is how a
+    /// hook script of Claude Code's that differs from this build's is treated.
     pub works: bool,
 }
 
@@ -206,6 +207,17 @@ impl Finding {
 
     /// Something that works and is not what this build would write.
     fn stale(said: impl Into<String>, fix: impl Into<String>) -> Self {
+        Finding {
+            said: said.into(),
+            fix: Some(fix.into()),
+            works: true,
+        }
+    }
+
+    /// Something setup cannot write until a program is installed. Running
+    /// setup again would not change it, so it is said with what to install
+    /// and not counted against the setup.
+    fn waiting(said: impl Into<String>, fix: impl Into<String>) -> Self {
         Finding {
             said: said.into(),
             fix: Some(fix.into()),
@@ -291,17 +303,37 @@ fn kept(dir: &Path, files: &[Kept], what: &str) -> Vec<Finding> {
     found
 }
 
+/// Where `agent` keeps its config, and the files there that hold its own
+/// settings, by the names the agent reads them under. The agent or its user
+/// writes them, so one of them says the agent has been used here. Setup
+/// writes none of them where the agent is missing, with one exception:
+/// goose's `config.yaml` gains setup's one line, so a goose named with
+/// `--agent` once is found after that.
+fn own_config(agent: Agent, ground: &Ground<'_>) -> (PathBuf, &'static [&'static str]) {
+    match agent {
+        Agent::Gemini => (gemini::home(ground), &["settings.json"]),
+        Agent::Codex => (codex::home(ground), &["config.toml"]),
+        // Its settings were in `config.json`, and are now in `settings.json`,
+        // with `config.json` kept for what Copilot CLI notes for itself.
+        Agent::Copilot => (copilot::home(ground), &["settings.json", "config.json"]),
+        Agent::Goose => (goose::config_dir(ground), &["config.yaml"]),
+        Agent::Opencode => (
+            opencode::config_dir(ground),
+            &["opencode.json", "opencode.jsonc"],
+        ),
+    }
+}
+
 /// Whether `agent` is on this machine: its program is on the PATH, or its
-/// config directory is there.
+/// config directory holds a config file of its own ([`own_config`]). The
+/// directory alone does not say so: an agent that was removed leaves one
+/// behind, and setup makes one for an agent named with `--agent`.
 pub fn present(agent: Agent, ground: &Ground<'_>) -> bool {
-    (ground.find)(agent.program()).is_some()
-        || match agent {
-            Agent::Gemini => gemini::home(ground).is_dir(),
-            Agent::Codex => codex::home(ground).is_dir(),
-            Agent::Copilot => copilot::home(ground).is_dir(),
-            Agent::Goose => goose::config_dir(ground).is_dir(),
-            Agent::Opencode => opencode::config_dir(ground).is_dir(),
-        }
+    if (ground.find)(agent.program()).is_some() {
+        return true;
+    }
+    let (dir, files) = own_config(agent, ground);
+    files.iter().any(|file| dir.join(file).is_file())
 }
 
 /// Connect `agent`: write what it needs to reach the server through the
@@ -478,6 +510,94 @@ pub(crate) mod tests {
         fn info(&self, said: &str) {
             self.said.borrow_mut().push(format!("info {said}"));
         }
+    }
+
+    fn nothing(_: &str) -> Option<String> {
+        None
+    }
+
+    fn nowhere(_: &str) -> Option<PathBuf> {
+        None
+    }
+
+    #[test]
+    fn a_config_directory_alone_is_not_an_agent_on_this_machine() -> anyhow::Result<()> {
+        let home = scratch::Scratch::new("present")?;
+        let ground = Ground {
+            home: home.path(),
+            antumbra: Program::Named,
+            env: &nothing,
+            find: &nowhere,
+        };
+        // Each agent's config directory, and the config files of its own.
+        let own: [(Agent, PathBuf, &[&str]); 5] = [
+            (
+                Agent::Gemini,
+                home.path().join(".gemini"),
+                &["settings.json"],
+            ),
+            (Agent::Codex, home.path().join(".codex"), &["config.toml"]),
+            (
+                Agent::Copilot,
+                home.path().join(".copilot"),
+                &["settings.json", "config.json"],
+            ),
+            // Where goose's is depends on the platform.
+            (Agent::Goose, goose::config_dir(&ground), &["config.yaml"]),
+            (
+                Agent::Opencode,
+                home.path().join(".config").join("opencode"),
+                &["opencode.json", "opencode.jsonc"],
+            ),
+        ];
+        for (agent, dir, files) in own {
+            assert!(dir.starts_with(home.path()), "{agent:?}");
+            // Nothing of it at all.
+            assert!(!present(agent, &ground), "{agent:?}");
+            // What an agent that was removed leaves behind: its directory,
+            // with nothing in it the agent reads its settings from.
+            std::fs::create_dir_all(&dir)?;
+            std::fs::write(dir.join("history.jsonl"), "{}\n")?;
+            assert!(!present(agent, &ground), "{agent:?}");
+            // Its program on the PATH is the agent, whatever the directory holds.
+            let on_path = |name: &str| (name == agent.program()).then(|| PathBuf::from(name));
+            let installed = Ground {
+                home: home.path(),
+                antumbra: Program::Named,
+                env: &nothing,
+                find: &on_path,
+            };
+            assert!(present(agent, &installed), "{agent:?}");
+            // So is each config file of its own, with no program.
+            for file in files {
+                std::fs::write(dir.join(file), "")?;
+                assert!(present(agent, &ground), "{agent:?} {file}");
+                std::fs::remove_file(dir.join(file))?;
+            }
+            assert!(!present(agent, &ground), "{agent:?}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn what_setup_wrote_for_an_agent_that_is_not_here_does_not_find_it() -> anyhow::Result<()> {
+        let home = scratch::Scratch::new("present-wired")?;
+        let ground = Ground {
+            home: home.path(),
+            antumbra: Program::Named,
+            env: &nothing,
+            find: &nowhere,
+        };
+        // goose is left out: setup adds its one line to goose's own
+        // `config.yaml`, and makes the file where there is none.
+        for agent in [Agent::Gemini, Agent::Codex, Agent::Copilot, Agent::Opencode] {
+            // Named with `--agent`, on a machine without it.
+            connect(agent, &ground, &Told::default())?;
+            let (dir, _) = own_config(agent, &ground);
+            assert!(dir.is_dir(), "{agent:?}");
+            assert!(!present(agent, &ground), "{agent:?}");
+        }
+        Ok(())
     }
 
     fn home_with(state: &str) -> anyhow::Result<scratch::Scratch> {

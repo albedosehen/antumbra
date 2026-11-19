@@ -417,13 +417,13 @@ impl Training {
         match (self.learned, self.admitted) {
             (true, true) => format!("learned ({rates}); its scope's expert serves it"),
             (true, false) => format!(
-                "learned ({rates}), but its scope's expert was refused: its controls fell, or no behavior rose above the base model"
+                "learned ({rates}), but the expert that training made was refused: its controls fell, no behavior rose above the base model, or it did not learn everything the expert in place holds"
             ),
             (false, true) => format!(
                 "not learned ({rates}); its scope's expert serves the others without it, and {MORE}"
             ),
             (false, false) => {
-                format!("not learned ({rates}), and its scope's expert was refused; {MORE}")
+                format!("not learned ({rates}), and the expert that training made was refused; {MORE}")
             }
         }
     }
@@ -962,6 +962,64 @@ pub fn taught_by(expert: &Expert) -> Vec<String> {
 /// card records one. It may hold fewer: only those it learned.
 pub fn trained_set(expert: &Expert) -> Option<&str> {
     expert.capability_card.get("set").and_then(|v| v.as_str())
+}
+
+/// Where a standing expert's card keeps the [`fingerprint`] of the behaviors
+/// it learned in its last training.
+pub const CARD_HELD: &str = "held";
+
+/// The [`fingerprint`] of the behaviors a standing expert learned in its last
+/// training, when its card records one.
+pub fn held_set(expert: &Expert) -> Option<&str> {
+    expert
+        .capability_card
+        .get(CARD_HELD)
+        .and_then(|v| v.as_str())
+}
+
+/// The behaviors a standing expert was taught and did not learn, from its
+/// card.
+pub fn missed_by(expert: &Expert) -> Vec<String> {
+    expert
+        .capability_card
+        .get("missed")
+        .and_then(|v| v.as_array())
+        .map(|xs| {
+            xs.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether `expert` already holds exactly the set in force. Its last
+/// training taught it more than this; it learned these, and each behavior it
+/// missed is still accepted and left out of the set (waiting for room, or one
+/// the base model now follows). Training it on what it learned alone would
+/// teach it nothing, and could cost it a behavior it has.
+///
+/// A behavior it missed that is no longer left out was retired, or has room
+/// again: either is a change the expert is trained for.
+pub fn holds(taught: &Taught, expert: &Expert) -> bool {
+    if taught.set.is_empty() || held_set(expert) != Some(fingerprint(&taught.set).as_str()) {
+        return false;
+    }
+    let left_out: Vec<&str> = taught
+        .waiting
+        .iter()
+        .chain(&taught.followed)
+        .map(|(m, _)| m.id.as_str())
+        .collect();
+    missed_by(expert)
+        .iter()
+        .all(|id| left_out.contains(&id.as_str()))
+}
+
+/// Whether a scope's standing expert is behind what the scope teaches:
+/// [`stale`] against the set in force, unless it already [`holds`] exactly
+/// that set.
+pub fn behind(taught: &Taught, expert: Option<&Expert>) -> bool {
+    stale(&taught.set, expert) && !expert.is_some_and(|e| holds(taught, e))
 }
 
 /// Whether a scope's standing expert is behind its behaviors: missing while
