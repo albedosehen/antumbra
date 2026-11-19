@@ -74,6 +74,15 @@ pub(super) fn rms_norm(x: &Tensor, weight: &Tensor, eps: f64) -> Result<Tensor> 
         .apply_op2_no_bwd(&weight.contiguous()?, &RmsNormRows { eps: eps as f32 })
 }
 
+/// One row's RMS norm into `out`: what [`rms_norm`] gives each row.
+pub(super) fn norm_row(x: &[f32], weight: &[f32], eps: f32, out: &mut [f32]) {
+    let mean = dot(x, x) / x.len() as f32;
+    let root = (mean + eps).sqrt();
+    for ((o, v), w) in out.iter_mut().zip(x).zip(weight) {
+        *o = v / root * w;
+    }
+}
+
 struct RmsNormRows {
     eps: f32,
 }
@@ -102,11 +111,7 @@ impl CustomOp2 for RmsNormRows {
         let weight = values(weight, weight_layout, "rms norm: the weight")?;
         let mut out = vec![0f32; x.len()];
         for (o_row, x_row) in out.chunks_exact_mut(width).zip(x.chunks_exact(width)) {
-            let mean = dot(x_row, x_row) / width as f32;
-            let root = (mean + self.eps).sqrt();
-            for ((o, v), w) in o_row.iter_mut().zip(x_row).zip(weight) {
-                *o = v / root * w;
-            }
+            norm_row(x_row, weight, self.eps, o_row);
         }
         Ok((CpuStorage::F32(out), x_layout.shape().clone()))
     }
