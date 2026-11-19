@@ -29,6 +29,7 @@ use std::sync::{Mutex, PoisonError};
 use candle_core::{bail, Device, Result, Storage, Tensor};
 
 use super::kv::KvStore;
+use super::phases::{dispatch, Phase};
 use super::slices::{dot, values};
 
 /// Cached positions below which a token's attention is not worth a dispatch.
@@ -147,6 +148,151 @@ fn raise(slot: &AtomicU32, to: f32) {
     });
 }
 
+/// How one query position's attention over the first `len` cached positions
+/// is cut into units of work: a unit is one KV head's run of positions. How
+/// long a run is depends on how many positions there are and on nothing
+/// else, so the sums are the same sums however they are computed.
+struct Cut {
+    kv_heads: usize,
+    dim: usize,
+    heads: usize,
+    /// Query heads to a KV head.
+    rep: usize,
+    len: usize,
+    run: usize,
+    runs: usize,
+}
+
+impl Cut {
+    fn of(q: usize, out: usize, store: &KvStore, len: usize) -> Result<Self> {
+        let (kv_heads, dim) = (store.heads(), store.dim());
+        if dim == 0
+            || kv_heads == 0
+            || len == 0
+            || len > store.len()
+            || q == 0
+            || !q.is_multiple_of(kv_heads * dim)
+            || out != q
+        {
+            bail!(
+                "decode attention: a query of {q} values into {out} does not fit {len} of {} cached positions of {kv_heads} heads of {dim}",
+                store.len()
+            )
+        }
+        let heads = q / dim;
+        let run = len
+            .div_ceil(RUNS)
+            .next_multiple_of(RUN_STEP)
+            .clamp(RUN_LEAST, RUN_MOST);
+        Ok(Self {
+            kv_heads,
+            dim,
+            heads,
+            rep: heads / kv_heads,
+            len,
+            run,
+            runs: len.div_ceil(run),
+        })
+    }
+
+    fn units(&self) -> usize {
+        self.kv_heads * self.runs
+    }
+
+    /// Unit `u`'s KV head and its run of positions.
+    fn unit(&self, u: usize) -> (usize, usize, usize) {
+        let (kv_head, first) = (u / self.runs, u % self.runs * self.run);
+        (kv_head, first, self.len.min(first + self.run))
+    }
+
+    /// Values a unit sums into: its heads' weighted values, then their
+    /// weights.
+    fn room(&self) -> usize {
+        self.rep * self.dim + self.rep
+    }
+
+    /// Unit `u`'s scores, written where its heads' rows of `scores` have
+    /// these positions, and each of its heads' largest into `top`.
+    ///
+    /// SAFETY (for the caller): the kernels are for this CPU and this
+    /// `dim`; `scores` is room for `heads` rows of `len`; and no other
+    /// thread writes this unit's scores.
+    unsafe fn score(
+        &self,
+        kernels: Kernels,
+        q: &[f32],
+        store: &KvStore,
+        u: usize,
+        scores: *mut f32,
+        top: &mut [f32],
+    ) {
+        let (kv_head, first, last) = self.unit(u);
+        let (rep, dim) = (self.rep, self.dim);
+        top.fill(f32::NEG_INFINITY);
+        (kernels.scores)(
+            &q[kv_head * rep * dim..(kv_head + 1) * rep * dim],
+            &store.keys(kv_head)[first * dim..last * dim],
+            dim,
+            1f32 / (dim as f32).sqrt(),
+            scores.add(kv_head * rep * self.len + first),
+            self.len,
+            top,
+        );
+    }
+
+    /// Unit `u`'s weighted values and weights into `room`, which is made
+    /// nothing first: `top` is every head's largest score.
+    ///
+    /// SAFETY (for the caller): as [`Cut::score`], and every unit's scores
+    /// were written.
+    unsafe fn weigh(
+        &self,
+        kernels: Kernels,
+        store: &KvStore,
+        u: usize,
+        scores: *const f32,
+        top: &[f32],
+        room: &mut [f32],
+    ) {
+        let (kv_head, first, last) = self.unit(u);
+        let (rep, dim) = (self.rep, self.dim);
+        room.fill(0.0);
+        let (acc, weights) = room.split_at_mut(rep * dim);
+        (kernels.weigh)(
+            scores.add(kv_head * rep * self.len + first),
+            self.len,
+            &top[kv_head * rep..(kv_head + 1) * rep],
+            &store.values(kv_head)[first * dim..last * dim],
+            dim,
+            acc,
+            weights,
+        );
+    }
+
+    /// Each head's weighted values over its weights into `out`: the units'
+    /// sums, added in their order.
+    fn gather(&self, sums: &[f32], out: &mut [f32]) {
+        let (rep, dim) = (self.rep, self.dim);
+        out.fill(0.0);
+        let mut weights = vec![0f32; self.heads];
+        for (u, room) in sums.chunks_exact(self.room()).enumerate() {
+            let (acc, sum) = room.split_at(rep * dim);
+            let kv_head = u / self.runs;
+            for (o, a) in out[kv_head * rep * dim..].iter_mut().zip(acc) {
+                *o += a;
+            }
+            for (w, s) in weights[kv_head * rep..].iter_mut().zip(sum) {
+                *w += s;
+            }
+        }
+        for (row, weight) in out.chunks_exact_mut(dim).zip(&weights) {
+            for o in row.iter_mut() {
+                *o /= weight;
+            }
+        }
+    }
+}
+
 /// Attention of one query position per head against every position in
 /// `store`, for grouped-query attention where each KV head serves
 /// `heads / kv_heads` query heads in order. `q` is each query head's `dim`
@@ -164,43 +310,13 @@ fn attend_with(
     out: &mut [f32],
     work: &mut Work,
 ) -> Result<()> {
-    let (kv_heads, dim, len) = (store.heads(), store.dim(), store.len());
-    if dim == 0
-        || kv_heads == 0
-        || len == 0
-        || q.is_empty()
-        || !q.len().is_multiple_of(kv_heads * dim)
-        || out.len() != q.len()
-    {
-        bail!(
-            "decode attention: a query of {} values into {} does not fit {len} cached positions of {kv_heads} heads of {dim}",
-            q.len(),
-            out.len()
-        )
-    }
-    let heads = q.len() / dim;
-    let rep = heads / kv_heads;
-    let scale = 1f32 / (dim as f32).sqrt();
+    let cut = Cut::of(q.len(), out.len(), store, store.len())?;
+    let (units, rep) = (cut.units(), cut.rep);
     let Work { scores, sums } = work;
     scores.clear();
-    scores.resize(heads * len, 0.0);
-
-    // A unit is one KV head's run of positions. How long a run is depends on
-    // how many positions there are and on nothing else, so the sums below are
-    // the same sums on any number of threads.
-    let run = len
-        .div_ceil(RUNS)
-        .next_multiple_of(RUN_STEP)
-        .clamp(RUN_LEAST, RUN_MOST);
-    let runs = len.div_ceil(run);
-    let units = kv_heads * runs;
-    let unit = |u: usize| {
-        let (kv_head, first) = (u / runs, u % runs * run);
-        (kv_head, first, len.min(first + run))
-    };
-
+    scores.resize(cut.heads * cut.len, 0.0);
     let at = Scores(scores.as_mut_ptr());
-    let most: Vec<AtomicU32> = (0..heads)
+    let most: Vec<AtomicU32> = (0..cut.heads)
         .map(|_| AtomicU32::new(f32::NEG_INFINITY.to_bits()))
         .collect();
     let (next_scored, scored, next_weighed) = (
@@ -208,15 +324,14 @@ fn attend_with(
         AtomicUsize::new(0),
         AtomicUsize::new(0),
     );
-    // Each unit sums into room of its own: its heads' weighted values, then
-    // their weights. One lock for every thread to add its sums under is asked
-    // for by all of them at once as the pass ends, and a thread that waits
-    // for a lock sleeps for longer than a layer's attention takes; and sums
-    // kept by thread would depend on which thread took which run.
-    let per = rep * dim + rep;
+    // Each unit sums into room of its own. One lock for every thread to add
+    // its sums under is asked for by all of them at once as the pass ends,
+    // and a thread that waits for a lock sleeps for longer than a layer's
+    // attention takes; and sums kept by thread would depend on which thread
+    // took which run.
     sums.clear();
-    sums.resize(units * per, 0.0);
-    let rooms: Vec<Mutex<&mut [f32]>> = sums.chunks_exact_mut(per).map(Mutex::new).collect();
+    sums.resize(units * cut.room(), 0.0);
+    let rooms: Vec<Mutex<&mut [f32]>> = sums.chunks_exact_mut(cut.room()).map(Mutex::new).collect();
 
     let pool = candle_core::utils::barrier_pool();
     let work = |_: usize| {
@@ -227,24 +342,11 @@ fn attend_with(
             if u >= units {
                 break;
             }
-            let (kv_head, first, last) = unit(u);
-            top.fill(f32::NEG_INFINITY);
             // SAFETY: the kernels were chosen for this CPU and this `dim`;
-            // head `kv_head * rep + r`'s scores for these positions are at
-            // `(kv_head * rep + r) * len + p`, inside `scores`, and this unit
-            // alone covers them.
-            unsafe {
-                (kernels.scores)(
-                    &q[kv_head * rep * dim..(kv_head + 1) * rep * dim],
-                    &store.keys(kv_head)[first * dim..last * dim],
-                    dim,
-                    scale,
-                    at.0.add(kv_head * rep * len + first),
-                    len,
-                    &mut top,
-                );
-            }
-            for (slot, top) in most[kv_head * rep..].iter().zip(&top) {
+            // `scores` was sized for every head and position just above;
+            // and a unit is taken by one thread.
+            unsafe { cut.score(kernels, q, store, u, at.0, &mut top) };
+            for (slot, top) in most[cut.unit(u).0 * rep..].iter().zip(&top) {
                 raise(slot, *top);
             }
             scored.fetch_add(1, Ordering::Release);
@@ -254,61 +356,116 @@ fn attend_with(
         while scored.load(Ordering::Acquire) < units {
             std::hint::spin_loop();
         }
+        let top: Vec<f32> = most
+            .iter()
+            .map(|slot| f32::from_bits(slot.load(Ordering::Acquire)))
+            .collect();
         loop {
             let u = next_weighed.fetch_add(1, Ordering::Relaxed);
             if u >= units {
                 break;
             }
-            let (kv_head, first, last) = unit(u);
-            for (top, slot) in top.iter_mut().zip(&most[kv_head * rep..]) {
-                *top = f32::from_bits(slot.load(Ordering::Acquire));
-            }
             // This unit's room, which no other unit locks.
             let mut room = rooms[u].lock().unwrap_or_else(PoisonError::into_inner);
-            let (acc, weights) = room.split_at_mut(rep * dim);
-            // SAFETY: every score was written before the wait above ended,
-            // and these are the places the scoring pass wrote this unit's.
-            unsafe {
-                (kernels.weigh)(
-                    at.0.add(kv_head * rep * len + first).cast_const(),
-                    len,
-                    &top,
-                    &store.values(kv_head)[first * dim..last * dim],
-                    dim,
-                    acc,
-                    weights,
-                );
-            }
+            // SAFETY: as above, and every score was written before the wait
+            // ended.
+            unsafe { cut.weigh(kernels, store, u, at.0.cast_const(), &top, &mut room) };
         }
     };
     // A handful of positions are not worth a dispatch.
-    if len < INLINE_BELOW || pool.n_workers() == 0 {
+    if cut.len < INLINE_BELOW || pool.n_workers() == 0 {
         work(0);
     } else {
         pool.execute(work);
     }
-
-    // Each head's weighted values over its weights, the runs added in their
-    // order.
-    out.fill(0.0);
-    let mut weights = vec![0f32; heads];
-    for (u, room) in rooms.into_iter().enumerate() {
-        let room = room.into_inner().unwrap_or_else(PoisonError::into_inner);
-        let (acc, sum) = room.split_at(rep * dim);
-        let kv_head = u / runs;
-        for (o, a) in out[kv_head * rep * dim..].iter_mut().zip(acc) {
-            *o += a;
-        }
-        for (w, s) in weights[kv_head * rep..].iter_mut().zip(sum) {
-            *w += s;
-        }
-    }
-    for (row, weight) in out.chunks_exact_mut(dim).zip(&weights) {
-        for o in row.iter_mut() {
-            *o /= weight;
-        }
-    }
+    drop(rooms);
+    cut.gather(sums, out);
     Ok(())
+}
+
+/// [`attend`] over the first `len` positions of `store`, on the calling
+/// thread: the same units, summed in the same order, so the same values to
+/// the bit. For one of several rows that are attended at once.
+fn attend_alone(
+    kernels: Kernels,
+    q: &[f32],
+    store: &KvStore,
+    len: usize,
+    out: &mut [f32],
+    work: &mut Work,
+) -> Result<()> {
+    let cut = Cut::of(q.len(), out.len(), store, len)?;
+    let (units, rep) = (cut.units(), cut.rep);
+    let Work { scores, sums } = work;
+    scores.clear();
+    scores.resize(cut.heads * cut.len, 0.0);
+    sums.clear();
+    sums.resize(units * cut.room(), 0.0);
+    let mut most = vec![f32::NEG_INFINITY; cut.heads];
+    let mut top = vec![0f32; rep];
+    for u in 0..units {
+        // SAFETY: the kernels were chosen for this CPU and this `dim`;
+        // `scores` was sized for every head and position just above; and
+        // this thread alone works on them.
+        unsafe { cut.score(kernels, q, store, u, scores.as_mut_ptr(), &mut top) };
+        for (most, top) in most[cut.unit(u).0 * rep..].iter_mut().zip(&top) {
+            *most = most.max(*top);
+        }
+    }
+    for (u, room) in sums.chunks_exact_mut(cut.room()).enumerate() {
+        // SAFETY: as above, and every unit's scores are written.
+        unsafe { cut.weigh(kernels, store, u, scores.as_ptr(), &most, room) };
+    }
+    cut.gather(sums, out);
+    Ok(())
+}
+
+/// [`attend`] for `rows` query positions that were read together, the last
+/// `rows` positions in `store`: row `i` attends to the positions before it
+/// and its own. `q` and `out` hold a row's heads one after another, row
+/// after row. Each row is one unit of work and is computed as [`attend`]
+/// computes it, to the bit.
+pub(super) fn attend_rows(q: &[f32], rows: usize, store: &KvStore, out: &mut [f32]) -> Result<()> {
+    if rows == 0 || !q.len().is_multiple_of(rows) || out.len() != q.len() || rows > store.len() {
+        bail!(
+            "decode attention: {rows} rows in a query of {} values into {} do not fit {} cached positions",
+            q.len(),
+            out.len(),
+            store.len()
+        )
+    }
+    let (per, before) = (q.len() / rows, store.len() - rows);
+    let kernels = kernels(store.dim());
+    // Checked once here, so a row's own check cannot fail in the dispatch.
+    Cut::of(per, per, store, before + 1)?;
+    let places = Scores(out.as_mut_ptr());
+    let failed: Mutex<Option<candle_core::Error>> = Mutex::new(None);
+    let run = |first: usize, last: usize| {
+        let places = &places;
+        let mut work = Work::default();
+        for row in first..last {
+            // SAFETY: row `row`'s attended values are its own `per` values
+            // of `out`, which no other unit writes.
+            let out = unsafe { std::slice::from_raw_parts_mut(places.0.add(row * per), per) };
+            let q = &q[row * per..(row + 1) * per];
+            if let Err(err) = attend_alone(kernels, q, store, before + row + 1, out, &mut work) {
+                *failed.lock().unwrap_or_else(PoisonError::into_inner) = Some(err);
+            }
+        }
+    };
+    dispatch(
+        &[Phase {
+            units: rows,
+            most: 1,
+            run: &run,
+            then: None,
+        }],
+        rows == 1,
+    );
+    match failed.into_inner().unwrap_or_else(PoisonError::into_inner) {
+        Some(err) => Err(err),
+        None => Ok(()),
+    }
 }
 
 /// [`attend`] for a query held as a tensor of `(1, heads, 1, dim)`, f32 in
@@ -417,6 +574,55 @@ mod tests {
             attend(&q, &store, &mut again, &mut work)?;
             assert_eq!(again, first);
         }
+        Ok(())
+    }
+
+    /// Rows read together attend as each would alone: row `i` of the last
+    /// few positions gives, to the bit, what one query gives against a cache
+    /// that ends at its own position, for a few rows and for enough
+    /// positions to dispatch.
+    #[test]
+    fn rows_read_together_attend_as_each_would_alone() -> Result<()> {
+        let dev = Device::Cpu;
+        for (kv_heads, n_rep, before, rows, d) in [
+            (2, 6, 0, 5, 128),
+            (2, 6, 40, 37, 128),
+            (2, 2, 300, 3, 64),
+            (3, 2, 7, 4, 40),
+        ] {
+            let (heads, len) = (kv_heads * n_rep, before + rows);
+            let q = Tensor::randn(0f32, 1.0, (rows, heads * d), &dev)?;
+            let k = Tensor::randn(0f32, 1.0, (1, kv_heads, len, d), &dev)?;
+            let v = Tensor::randn(0f32, 1.0, (1, kv_heads, len, d), &dev)?;
+            let q = q.flatten_all()?.to_vec1::<f32>()?;
+            let mut together = vec![0f32; q.len()];
+            attend_rows(&q, rows, &stored(&k, &v)?, &mut together)?;
+            for row in 0..rows {
+                let upto = before + row + 1;
+                let store = stored(&k.narrow(2, 0, upto)?, &v.narrow(2, 0, upto)?)?;
+                let mut alone = vec![0f32; heads * d];
+                let query = &q[row * heads * d..(row + 1) * heads * d];
+                attend(query, &store, &mut alone, &mut Work::default())?;
+                assert_eq!(
+                    &together[row * heads * d..(row + 1) * heads * d],
+                    alone.as_slice(),
+                    "{kv_heads}x{n_rep}, row {row} of {rows} after {before}"
+                );
+            }
+        }
+        let store = stored(
+            &Tensor::zeros((1, 2, 3, 8), DType::F32, &dev)?,
+            &Tensor::zeros((1, 2, 3, 8), DType::F32, &dev)?,
+        )?;
+        let mut out = vec![0f32; 4 * 32];
+        assert!(
+            attend_rows(&vec![0f32; 4 * 32], 4, &store, &mut out).is_err(),
+            "more rows than positions"
+        );
+        assert!(
+            attend_rows(&[0f32; 32], 0, &store, &mut out[..32]).is_err(),
+            "no rows"
+        );
         Ok(())
     }
 

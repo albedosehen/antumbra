@@ -130,6 +130,9 @@ pub(super) struct LoraLinear {
     /// the KV cache, and with a quantized base, every token's re-materialized
     /// weights are retained too, OOMing the card.
     grad: bool,
+    /// The factors as plain rows read them (`pack`), made when rows are
+    /// first read and let go when the factors are set.
+    packed: Option<pack::Packed>,
 }
 
 /// The spread a fresh adapter's `lora_a` factors are drawn with; `lora_b`
@@ -203,7 +206,55 @@ impl LoraLinear {
             scale,
             enabled: true,
             grad: true,
+            packed: None,
         })
+    }
+
+    /// Whether there is a copy of the adapter's factors to make: none is
+    /// held, and the factors can be read where they are (the adapter on, in
+    /// f32 on the CPU, nothing to differentiate).
+    pub(super) fn packs(&self) -> bool {
+        self.packed.is_none() && self.reads_directly()
+    }
+
+    /// Make the copy of the adapter's factors that plain rows read, when
+    /// there is one to make.
+    pub(super) fn pack(&mut self) -> CResult<()> {
+        if !self.packs() {
+            return Ok(());
+        }
+        let (rank, cols) = self.a.dims2()?;
+        let packed = {
+            let (a, b) = (self.a.contiguous()?, self.b.contiguous()?);
+            let (a_storage, a_layout) = a.storage_and_layout();
+            let (b_storage, b_layout) = b.storage_and_layout();
+            let (candle_core::Storage::Cpu(a_storage), candle_core::Storage::Cpu(b_storage)) =
+                (&*a_storage, &*b_storage)
+            else {
+                candle_core::bail!("an adapter's factors are packed from host memory")
+            };
+            pack::Packed::of(
+                slices::values(a_storage, a_layout, "lora_a")?,
+                slices::values(b_storage, b_layout, "lora_b")?,
+                rank,
+                cols,
+                self.scale as f32,
+            )
+        };
+        if packed.is_none() {
+            candle_core::bail!(
+                "an adapter of {:?} and {:?} does not pack",
+                self.a.dims(),
+                self.b.dims()
+            )
+        }
+        self.packed = packed;
+        Ok(())
+    }
+
+    /// Let the packed copy go: the factors were set.
+    pub(super) fn forget_pack(&mut self) {
+        self.packed = None;
     }
 
     /// The frozen base's product with `x`, before the adapter and the bias.
@@ -615,6 +666,26 @@ impl Attention {
         }
     }
 
+    pub(super) fn packs(&self) -> bool {
+        [&self.q_proj, &self.k_proj, &self.v_proj, &self.o_proj]
+            .iter()
+            .any(|l| l.packs())
+    }
+
+    pub(super) fn pack(&mut self) -> CResult<()> {
+        self.q_proj.pack()?;
+        self.k_proj.pack()?;
+        self.v_proj.pack()?;
+        self.o_proj.pack()
+    }
+
+    pub(super) fn forget_packs(&mut self) {
+        self.q_proj.forget_pack();
+        self.k_proj.forget_pack();
+        self.v_proj.forget_pack();
+        self.o_proj.forget_pack();
+    }
+
     pub(super) fn set_lora(&mut self, on: bool) {
         self.q_proj.set_enabled(on);
         self.k_proj.set_enabled(on);
@@ -718,6 +789,24 @@ impl Mlp {
         self.down_proj.set_enabled(on);
     }
 
+    pub(super) fn packs(&self) -> bool {
+        [&self.gate_proj, &self.up_proj, &self.down_proj]
+            .iter()
+            .any(|l| l.packs())
+    }
+
+    pub(super) fn pack(&mut self) -> CResult<()> {
+        self.gate_proj.pack()?;
+        self.up_proj.pack()?;
+        self.down_proj.pack()
+    }
+
+    pub(super) fn forget_packs(&mut self) {
+        self.gate_proj.forget_pack();
+        self.up_proj.forget_pack();
+        self.down_proj.forget_pack();
+    }
+
     pub(super) fn set_grad(&mut self, on: bool) {
         self.gate_proj.set_grad(on);
         self.up_proj.set_grad(on);
@@ -796,6 +885,21 @@ impl DecoderLayer {
 
     pub(super) fn clear_cache(&mut self) {
         self.self_attn.clear_cache();
+    }
+
+    /// Whether any of this layer's adapters has a copy to make.
+    pub(super) fn packs(&self) -> bool {
+        self.self_attn.packs() || self.mlp.packs()
+    }
+
+    pub(super) fn pack(&mut self) -> CResult<()> {
+        self.self_attn.pack()?;
+        self.mlp.pack()
+    }
+
+    pub(super) fn forget_packs(&mut self) {
+        self.self_attn.forget_packs();
+        self.mlp.forget_packs();
     }
 
     pub(super) fn set_lora(&mut self, on: bool) {
@@ -938,6 +1042,7 @@ mod tests {
             scale: 2.0,
             enabled: true,
             grad: false,
+            packed: None,
         }
     }
 
