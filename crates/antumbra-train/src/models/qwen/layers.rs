@@ -36,9 +36,12 @@ pub(super) fn served_matmul(w: &QMatMul, x: &Tensor) -> CResult<Tensor> {
 ///
 /// The query heads that share a KV head are stacked as rows against it, so
 /// every product is the one a K or V repeated `n_rep` times would give, and
-/// nothing of the cache's length is copied to make it. Repeating them copied
-/// the whole cache, six times over on this base, in every layer for every
-/// token: most of what a decoded token cost on a CPU.
+/// nothing of the cache's length is copied to make it. K is multiplied
+/// through a transposed view, which the product reads in place. Repeating K
+/// and V copied the whole cache six times over on this base, and making the
+/// transposed K contiguous copied it again element by element, in every
+/// layer for every token: on a CPU that copy alone was about a quarter of a
+/// decoded token.
 pub(super) fn grouped_attention(
     q: &Tensor,
     k: &Tensor,
@@ -51,7 +54,7 @@ pub(super) fn grouped_attention(
     let rows = n_rep * q_len;
     let q = q.contiguous()?.reshape((b, kv_heads, rows, head_dim))?;
     let scale = 1f64 / (head_dim as f64).sqrt();
-    let attn = (q.matmul(&k.transpose(2, 3)?.contiguous()?)? * scale)?;
+    let attn = (q.matmul(&k.contiguous()?.t()?)? * scale)?;
     let attn = match mask {
         // The mask is per query position, so it is added with the stacked
         // heads set apart again.
