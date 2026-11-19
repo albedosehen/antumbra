@@ -460,6 +460,23 @@ impl Row {
         }
     }
 
+    /// Whether this row was quantized from `cols` values.
+    pub(super) fn holds(&self, cols: usize) -> bool {
+        self.qs.len() == cols
+    }
+
+    /// Block `b` of the row as a kernel outside the tiles reads it: its 256
+    /// values, its scale, and the sum of its values.
+    // Off x86-64 there is no such kernel.
+    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+    pub(super) fn block(&self, b: usize) -> (&[i8], f32, i32) {
+        (
+            &self.qs[b * QK_K..(b + 1) * QK_K],
+            self.d[b],
+            self.sums[b * 16..(b + 1) * 16].iter().sum(),
+        )
+    }
+
     /// This row with room for `values` values, to be quantized a block of 256
     /// at a time by the units of a phase.
     pub(super) fn blocks(&mut self, values: usize) -> Blocks {
