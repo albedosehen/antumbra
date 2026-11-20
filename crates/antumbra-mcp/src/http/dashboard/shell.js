@@ -32,10 +32,10 @@ const POLICY = [
     "How long memory lasts",
     "A memory nobody recalls or reinforces fades; this is how long each kind takes to lose half its strength.",
     [
-      ["world_half_life_days", "Facts (world)", days],
-      ["bank_half_life_days", "Experiences (bank)", days],
-      ["opinion_half_life_days", "Judgments (opinion)", days],
-      ["volatile_half_life_days", "Marked volatile", days],
+      ["world_half_life_days", "Facts (world)", days, "days"],
+      ["bank_half_life_days", "Experiences (bank)", days, "days"],
+      ["opinion_half_life_days", "Judgments (opinion)", days, "days"],
+      ["volatile_half_life_days", "Marked volatile", days, "days"],
     ],
   ],
   [
@@ -55,7 +55,7 @@ const POLICY = [
     "How behaviors are taught",
     "What happens to a behavior between being proposed and an expert learning it.",
     [
-      ["accept_after_hours", "A proposed behavior is accepted after", hoursOrNever],
+      ["accept_after_hours", "A proposed behavior is accepted after", hoursOrNever, "hours"],
       ["behaviors_per_expert", "Behaviors one expert is taught, at most", whole],
       ["standing_training", "Training of standing experts", onOff],
     ],
@@ -320,39 +320,193 @@ function handoffItem(note) {
   return item;
 }
 
-// The workspace's policy, read from what the console reads.
+// The workspace's policy: read from what the console reads, and for an
+// operator a form over it, saved through the console's own action. The
+// server names each knob's range and keeps what it stores inside it.
 
-async function loadPolicy() {
+/** `path` on this server as the signed-in identity, with the dashboard's
+ *  errors: the answer's JSON, or nothing for an answer with no body. */
+async function consoleFetch(path, body) {
   const token = state.token;
-  const res = await fetch("console/snapshot", {
-    headers: { authorization: `Bearer ${token}` },
+  const res = await fetch(path, {
+    method: body ? "POST" : "GET",
+    headers: body
+      ? { authorization: `Bearer ${token}`, "content-type": "application/json" }
+      : { authorization: `Bearer ${token}` },
+    body: body ? JSON.stringify(body) : undefined,
     cache: "no-store",
     credentials: "omit",
   });
   if (res.status === 401) throw new SignedOut();
-  if (!res.ok) throw new Error((await res.text()) || `${res.status} ${res.statusText}`);
-  const snapshot = await res.json();
+  const text = await res.text();
+  if (!res.ok) {
+    let message = text || `${res.status} ${res.statusText}`;
+    try {
+      message = JSON.parse(text).error || message;
+    } catch {
+      // Not JSON: the text is the message.
+    }
+    throw new Error(message);
+  }
   if (state.token !== token) throw new Superseded();
-  const policy = snapshot.policy || {};
-  byId("policy-summary").textContent = snapshot.operator
-    ? "Change a value with K in the console (antumbra tui)."
+  return text ? JSON.parse(text) : null;
+}
+
+/** A knob that is on or off, by its range. */
+function isSwitch(knob) {
+  return knob && knob.min === 0 && knob.max === 1 && knob.step === 1;
+}
+
+/** A knob's value as a number, whatever the policy holds it as. */
+function knobNumber(value) {
+  return typeof value === "boolean" ? Number(value) : Number(value);
+}
+
+function sentence(text) {
+  return text ? text[0].toUpperCase() + text.slice(1) + "." : "";
+}
+
+async function loadPolicy() {
+  const [snapshot, named] = await Promise.all([consoleFetch("console/snapshot"), consoleFetch("console/knobs")]);
+  // The server's numbers are single precision: 0.1 arrives as 0.100000001.
+  const exact = (value) => Number(Number(value).toFixed(4));
+  const knobs = new Map(
+    (named.knobs ?? []).map((k) => [k.key, { ...k, min: exact(k.min), max: exact(k.max), step: exact(k.step) }]),
+  );
+  state.shell.policy = { stored: snapshot.policy || {}, knobs, operator: Boolean(snapshot.operator) };
+  drawPolicy("");
+}
+
+/** Draw the policy from what was last read: a form for an operator, the
+ *  values for anyone else. `said` is what the last save came to. */
+function drawPolicy(said) {
+  const { stored, knobs, operator } = state.shell.policy;
+  byId("policy-summary").textContent = operator
+    ? "You are an operator: a change applies at the next recall."
     : "Read only: an operator's token changes these.";
-  byId("policy").replaceChildren(
-    ...POLICY.map(([name, about, knobs]) =>
+  const groups = POLICY.map(([name, about, rows]) =>
+    h(
+      "section",
+      { class: "panel policy-group" },
+      h("div", { class: "policy-head" }, h("h4", {}, name), h("p", { class: "muted small" }, about)),
       h(
-        "section",
-        { class: "panel policy-group" },
-        h("div", { class: "policy-head" }, h("h4", {}, name), h("p", { class: "muted small" }, about)),
-        h(
-          "dl",
-          { class: "facts" },
-          ...knobs
-            .filter(([key]) => key in policy)
-            .map(([key, label, says]) => h("div", { class: "fact" }, h("dt", {}, label), h("dd", {}, says(policy[key])))),
-        ),
+        "div",
+        { class: "knobs" },
+        ...rows.filter(([key]) => key in stored).map((row) => knobRow(row, stored, knobs.get(row[0]), operator)),
       ),
     ),
   );
+  const status = h("p", { id: "policy-status", class: "small muted", role: "status" }, said);
+  const save = h("button", { type: "submit", disabled: true }, "Save changes");
+  const discard = h("button", { type: "button", class: "quiet", disabled: true }, "Discard");
+  const form = h(
+    "form",
+    { id: "policy-form", class: "policy", novalidate: "" },
+    ...groups,
+    operator ? h("div", { class: "save-bar" }, status, h("div", { class: "save-actions" }, discard, save)) : null,
+  );
+  byId("policy").replaceChildren(form);
+  if (!operator) return;
+
+  const changed = () => policyChanges(form);
+  const settle = () => {
+    const changes = changed();
+    const valid = form.checkValidity();
+    save.disabled = !changes.length || !valid;
+    discard.disabled = !changes.length;
+    for (const row of form.querySelectorAll(".knob")) row.classList.toggle("changed", changes.includes(row.dataset.key));
+    status.textContent = !valid
+      ? "A value is outside its range."
+      : changes.length
+        ? `${numbers.format(changes.length)} ${changes.length === 1 ? "change" : "changes"} not saved`
+        : said;
+  };
+  form.addEventListener("input", settle);
+  discard.addEventListener("click", () => drawPolicy(""));
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!changed().length || !form.checkValidity()) return;
+    save.disabled = true;
+    discard.disabled = true;
+    status.textContent = "Saving";
+    try {
+      await consoleFetch("console/action", { action: "set_memory_policy", policy: policyOf(form) });
+      const snapshot = await consoleFetch("console/snapshot");
+      state.shell.policy.stored = snapshot.policy || {};
+      drawPolicy(`Saved at ${clock.format(new Date())}.`);
+    } catch (error) {
+      if (error instanceof SignedOut) signOut(REFUSED);
+      else if (!(error instanceof Superseded)) {
+        status.textContent = `Not saved: ${error.message}`;
+        save.disabled = false;
+        discard.disabled = false;
+      }
+    }
+  });
+}
+
+function knobRow([key, label, says, unit], stored, knob, operator) {
+  const help = h("p", { class: "muted small" }, sentence(knob ? knob.help : ""));
+  const text = h("div", { class: "knob-text" }, h("p", { class: "knob-name", id: `knob-${key}` }, label), help);
+  let control;
+  if (!operator || !knob) {
+    control = h("p", { class: "knob-value" }, says(stored[key]));
+  } else if (isSwitch(knob)) {
+    const on = knobNumber(stored[key]) >= 0.5;
+    const radio = (value, name, checked) => {
+      const id = `knob-${key}-${value}`;
+      return [h("input", { type: "radio", id, name: key, value: String(value), checked: checked ? "" : null }), h("label", { for: id }, name)];
+    };
+    control = h("fieldset", { class: "segmented", "aria-labelledby": `knob-${key}` }, ...radio(1, "On", on), ...radio(0, key === "auto" ? "Off" : "Paused", !on));
+  } else {
+    const input = h("input", {
+      type: "number",
+      name: key,
+      min: String(knob.min),
+      max: String(knob.max),
+      step: knob.step >= 1 ? "1" : "0.01",
+      value: String(Number(Number(stored[key]).toFixed(2))),
+      required: "",
+      inputmode: "decimal",
+      "aria-labelledby": `knob-${key}`,
+    });
+    control = h(
+      "div",
+      { class: "knob-input" },
+      h("div", { class: "knob-field" }, input, unit ? h("span", { class: "small muted" }, unit) : null),
+      h("p", { class: "small muted" }, `${numbers.format(knob.min)} to ${numbers.format(knob.max)}`),
+    );
+  }
+  return h("div", { class: "knob", "data-key": key }, text, control);
+}
+
+/** The form's value for `key`, as a number. */
+function knobValue(form, key) {
+  const field = form.elements[key];
+  if (!field) return null;
+  return Number(field.value);
+}
+
+/** The knobs whose value in the form is not the stored one. */
+function policyChanges(form) {
+  const { stored } = state.shell.policy;
+  return Object.keys(stored).filter((key) => {
+    const value = knobValue(form, key);
+    return value !== null && Math.abs(value - Number(Number(knobNumber(stored[key])).toFixed(2))) > 1e-9;
+  });
+}
+
+/** The whole policy as the form has it, each value in the kind the stored
+ *  one is: what the action replaces the workspace's knobs with. */
+function policyOf(form) {
+  const { stored } = state.shell.policy;
+  const policy = {};
+  for (const [key, was] of Object.entries(stored)) {
+    const value = knobValue(form, key);
+    if (value === null || !policyChanges(form).includes(key)) policy[key] = was;
+    else policy[key] = typeof was === "boolean" ? value >= 0.5 : Number.isInteger(was) && key === "max_links" ? Math.round(value) : value;
+  }
+  return policy;
 }
 
 // The Overview: what is waiting, and the latest memories.
@@ -435,13 +589,13 @@ function clearShell() {
   }
   for (const id of ["devices-summary", "handoffs-summary", "policy-summary", "token-left"]) byId(id).textContent = "";
   for (const node of document.querySelectorAll("[data-user-name], [data-workspace-name], [data-initials]")) node.textContent = "";
-  state.shell = { devices: [], handoffs: 0, tokenDaysLeft: null };
+  state.shell = { devices: [], handoffs: 0, tokenDaysLeft: null, policy: null };
   showCounts();
   closeMenu();
 }
 
 function startShell() {
-  state.shell = { devices: [], handoffs: 0, tokenDaysLeft: null };
+  state.shell = { devices: [], handoffs: 0, tokenDaysLeft: null, policy: null };
   applyPreferences(preferences());
   byId("preferences").addEventListener("change", keepPreferences);
   window.addEventListener("hashchange", route);
