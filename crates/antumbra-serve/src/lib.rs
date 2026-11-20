@@ -404,6 +404,7 @@ impl Serve for MultiAdapterServe {
         let gone = waiting.0.clone();
         let job = engine::Job {
             gone: Box::new(move || gone.load(std::sync::atomic::Ordering::Relaxed)),
+            owner: req.owner.unwrap_or_default(),
             prompt: req.prompt,
             specs,
             reply: Box::new(move |result| {
@@ -503,6 +504,7 @@ mod tests {
             prompt: "hello".into(),
             adapters: vec![],
             weights: Vec::new(),
+            owner: None,
         };
         let Err(err) = serve.act(req).await else {
             return Err(AntumbraError::other("the seam served the request"));
@@ -536,6 +538,7 @@ mod tests {
             prompt: "hi".into(),
             adapters: vec![],
             weights: Vec::new(),
+            owner: None,
         };
         let msg = refused(&serve, req).await?;
         assert!(msg.contains("no adapter selected"), "{msg}");
@@ -550,6 +553,7 @@ mod tests {
             prompt: "hi".into(),
             adapters: vec![ExpertId::new("expert:ghost")],
             weights: Vec::new(),
+            owner: None,
         };
         let msg = refused(&serve, req).await?;
         assert!(msg.contains("no adapter registered"), "{msg}");
