@@ -483,7 +483,7 @@ impl Attention {
         s.attended.resize(rows * queries, 0.0);
         match rows {
             1 => attend::attend(q, store, &mut s.attended, &mut s.attention)?,
-            _ => attend::attend_rows(q, rows, store, &mut s.attended)?,
+            _ => attend::attend_rows(q, rows, store, &mut s.attended, &mut s.attention)?,
         }
         s.out.resize(rows * self.hidden_size, 0.0);
         products(
@@ -1073,6 +1073,106 @@ impl QwenLora {
         position: usize,
         first: bool,
     ) -> CResult<Option<Stepped>> {
+        let Some(width) = self.read(tokens, position)? else {
+            return Ok(None);
+        };
+        let s = &mut self.scratch;
+        // The head reads the last row alone.
+        self.norm
+            .step(&s.x[s.x.len() - width..], 1, &mut s.normed)?;
+        // Through its tiles, or through candle's kernels where this CPU has
+        // no tiles for the form it is in.
+        let Some(head) = &self.lm_head_t else {
+            let row = Tensor::from_slice(&s.normed, (1, 1, s.normed.len()), &Device::Cpu)?;
+            let logits = self.logits(&row)?.flatten_all()?.to_vec1()?;
+            return Ok(Some(Stepped::Logits(logits)));
+        };
+        quantize(&s.normed, 1, &mut s.quantized);
+        if let (true, Some(sketch)) = (first && plain(&self.lm_head_w), &self.lm_head_s) {
+            let (storage, layout) = self.lm_head_w.storage_and_layout();
+            let dense = held(&storage, layout, "the head's dense rows")?;
+            if s.sketched.is_empty() {
+                s.sketched.push(sketch::Room::default());
+            }
+            let token = sketch.first(&s.quantized[0], &s.normed, dense, &mut s.sketched[0])?;
+            return Ok(Some(Stepped::First(token)));
+        }
+        // Every logit is written, so what the room held is nothing to it.
+        let mut logits = std::mem::take(&mut s.logits);
+        logits.resize(head.rows(), 0.0);
+        tiles::multiply(&[head], &s.quantized[0], &mut [&mut logits])?;
+        Ok(Some(Stepped::Logits(logits)))
+    }
+
+    /// Whether [`QwenLora::step_ahead`] has a head to answer with: the
+    /// sketch, and the dense rows it decides by.
+    pub(in crate::models::qwen) fn reads_ahead(&self) -> bool {
+        self.lm_head_s.is_some() && plain(&self.lm_head_w)
+    }
+
+    /// The token the head ranks first after every one of `tokens`, the
+    /// first of which is at `position`, read in one pass: what
+    /// [`QwenLora::step`] gives for each of them read one after another, with
+    /// the first asked for. Where [`QwenLora::step_each`] reads a row from
+    /// each of several sequences, this reads several rows of one, each
+    /// attending to the rows before it in the pass as to the cache. The rows
+    /// after one whose token is not the next of `tokens` were read on text
+    /// that is not the model's, and their places in the cache are the
+    /// caller's to cut back ([`QwenLora::truncate`]).
+    ///
+    /// `None`, with nothing read or written, when the model does not read
+    /// rows this way, its head is not sketched, or there are more tokens
+    /// than are read at once.
+    pub(in crate::models::qwen) fn step_ahead(
+        &mut self,
+        tokens: &[u32],
+        position: usize,
+    ) -> CResult<Option<Vec<u32>>> {
+        if !self.reads_ahead() || tokens.len() > ROWS_AT_ONCE {
+            return Ok(None);
+        }
+        let Some(width) = self.read(tokens, position)? else {
+            return Ok(None);
+        };
+        let Some(sketch) = &self.lm_head_s else {
+            bail!("a head that reads ahead has a sketch")
+        };
+        let (rows, s) = (tokens.len(), &mut self.scratch);
+        self.norm
+            .step(&s.x[s.x.len() - rows * width..], rows, &mut s.normed)?;
+        quantize(&s.normed, rows, &mut s.quantized);
+        let (storage, layout) = self.lm_head_w.storage_and_layout();
+        let dense = held(&storage, layout, "the head's dense rows")?;
+        if s.sketched.len() < rows {
+            s.sketched.resize_with(rows, Default::default);
+        }
+        // Every row's first in one reading of the sketch.
+        let mut firsts = vec![0u32; rows];
+        sketch.first_of_each(
+            &s.quantized[..rows],
+            &s.normed,
+            dense,
+            &mut s.sketched[..rows],
+            &mut firsts,
+        )?;
+        Ok(Some(firsts))
+    }
+
+    /// Forget the positions from `len` on in every layer's cache of plain
+    /// rows: the first sequence's, which is the one [`QwenLora::step`] and
+    /// [`QwenLora::step_ahead`] read and write.
+    pub(in crate::models::qwen) fn truncate(&mut self, len: usize) {
+        for layer in &mut self.layers {
+            layer.truncate(len);
+        }
+    }
+
+    /// `tokens`, the first of which is at `position`, through every layer
+    /// as plain rows, their keys and values joined to the cache: the hidden
+    /// rows of the last run of them are left in the scratch, and what comes
+    /// back is a row's width. `None`, with nothing read or written, when
+    /// this model does not read rows that way.
+    fn read(&mut self, tokens: &[u32], position: usize) -> CResult<Option<usize>> {
         if tokens.is_empty() || !self.steps_plainly()? {
             return Ok(None);
         }
@@ -1101,32 +1201,8 @@ impl QwenLora {
             }
             read += run.len();
         }
-        // The head reads the last row alone.
-        let last = &x[x.len() - width..];
-        self.norm.step(last, 1, &mut s.normed)?;
         s.x = x;
-        // Through its tiles, or through candle's kernels where this CPU has
-        // no tiles for the form it is in.
-        let Some(head) = &self.lm_head_t else {
-            let row = Tensor::from_slice(&s.normed, (1, 1, s.normed.len()), &Device::Cpu)?;
-            let logits = self.logits(&row)?.flatten_all()?.to_vec1()?;
-            return Ok(Some(Stepped::Logits(logits)));
-        };
-        quantize(&s.normed, 1, &mut s.quantized);
-        if let (true, Some(sketch)) = (first && plain(&self.lm_head_w), &self.lm_head_s) {
-            let (storage, layout) = self.lm_head_w.storage_and_layout();
-            let dense = held(&storage, layout, "the head's dense rows")?;
-            if s.sketched.is_empty() {
-                s.sketched.push(sketch::Room::default());
-            }
-            let token = sketch.first(&s.quantized[0], &s.normed, dense, &mut s.sketched[0])?;
-            return Ok(Some(Stepped::First(token)));
-        }
-        // Every logit is written, so what the room held is nothing to it.
-        let mut logits = std::mem::take(&mut s.logits);
-        logits.resize(head.rows(), 0.0);
-        tiles::multiply(&[head], &s.quantized[0], &mut [&mut logits])?;
-        Ok(Some(Stepped::Logits(logits)))
+        Ok(Some(width))
     }
 
     /// Take back the room a token's logits were handed out in, for the next
@@ -1380,7 +1456,7 @@ mod tests {
             forms.push(GgmlDType::Q6K);
         }
         for serve in forms {
-            for length in [1usize, 5, ROWS_AT_ONCE, 2 * ROWS_AT_ONCE + 6] {
+            for length in [1usize, 2, 3, 5, 7, ROWS_AT_ONCE, 2 * ROWS_AT_ONCE + 6] {
                 let prompt: Vec<u32> = (0..length).map(token).collect();
                 let mut at_once = model(&cfg, &weights, Some(serve), true)?;
                 let mut one_by_one = model(&cfg, &weights, Some(serve), true)?;
@@ -1655,6 +1731,262 @@ mod tests {
                 assert_eq!(got, want.1, "{serve:?}, token {i}");
             }
         }
+        Ok(())
+    }
+
+    /// A generation a token at a time, as the generation loop writes it:
+    /// the prompt, then each token's own pass, until the end token, a loop
+    /// or the most tokens allowed.
+    fn a_token_at_a_time(
+        model: &mut QwenLora,
+        prompt: &[u32],
+        eos: u32,
+        most: usize,
+    ) -> CResult<Vec<u32>> {
+        let mut tokens = prompt.to_vec();
+        for index in 0..most {
+            let start = match index {
+                0 => 0,
+                _ => tokens.len() - 1,
+            };
+            let Some(Stepped::First(next)) = model.step(&tokens[start..], start, true)? else {
+                bail!("token {index} was not stepped to its first")
+            };
+            if next == eos {
+                break;
+            }
+            tokens.push(next);
+            if crate::decode::loops(&tokens[prompt.len()..]) {
+                break;
+            }
+        }
+        Ok(tokens)
+    }
+
+    /// Rows read ahead in one pass each give the first token a step for the
+    /// row alone gives, at every served form; and a cache cut back is the
+    /// cache as it was before the rows cut off: another token read there
+    /// gives what it gives after the rows before it were read one by one.
+    #[test]
+    fn rows_read_ahead_give_each_rows_own_first_token() -> CResult<()> {
+        if !tiles::six_bit() {
+            eprintln!("skipped: this CPU multiplies no sketch of the head");
+            return Ok(());
+        }
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        let tokens: Vec<u32> = (0..12).map(token).collect();
+        for serve in [GgmlDType::Q4K, GgmlDType::Q6K, GgmlDType::Q8_0] {
+            let mut alone = model(&cfg, &weights, Some(serve), true)?;
+            let mut want = Vec::new();
+            for (at, token) in tokens.iter().enumerate() {
+                let Some(Stepped::First(first)) = alone.step(&[*token], at, true)? else {
+                    bail!("{serve:?}: token {at} was not stepped to its first")
+                };
+                want.push(first);
+            }
+            // Three as a prompt, then nine at once: eight and one.
+            let mut ahead = model(&cfg, &weights, Some(serve), true)?;
+            assert!(ahead.reads_ahead());
+            let Some(Stepped::First(first)) = ahead.step(&tokens[..3], 0, true)? else {
+                bail!("{serve:?}: the prompt was not stepped to its first")
+            };
+            assert_eq!(first, want[2], "{serve:?}: after the prompt");
+            let Some(firsts) = ahead.step_ahead(&tokens[3..], 3)? else {
+                bail!("{serve:?}: nine rows were not read ahead")
+            };
+            assert_eq!(firsts, &want[3..], "{serve:?}: nine rows at once");
+
+            // Cut back to five positions; a sixth token that was never there.
+            ahead.truncate(5);
+            let mut again = model(&cfg, &weights, Some(serve), true)?;
+            for (at, token) in tokens[..5].iter().enumerate() {
+                again.step(&[*token], at, true)?;
+            }
+            let other = token(40);
+            let (Some(Stepped::First(got)), Some(Stepped::First(want))) = (
+                ahead.step(&[other], 5, true)?,
+                again.step(&[other], 5, true)?,
+            ) else {
+                bail!("{serve:?}: the token after the cut was not stepped")
+            };
+            assert_eq!(got, want, "{serve:?}: after the cache was cut back");
+            assert_eq!(
+                ahead.scratch.normed, again.scratch.normed,
+                "{serve:?}: the row the head is given after the cut"
+            );
+        }
+        // More rows than are read at once are not read ahead, and a head
+        // with no sketch reads nothing ahead.
+        let mut served = model(&cfg, &weights, Some(GgmlDType::Q6K), false)?;
+        let many: Vec<u32> = (0..ROWS_AT_ONCE + 1).map(token).collect();
+        assert!(served.step_ahead(&many, 0)?.is_none());
+        let mut dense = model(&cfg, &weights, None, false)?;
+        assert!(!dense.reads_ahead() && dense.step_ahead(&[1], 0)?.is_none());
+        Ok(())
+    }
+
+    /// A generation read ahead is the generation a token at a time, token
+    /// for token, whatever is guessed: nothing, the text itself, the text
+    /// with every third token wrong, and wrong tokens throughout. It stops
+    /// where a token at a time stops: at the end token, and at the most
+    /// tokens allowed. Guessed right, it takes fewer passes than tokens.
+    #[test]
+    fn a_generation_read_ahead_is_the_generation_a_token_at_a_time() -> CResult<()> {
+        use crate::draft::Drafts;
+        if !tiles::six_bit() {
+            eprintln!("skipped: this CPU multiplies no sketch of the head");
+            return Ok(());
+        }
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        let serve = GgmlDType::Q6K;
+        // No token is 64: a generation that only its length ends.
+        const NEVER: u32 = 64;
+        let whole = a_token_at_a_time(
+            &mut model(&cfg, &weights, Some(serve), true)?,
+            &PROMPT,
+            NEVER,
+            48,
+        )?;
+        let written = whole.len() - PROMPT.len();
+        assert!(
+            written >= 12,
+            "a generation of {written} tokens says little"
+        );
+
+        let remembering = |text: &[u32]| {
+            let mut memory = Drafts::new();
+            memory.learn(text, PROMPT.len());
+            memory
+        };
+        let mut garbled = whole.clone();
+        for token in garbled[PROMPT.len()..].iter_mut().skip(2).step_by(3) {
+            *token = (*token + 1) % 64;
+        }
+        let wrong: Vec<u32> = whole
+            .iter()
+            .enumerate()
+            .map(|(at, token)| match at < PROMPT.len() {
+                true => *token,
+                false => (*token + 1) % 64,
+            })
+            .collect();
+        let kept = |text: &[u32]| {
+            let mut memory = Drafts::new();
+            memory.keep(&PROMPT, &text[PROMPT.len()..]);
+            memory
+        };
+        // An end token the generation writes part of the way through.
+        let ending = whole[PROMPT.len() + written / 2];
+        // What a served model counts, from one generation to the next.
+        let mut odds = ahead::Odds::default();
+        for (what, far) in [
+            ("nothing remembered", Drafts::new()),
+            ("the text itself", remembering(&whole)),
+            ("every third token wrong", remembering(&garbled)),
+            ("every token wrong", remembering(&wrong)),
+            ("the answer kept whole", kept(&whole)),
+            ("an answer kept that goes wrong", kept(&garbled)),
+            ("another answer kept", kept(&wrong)),
+        ] {
+            for (eos, most) in [
+                (NEVER, 48usize),
+                (ending, 48),
+                (NEVER, 7),
+                (NEVER, 1),
+                (NEVER, 0),
+            ] {
+                let want = a_token_at_a_time(
+                    &mut model(&cfg, &weights, Some(serve), true)?,
+                    &PROMPT,
+                    eos,
+                    most,
+                )?;
+                // Under the odds a served model counts, whatever they come
+                // to on this machine today: the same tokens.
+                let mut counted = model(&cfg, &weights, Some(serve), true)?;
+                let (mut tokens, mut near) = (PROMPT.to_vec(), Drafts::new());
+                let read = ahead::decode(
+                    &mut counted,
+                    &mut tokens,
+                    PROMPT.len(),
+                    ahead::Ahead {
+                        eos,
+                        most,
+                        near: &mut near,
+                        far: &far,
+                        odds: &mut odds,
+                    },
+                    &mut GenTiming::default(),
+                )?;
+                assert!(read.is_some(), "{what}: the generation was not read ahead");
+                assert_eq!(tokens, want, "{what}, counted, at {eos} or {most} tokens");
+                // And with every guess offered carried, so that passes of
+                // every width are read.
+                let mut ahead = model(&cfg, &weights, Some(serve), true)?;
+                let (mut tokens, mut near) = (PROMPT.to_vec(), Drafts::new());
+                let mut timing = GenTiming::default();
+                let Some(passes) = ahead::decode(
+                    &mut ahead,
+                    &mut tokens,
+                    PROMPT.len(),
+                    ahead::Ahead {
+                        eos,
+                        most,
+                        near: &mut near,
+                        far: &far,
+                        odds: &mut ahead::Odds::eager(),
+                    },
+                    &mut timing,
+                )?
+                else {
+                    bail!("{what}: the generation was not read ahead")
+                };
+                assert_eq!(tokens, want, "{what}, ending at {eos} or {most} tokens");
+                assert_eq!(timing.passes, passes.passes, "{what}");
+                assert!(passes.kept <= passes.guessed, "{what}");
+                if what == "the text itself" && eos == NEVER && most == 48 {
+                    assert!(
+                        passes.passes * 2 < written && passes.kept * 2 > written,
+                        "{what}: {} passes and {} guesses kept for {written} tokens",
+                        passes.passes,
+                        passes.kept
+                    );
+                }
+                if what == "the answer kept whole" && eos == NEVER && most == 48 {
+                    // Sixteen tokens a pass from the first.
+                    assert!(
+                        passes.passes <= written.div_ceil(16) && passes.kept + 1 >= written - 1,
+                        "{what}: {} passes and {} guesses kept for {written} tokens",
+                        passes.passes,
+                        passes.kept
+                    );
+                }
+                if what == "nothing remembered" && most == 48 {
+                    // Its own prompt and tokens are all it can guess from.
+                    assert!(passes.passes <= tokens.len() - PROMPT.len(), "{what}");
+                }
+            }
+        }
+        // A model with no sketch of its head is not read ahead, and nothing
+        // of the prompt is read.
+        let mut dense = model(&cfg, &weights, None, false)?;
+        let (mut tokens, mut near) = (PROMPT.to_vec(), Drafts::new());
+        let none = ahead::decode(
+            &mut dense,
+            &mut tokens,
+            PROMPT.len(),
+            ahead::Ahead {
+                eos: NEVER,
+                most: 8,
+                near: &mut near,
+                far: &Drafts::new(),
+                odds: &mut ahead::Odds::default(),
+            },
+            &mut GenTiming::default(),
+        )?;
+        assert!(none.is_none() && tokens == PROMPT);
         Ok(())
     }
 

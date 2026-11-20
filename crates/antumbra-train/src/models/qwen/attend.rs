@@ -29,7 +29,7 @@ use std::sync::{Mutex, PoisonError};
 use candle_core::{bail, Device, Result, Storage, Tensor};
 
 use super::kv::KvStore;
-use super::phases::{dispatch, Phase};
+use super::phases::{dispatch, Phase, Shared};
 use super::slices::{dot, values};
 
 /// Cached positions below which a token's attention is not worth a dispatch.
@@ -420,12 +420,26 @@ fn attend_alone(
     Ok(())
 }
 
+/// Rows at most whose attention is shared out a run of positions at a time,
+/// as one row's is. More rows than this are a prompt's, as many as there are
+/// cores or more, and each is a unit of work of its own.
+const ROWS_BY_RUNS: usize = 16;
+
 /// [`attend`] for `rows` query positions that were read together, the last
 /// `rows` positions in `store`: row `i` attends to the positions before it
 /// and its own. `q` and `out` hold a row's heads one after another, row
-/// after row. Each row is one unit of work and is computed as [`attend`]
-/// computes it, to the bit.
-pub(super) fn attend_rows(q: &[f32], rows: usize, store: &KvStore, out: &mut [f32]) -> Result<()> {
+/// after row. Each row is computed as [`attend`] computes it, to the bit:
+/// the same runs of positions, summed in the same order. A few rows, as a
+/// decode pass carries, have their runs shared out among the cores, so no
+/// core reads a row's whole cache alone; a prompt's many rows are a unit of
+/// work each.
+pub(super) fn attend_rows(
+    q: &[f32],
+    rows: usize,
+    store: &KvStore,
+    out: &mut [f32],
+    work: &mut Work,
+) -> Result<()> {
     if rows == 0 || !q.len().is_multiple_of(rows) || out.len() != q.len() || rows > store.len() {
         bail!(
             "decode attention: {rows} rows in a query of {} values into {} do not fit {} cached positions",
@@ -436,6 +450,9 @@ pub(super) fn attend_rows(q: &[f32], rows: usize, store: &KvStore, out: &mut [f3
     }
     let (per, before) = (q.len() / rows, store.len() - rows);
     let kernels = kernels(store.dim());
+    if rows <= ROWS_BY_RUNS {
+        return attend_by_runs(kernels, q, rows, store, out, work);
+    }
     // Checked once here, so a row's own check cannot fail in the dispatch.
     Cut::of(per, per, store, before + 1)?;
     let places = Scores(out.as_mut_ptr());
@@ -516,6 +533,118 @@ pub(super) fn attend_each(q: &[f32], stores: &[&KvStore], out: &mut [f32]) -> Re
         Some(err) => Err(err),
         None => Ok(()),
     }
+}
+
+/// [`attend_rows`] with every row's runs of positions as units of work: two
+/// phases of one dispatch, every run's scores and then, each head's largest
+/// score for each row being known, every run's weighted values.
+fn attend_by_runs(
+    kernels: Kernels,
+    q: &[f32],
+    rows: usize,
+    store: &KvStore,
+    out: &mut [f32],
+    work: &mut Work,
+) -> Result<()> {
+    let (per, before) = (q.len() / rows, store.len() - rows);
+    // Each row's cut, and where its units, its scores and its sums start
+    // among all the rows'.
+    let mut cuts = Vec::with_capacity(rows);
+    let mut starts = Vec::with_capacity(rows);
+    let (mut units, mut scored, mut summed) = (0, 0, 0);
+    for row in 0..rows {
+        let cut = Cut::of(per, per, store, before + row + 1)?;
+        starts.push((units, scored, summed));
+        units += cut.units();
+        scored += cut.heads * cut.len;
+        summed += cut.units() * cut.room();
+        cuts.push(cut);
+    }
+    let Work { scores, sums } = work;
+    scores.clear();
+    scores.resize(scored, 0.0);
+    sums.clear();
+    sums.resize(summed, 0.0);
+    let (heads, rep) = (cuts[0].heads, cuts[0].rep);
+    let most: Vec<AtomicU32> = (0..rows * heads)
+        .map(|_| AtomicU32::new(f32::NEG_INFINITY.to_bits()))
+        .collect();
+    let at = Scores(scores.as_mut_ptr());
+    let rooms = Shared::of(sums.as_mut_slice());
+    // The row a unit among all the rows' is of, and which of the row's.
+    let of = |unit: usize| {
+        let row = starts.partition_point(|start| start.0 <= unit) - 1;
+        (row, unit - starts[row].0)
+    };
+    let score = |first: usize, last: usize| {
+        let at = &at;
+        let mut top = vec![0f32; rep];
+        for unit in first..last {
+            let (row, u) = of(unit);
+            let cut = &cuts[row];
+            // SAFETY: the kernels were chosen for this CPU and this `dim`;
+            // the row's scores were given room for every head and position
+            // just above; and a unit is taken by one thread.
+            unsafe {
+                cut.score(
+                    kernels,
+                    &q[row * per..(row + 1) * per],
+                    store,
+                    u,
+                    at.0.add(starts[row].1),
+                    &mut top,
+                )
+            };
+            for (slot, top) in most[row * heads + cut.unit(u).0 * rep..].iter().zip(&top) {
+                raise(slot, *top);
+            }
+        }
+    };
+    let weigh = |first: usize, last: usize| {
+        let at = &at;
+        let mut top = vec![0f32; heads];
+        for unit in first..last {
+            let (row, u) = of(unit);
+            let cut = &cuts[row];
+            for (top, slot) in top.iter_mut().zip(&most[row * heads..(row + 1) * heads]) {
+                *top = f32::from_bits(slot.load(Ordering::Acquire));
+            }
+            // SAFETY: as above; every unit's scores were written in the
+            // phase before; and this unit's room among the sums is its own.
+            unsafe {
+                let room = rooms.part(starts[row].2 + u * cut.room(), cut.room());
+                cut.weigh(
+                    kernels,
+                    store,
+                    u,
+                    at.0.add(starts[row].1).cast_const(),
+                    &top,
+                    room,
+                );
+            }
+        }
+    };
+    dispatch(
+        &[
+            Phase {
+                units,
+                most: 1,
+                run: &score,
+                then: None,
+            },
+            Phase {
+                units,
+                most: 1,
+                run: &weigh,
+                then: None,
+            },
+        ],
+        false,
+    );
+    for ((cut, start), out) in cuts.iter().zip(&starts).zip(out.chunks_exact_mut(per)) {
+        cut.gather(&sums[start.2..start.2 + cut.units() * cut.room()], out);
+    }
+    Ok(())
 }
 
 /// [`attend`] for a query held as a tensor of `(1, heads, 1, dim)`, f32 in
@@ -639,6 +768,10 @@ mod tests {
             (2, 6, 40, 37, 128),
             (2, 2, 300, 3, 64),
             (3, 2, 7, 4, 40),
+            // As many as are shared out by runs, and one more.
+            (2, 6, 130, ROWS_BY_RUNS, 128),
+            (2, 6, 130, ROWS_BY_RUNS + 1, 128),
+            (2, 6, 600, 2, 128),
         ] {
             let (heads, len) = (kv_heads * n_rep, before + rows);
             let q = Tensor::randn(0f32, 1.0, (rows, heads * d), &dev)?;
@@ -646,7 +779,13 @@ mod tests {
             let v = Tensor::randn(0f32, 1.0, (1, kv_heads, len, d), &dev)?;
             let q = q.flatten_all()?.to_vec1::<f32>()?;
             let mut together = vec![0f32; q.len()];
-            attend_rows(&q, rows, &stored(&k, &v)?, &mut together)?;
+            attend_rows(
+                &q,
+                rows,
+                &stored(&k, &v)?,
+                &mut together,
+                &mut Work::default(),
+            )?;
             for row in 0..rows {
                 let upto = before + row + 1;
                 let store = stored(&k.narrow(2, 0, upto)?, &v.narrow(2, 0, upto)?)?;
@@ -666,11 +805,18 @@ mod tests {
         )?;
         let mut out = vec![0f32; 4 * 32];
         assert!(
-            attend_rows(&vec![0f32; 4 * 32], 4, &store, &mut out).is_err(),
+            attend_rows(
+                &vec![0f32; 4 * 32],
+                4,
+                &store,
+                &mut out,
+                &mut Work::default()
+            )
+            .is_err(),
             "more rows than positions"
         );
         assert!(
-            attend_rows(&[0f32; 32], 0, &store, &mut out[..32]).is_err(),
+            attend_rows(&[0f32; 32], 0, &store, &mut out[..32], &mut Work::default()).is_err(),
             "no rows"
         );
         Ok(())

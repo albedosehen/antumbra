@@ -56,6 +56,12 @@ impl KvStore {
         self.dim
     }
 
+    /// Forget the positions from `len` on: rows that were read on text that
+    /// was never written. A store that holds no more is left as it is.
+    pub(super) fn truncate(&mut self, len: usize) {
+        self.len = self.len.min(len);
+    }
+
     /// Forget every position; the room is kept for the next sequence.
     pub(super) fn reset(&mut self) {
         self.len = 0;

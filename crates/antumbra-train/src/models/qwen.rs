@@ -66,6 +66,7 @@ fn default_true() -> bool {
 }
 
 mod adapt;
+mod ahead;
 mod attend;
 mod kv;
 mod layers;
@@ -292,9 +293,12 @@ impl QwenLora {
 pub struct GenTiming {
     pub prompt_tokens: usize,
     pub prompt_secs: f64,
-    /// Tokens decoded after the first, one forward each.
+    /// Tokens decoded after the first.
     pub decoded: usize,
     pub decode_secs: f64,
+    /// Passes over the weights those tokens took: as many as the tokens
+    /// where each has a pass of its own, fewer where a model reads ahead.
+    pub passes: usize,
 }
 
 impl GenTiming {
@@ -303,9 +307,47 @@ impl GenTiming {
             self.prompt_tokens = ctx_len;
             self.prompt_secs = took.as_secs_f64();
         } else {
-            self.decoded += 1;
-            self.decode_secs += took.as_secs_f64();
+            self.passed(1, took);
         }
+    }
+
+    /// One pass over the weights that decided `tokens` tokens.
+    fn passed(&mut self, tokens: usize, took: std::time::Duration) {
+        self.decoded += tokens;
+        self.decode_secs += took.as_secs_f64();
+        self.passes += 1;
+    }
+}
+
+/// How many blends of experts a model remembers its own writing for.
+const BLENDS_REMEMBERED: usize = 8;
+
+/// What a model that reads ahead guesses from: what it wrote before, apart
+/// for each blend of experts it wrote through, and room for the generation
+/// in hand.
+#[derive(Default)]
+struct Memories {
+    /// The generation in hand: its prompt and what it has written.
+    near: crate::draft::Drafts,
+    /// What was written through each blend, the latest used last.
+    far: Vec<(String, crate::draft::Drafts)>,
+    /// What guesses have been worth on this machine, whatever the blend.
+    odds: ahead::Odds,
+}
+
+impl Memories {
+    /// Where `blend`'s memory is, made if it is new, and moved to the end as
+    /// the latest used. The blend longest unused is forgotten for it.
+    fn place(&mut self, blend: &str) -> usize {
+        let held = match self.far.iter().position(|(name, _)| name == blend) {
+            Some(at) => self.far.remove(at),
+            None => (blend.to_string(), crate::draft::Drafts::new()),
+        };
+        if self.far.len() >= BLENDS_REMEMBERED {
+            self.far.remove(0);
+        }
+        self.far.push(held);
+        self.far.len() - 1
     }
 }
 
@@ -336,6 +378,14 @@ pub struct QwenCausalLm {
     train_order: Option<(u64, u64)>,
     /// The phases of the last generation, for a caller measuring serving.
     timing: Option<GenTiming>,
+    /// What greedy generation reads ahead with ([`RaftConfig::read_ahead`]),
+    /// when it does.
+    ahead: Option<Memories>,
+    /// The blend of experts the adapter is set to, as a name, and whether
+    /// the adapter is on: which memory a generation guesses from and adds
+    /// to. Writing through one blend is never guessed from under another.
+    blend: String,
+    adapter_on: bool,
 }
 
 /// What a seeded run's two streams are told apart by: the adapter's starting
@@ -485,6 +535,9 @@ impl QwenCausalLm {
             draws: None,
             train_order: seeded.map(|s| (s ^ ORDER_STREAM, 0)),
             timing: None,
+            ahead: cfg.read_ahead.then(Memories::default),
+            blend: String::new(),
+            adapter_on: true,
         })
     }
 
@@ -497,6 +550,7 @@ impl QwenCausalLm {
         // Whatever the load did or did not set, no copy of the factors
         // outlives it.
         self.model.adapters_changed();
+        self.blend = format!("one:{path}");
         crate::compose::restore_adapter(&self.model.varmap, path)
     }
 
@@ -511,6 +565,7 @@ impl QwenCausalLm {
     /// what an adapter costs a token; whoever turns it off turns it back on.
     pub fn set_adapter(&mut self, on: bool) {
         self.model.set_lora(on);
+        self.adapter_on = on;
     }
 
     /// Teacher-force `completion` after `prompt` through the adapter, with no
@@ -600,6 +655,11 @@ impl QwenCausalLm {
     /// model at the trained rank would, and a blend without a rebuild.
     pub fn load_blend(&mut self, specs: &[(String, f32)]) -> Result<()> {
         self.model.adapters_changed();
+        self.blend = specs
+            .iter()
+            .map(|(path, weight)| format!("{path}*{weight}"))
+            .collect::<Vec<_>>()
+            .join("+");
         // A poisoned lock holds the same map of vars, none half-set: taken as is.
         let vars = self
             .model
@@ -678,7 +738,42 @@ impl QwenCausalLm {
         };
         let mut timing = GenTiming::default();
 
-        for index in 0..self.max_new_tokens {
+        // Several tokens a pass, where the token is the largest logit and
+        // the model reads ahead: the same tokens as the loop below writes.
+        let mut written = false;
+        if let (true, Some(memories)) = (policy.takes_the_first(), &mut self.ahead) {
+            let blend = match self.adapter_on {
+                true => self.blend.as_str(),
+                false => "",
+            };
+            let at = memories.place(blend);
+            let ahead = ahead::Ahead {
+                eos: self.eos,
+                most: self.max_new_tokens,
+                near: &mut memories.near,
+                far: &memories.far[at].1,
+                odds: &mut memories.odds,
+            };
+            let passes =
+                ahead::decode(&mut self.model, &mut tokens, prompt_len, ahead, &mut timing)
+                    .map_err(ce)?;
+            if passes.is_some() {
+                // What it wrote is remembered for this blend's next
+                // generation; the prompt is not.
+                memories.far[at].1.learn(&tokens, prompt_len);
+                memories.far[at]
+                    .1
+                    .keep(&tokens[..prompt_len], &tokens[prompt_len..]);
+                written = true;
+            }
+        }
+
+        // A token at a time, where that was not done.
+        let steps = match written {
+            true => 0,
+            false => self.max_new_tokens,
+        };
+        for index in 0..steps {
             let step = std::time::Instant::now();
             let ctx_len = if index == 0 { tokens.len() } else { 1 };
             let start = tokens.len() - ctx_len;

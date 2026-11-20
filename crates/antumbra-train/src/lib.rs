@@ -32,6 +32,7 @@ pub mod critic;
 pub mod decision;
 pub mod decode;
 pub mod device;
+pub mod draft;
 pub mod eval;
 pub mod frozen;
 pub mod grpo;
