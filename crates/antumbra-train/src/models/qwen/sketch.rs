@@ -33,6 +33,12 @@
 //! of their bytes as they cut a six-bit tile's. Sampling, penalties, and
 //! everything that reads log-probabilities keep the whole head.
 //!
+//! The codes lie in their bytes as the CPU cuts them out ([`Layout`]): three
+//! bits each where AVX-512 VBMI or NEON does, and a nibble each, 117 MB for
+//! that head, where AVX2 does with a mask and a shift. They are the same
+//! codes on the same scales either way, so the products are the same to the
+//! bit, the same rows are read whole, and the token is the same token.
+//!
 //! On one laptop CPU a 1.5B base decodes 7 to 10% more tokens a second for
 //! it: 29.9 where it decoded 27.9 at Q6_K, 38.7 where 36.1 at Q4_K, and 23.5
 //! where 21.4 at Q8_0, medians of twelve rounds. With an expert on: 28.8
@@ -57,8 +63,46 @@ const BLOCK: usize = 256;
 const PAIR: usize = BITS;
 /// Bytes a group of four values takes for sixteen rows.
 const GROUP: usize = ROWS / 2 * PAIR;
+/// Bytes a group of four values takes for sixteen rows where a code has a
+/// nibble to itself: a byte for two rows' codes of one value.
+const NIBBLE_GROUP: usize = ROWS / 2 * 4;
 /// Bytes past the last group that a load of a whole vector may reach into.
 const SLACK: usize = 64;
+
+/// How a sketch's codes lie in their bytes: the way the kernel that reads
+/// them cuts them out. A sketch is made on the CPU that reads it.
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Layout {
+    /// `[sixteen rows][group of 4 values][pair of rows (8)][PAIR bytes]`: a
+    /// pair's eight values in `8 * BITS` bits, the first row's four lowest
+    /// and each row's first value lowest. What AVX-512 VBMI and NEON cut
+    /// out.
+    Fields,
+    /// `[sixteen rows][group of 4 values][row of the first eight (8)][value
+    /// (4)]`: a byte holds its row's code in its low nibble and, in its high
+    /// one, the code of the row eight after it. What AVX2 cuts out.
+    Nibbles,
+}
+
+impl Layout {
+    /// The layout this CPU's kernel reads.
+    fn here() -> Self {
+        #[cfg(target_arch = "x86_64")]
+        if !tiles::wide_six_bit() {
+            return Self::Nibbles;
+        }
+        Self::Fields
+    }
+
+    /// Bytes a group of four values takes for sixteen rows.
+    fn group(self) -> usize {
+        match self {
+            Self::Fields => GROUP,
+            Self::Nibbles => NIBBLE_GROUP,
+        }
+    }
+}
 
 /// The steps tried for a row, in units of the root mean square of its
 /// values: the one that leaves the least of the row outside its sketch is
@@ -95,11 +139,10 @@ const DECIDED_AT_ONCE: usize = 16;
     allow(dead_code)
 )]
 pub(super) struct Sketch {
-    /// `[sixteen rows][group of 4 values][pair of rows (8)][PAIR bytes]`: a
-    /// pair's eight values in `8 * BITS` bits, the first row's four lowest
-    /// and each row's first value lowest. A sixteen's groups one after
-    /// another: the order the kernel reads them in.
+    /// Every row's codes, laid out as `layout` says. A sixteen's groups one
+    /// after another: the order the kernel reads them in.
     codes: Vec<u8>,
+    layout: Layout,
     /// Each row's scale.
     scales: Vec<f32>,
     /// How far each row's sketched product may fall short of its own, for an
@@ -221,29 +264,45 @@ fn sketch_row(w: &[f32], codes: &mut [u8]) -> (f32, f32) {
 
 /// Sixteen rows' codes, a row after another in `held`, into the bytes of
 /// their sixteen.
-fn pack(held: &[u8], cols: usize, codes: &mut [u8]) {
-    for (g, group) in codes.chunks_exact_mut(GROUP).enumerate() {
-        for (p, pair) in group.chunks_exact_mut(PAIR).enumerate() {
-            let mut bits = 0u64;
-            for k in 0..4 {
-                let low = u64::from(held[2 * p * cols + 4 * g + k]);
-                let high = u64::from(held[(2 * p + 1) * cols + 4 * g + k]);
-                bits |= low << (BITS * k) | high << (BITS * (4 + k));
+fn pack(layout: Layout, held: &[u8], cols: usize, codes: &mut [u8]) {
+    match layout {
+        Layout::Fields => {
+            for (g, group) in codes.chunks_exact_mut(GROUP).enumerate() {
+                for (p, pair) in group.chunks_exact_mut(PAIR).enumerate() {
+                    let mut bits = 0u64;
+                    for k in 0..4 {
+                        let low = u64::from(held[2 * p * cols + 4 * g + k]);
+                        let high = u64::from(held[(2 * p + 1) * cols + 4 * g + k]);
+                        bits |= low << (BITS * k) | high << (BITS * (4 + k));
+                    }
+                    pair.copy_from_slice(&bits.to_le_bytes()[..PAIR]);
+                }
             }
-            pair.copy_from_slice(&bits.to_le_bytes()[..PAIR]);
+        }
+        Layout::Nibbles => {
+            for (g, group) in codes.chunks_exact_mut(NIBBLE_GROUP).enumerate() {
+                for (r, row) in group.chunks_exact_mut(4).enumerate() {
+                    for (k, byte) in row.iter_mut().enumerate() {
+                        let low = held[r * cols + 4 * g + k];
+                        let high = held[(r + ROWS / 2) * cols + 4 * g + k];
+                        *byte = low | high << 4;
+                    }
+                }
+            }
         }
     }
 }
 
 /// A run of sixteens sketched: `values` are their dense rows.
 fn sketch_rows(
+    layout: Layout,
     values: &[f32],
     cols: usize,
     codes: &mut [u8],
     scales: &mut [f32],
     reach: &mut [f32],
 ) {
-    let per = cols / 4 * GROUP;
+    let per = cols / 4 * layout.group();
     let margin = BOUND / (cols as f32).sqrt();
     let mut held = vec![0u8; ROWS * cols];
     for (t, sixteen) in values.chunks_exact(ROWS * cols).enumerate() {
@@ -252,7 +311,7 @@ fn sketch_rows(
             scales[t * ROWS + r] = scale;
             reach[t * ROWS + r] = off * margin;
         }
-        pack(&held, cols, &mut codes[t * per..(t + 1) * per]);
+        pack(layout, &held, cols, &mut codes[t * per..(t + 1) * per]);
     }
 }
 
@@ -299,21 +358,58 @@ unsafe fn sixteens_of_each(
     }
 }
 
+/// The sixteens `first..last` of the sketch against every one of `rows`,
+/// each row's products of them and their largest to its own of `places`,
+/// through the kernel of the sketch's layout: AVX-512's, which takes up to
+/// eight rows to a cutting of the codes, or AVX2's, which takes up to four.
+///
+/// SAFETY (for the caller): as the kernel's own, on a CPU [`available`]
+/// found the features of.
 #[cfg(target_arch = "x86_64")]
-use kernels::sixteens_of_each;
+unsafe fn sixteens_of_each(
+    sketch: &Sketch,
+    first: usize,
+    last: usize,
+    rows: &[Row],
+    places: &[Places],
+) {
+    match sketch.layout {
+        Layout::Fields => avx512::sixteens_of_each(sketch, first, last, rows, places),
+        Layout::Nibbles => avx2::sixteens_of_each(sketch, first, last, rows, places),
+    }
+}
+
+/// Which of a sixteen's rows could still be first: those whose sketched
+/// product, and their reach for an input of this `size`, come to `reached`
+/// or more.
+///
+/// SAFETY (for the caller): `products` and `reach` each point at sixteen
+/// values, on a CPU [`available`] found the features of.
+unsafe fn could_be_first(
+    sketch: &Sketch,
+    products: *const f32,
+    reach: *const f32,
+    size: f32,
+    reached: f32,
+) -> u16 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        match sketch.layout {
+            Layout::Fields => avx512::could_be_first(products, reach, size, reached),
+            Layout::Nibbles => avx2::could_be_first(products, reach, size, reached),
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = sketch;
+        kernels::could_be_first(products, reach, size, reached)
+    }
+}
 
 /// Whether this CPU multiplies a sketch of the head: the CPUs that multiply
 /// six-bit tiles, whose instructions cut the sketch's values out as well.
 pub(super) fn available() -> bool {
-    // On x86-64 the sketch's kernels are AVX-512's alone so far.
-    #[cfg(target_arch = "x86_64")]
-    {
-        tiles::wide_six_bit()
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        tiles::six_bit()
-    }
+    tiles::six_bit()
 }
 
 impl Sketch {
@@ -337,12 +433,13 @@ impl Sketch {
         if !fits {
             return Ok(None);
         }
-        let (storage, layout) = w.storage_and_layout();
+        let (storage, held) = w.storage_and_layout();
         let Storage::Cpu(storage) = &*storage else {
             bail!("a head is sketched from host memory")
         };
-        let values = values(storage, layout, "a head to sketch")?;
-        let (sixteens, per) = (rows / ROWS, cols / 4 * GROUP);
+        let values = values(storage, held, "a head to sketch")?;
+        let layout = Layout::here();
+        let (sixteens, per) = (rows / ROWS, cols / 4 * layout.group());
         let mut codes = vec![0u8; sixteens * per + SLACK];
         let mut scales = vec![0f32; rows];
         let mut reach = vec![0f32; rows];
@@ -356,7 +453,7 @@ impl Sketch {
                 .zip(reach.chunks_mut(run * ROWS))
                 .zip(values.chunks(run * ROWS * cols))
                 .map(|(((codes, scales), reach), values)| {
-                    scope.spawn(move || sketch_rows(values, cols, codes, scales, reach))
+                    scope.spawn(move || sketch_rows(layout, values, cols, codes, scales, reach))
                 })
                 .collect();
             for handle in handles {
@@ -368,6 +465,7 @@ impl Sketch {
         })?;
         Ok(Some(Self {
             codes,
+            layout,
             scales,
             reach,
             rows,
@@ -378,11 +476,20 @@ impl Sketch {
     /// Row `r` of sixteen `t`'s code for value `i`.
     #[cfg(test)]
     fn code(&self, t: usize, r: usize, i: usize) -> u8 {
-        let at = (t * (self.cols / 4) + i / 4) * GROUP + r / 2 * PAIR;
-        let mut bytes = [0u8; 8];
-        bytes[..PAIR].copy_from_slice(&self.codes[at..at + PAIR]);
-        let bits = u64::from_le_bytes(bytes);
-        ((bits >> (BITS * (4 * (r % 2) + i % 4))) & (LEVELS as u64 - 1)) as u8
+        let group = (t * (self.cols / 4) + i / 4) * self.layout.group();
+        match self.layout {
+            Layout::Fields => {
+                let at = group + r / 2 * PAIR;
+                let mut bytes = [0u8; 8];
+                bytes[..PAIR].copy_from_slice(&self.codes[at..at + PAIR]);
+                let bits = u64::from_le_bytes(bytes);
+                ((bits >> (BITS * (4 * (r % 2) + i % 4))) & (LEVELS as u64 - 1)) as u8
+            }
+            Layout::Nibbles => {
+                let byte = self.codes[group + r % (ROWS / 2) * 4 + i % 4];
+                (byte >> (4 * (r / (ROWS / 2)))) & 0xF
+            }
+        }
     }
 
     /// Sixteen `t`'s sketched products with `row`, a value at a time: what
@@ -576,7 +683,8 @@ impl Sketch {
                     };
                     // SAFETY: as above, and `reach` has a value for every row.
                     let mut could = unsafe {
-                        kernels::could_be_first(
+                        could_be_first(
+                            self,
                             products,
                             self.reach.as_ptr().add(t * ROWS),
                             of.size,
@@ -599,7 +707,7 @@ impl Sketch {
                 of.read.fetch_add(whole_rows, Ordering::Relaxed);
             }
         };
-        let per_sixteen = self.cols / 4 * GROUP;
+        let per_sixteen = self.cols / 4 * self.layout.group();
         dispatch(
             &[
                 Phase {
@@ -667,7 +775,11 @@ mod kernels {
 }
 
 #[cfg(target_arch = "x86_64")]
-mod kernels {
+#[path = "sketch_avx2.rs"]
+mod avx2;
+
+#[cfg(target_arch = "x86_64")]
+mod avx512 {
     use super::{Places, Row, Sketch, BITS, BLOCK, GROUP, LEVELS, PAIR, ROWS};
     use std::arch::x86_64::*;
 
