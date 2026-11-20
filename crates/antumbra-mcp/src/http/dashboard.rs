@@ -1,7 +1,8 @@
 //! The web dashboard: a browser surface over the same tools an agent calls.
 //! It reads, but for the decisions that are a user's own: a behavior drawn
 //! from their memories is accepted, so their expert learns it, or retired; and
-//! a handoff one of their machines left for another is marked done.
+//! a handoff one of their machines left for another is marked done; and an
+//! operator saves their workspace's policy, through the console's own action.
 //!
 //! It is one page with several views, the address's fragment naming the one
 //! showing: the workspace's (Overview, Memory, Behaviors, Experts,
