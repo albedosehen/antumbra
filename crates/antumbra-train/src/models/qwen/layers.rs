@@ -100,6 +100,11 @@ pub(super) fn repeat_kv(x: Tensor, n_rep: usize) -> CResult<Tensor> {
 /// `Tiled` is a served weight held as Antumbra's own tiles, on a CPU that can
 /// multiply through them (`tiles`): fewer bytes to read than candle's, and
 /// the one copy of the weight.
+// With the Metal backend candle's quantized tensor is some 300 bytes, far
+// more than the other forms. There is one of these to a projection, a few
+// hundred to a model, and each is read at every token: a box would save
+// kilobytes and add a hop to every read.
+#[cfg_attr(feature = "metal", allow(clippy::large_enum_variant))]
 pub(super) enum BaseWeight {
     Dense(Tensor),
     Quantized(QTensor),
