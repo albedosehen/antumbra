@@ -689,7 +689,7 @@ impl Attention {
 /// `silu(gate) · up` into `out`.
 fn gate_times(gate: &[f32], up: &[f32], out: &mut [f32]) {
     #[cfg(target_arch = "x86_64")]
-    if tiles::available() {
+    if tiles::wide() {
         // SAFETY: `available` found AVX-512F among the features it names.
         unsafe { wide::silu_times(gate, up, out) };
         return;
