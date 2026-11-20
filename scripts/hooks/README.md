@@ -1,6 +1,6 @@
 # Agent hooks: wire your coding agent into Antumbra
 
-These are template lifecycle hooks that turn Antumbra into your agent's persistent, self-improving brain. They are written for **Claude Code's `settings.json` hook shape**; the same three touchpoints exist (under different event names) in Cursor, Gemini CLI, OpenCode, Codex, and Copilot, so adapt the event keys, keep the bodies.
+These are template lifecycle hooks that turn Antumbra into your agent's persistent, self-improving brain. They are written for **Claude Code's `settings.json` hook shape**, and `antumbra setup` wires them for you. Gemini CLI, Codex, Copilot CLI, goose and OpenCode have the same three moments under their own event names: for those, setup wires each agent's own hooks to `antumbra hook <agent> <event>`, which runs these same scripts and answers in that agent's shape.
 
 | Script                   | Hook event            | What it does                                                                                                                                                |
 | ------------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
