@@ -468,6 +468,56 @@ pub(super) fn attend_rows(q: &[f32], rows: usize, store: &KvStore, out: &mut [f3
     }
 }
 
+/// [`attend`] for one query position from each of several sequences: row
+/// `i` of `q` attends to every position in `stores[i]`, its own sequence's
+/// cache, and its attended values are row `i` of `out`. Each row is one unit
+/// of work and is computed as [`attend`] computes it, to the bit.
+pub(super) fn attend_each(q: &[f32], stores: &[&KvStore], out: &mut [f32]) -> Result<()> {
+    let rows = stores.len();
+    if rows == 0 || !q.len().is_multiple_of(rows) || out.len() != q.len() {
+        bail!(
+            "decode attention: {rows} sequences against a query of {} values into {}",
+            q.len(),
+            out.len()
+        )
+    }
+    let per = q.len() / rows;
+    // Checked once here, so a row's own check cannot fail in the dispatch.
+    for store in stores {
+        Cut::of(per, per, store, store.len())?;
+    }
+    let places = Scores(out.as_mut_ptr());
+    let failed: Mutex<Option<candle_core::Error>> = Mutex::new(None);
+    let run = |first: usize, last: usize| {
+        let places = &places;
+        let mut work = Work::default();
+        for row in first..last {
+            let store = stores[row];
+            // SAFETY: row `row`'s attended values are its own `per` values
+            // of `out`, which no other unit writes.
+            let out = unsafe { std::slice::from_raw_parts_mut(places.0.add(row * per), per) };
+            let q = &q[row * per..(row + 1) * per];
+            let alone = attend_alone(kernels(store.dim()), q, store, store.len(), out, &mut work);
+            if let Err(err) = alone {
+                *failed.lock().unwrap_or_else(PoisonError::into_inner) = Some(err);
+            }
+        }
+    };
+    dispatch(
+        &[Phase {
+            units: rows,
+            most: 1,
+            run: &run,
+            then: None,
+        }],
+        false,
+    );
+    match failed.into_inner().unwrap_or_else(PoisonError::into_inner) {
+        Some(err) => Err(err),
+        None => Ok(()),
+    }
+}
+
 /// [`attend`] for a query held as a tensor of `(1, heads, 1, dim)`, f32 in
 /// host memory: the attended values in the same shape.
 pub(super) fn one(q: &Tensor, store: &KvStore) -> Result<Tensor> {

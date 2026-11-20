@@ -49,6 +49,10 @@ use phases::{dispatch, Phase, Shared};
 /// stay in the nearest cache until the way down's `A` has read them.
 const GATED_TOGETHER: usize = 8;
 
+/// Sequences decoded together from which each one's attention is a core's
+/// work, where fewer take the cores in turn, a row's heads spread over them.
+const EACH_A_CORE: usize = 4;
+
 /// Rows read at once at most: a prompt longer than this is read in runs of
 /// it, each run through every layer before the next. Its rows share one
 /// reading of the weights; what they are computed in stays within the
@@ -563,16 +567,32 @@ impl Attention {
             self.rotary.turn(k, self.head_dim, *position)?;
         }
         s.attended.resize(rows * queries, 0.0);
-        for ((((q, k), v), out), (slot, _)) in q
-            .chunks_exact(queries)
-            .zip(k.chunks_exact(cached))
-            .zip(v.chunks_exact(cached))
-            .zip(s.attended.chunks_exact_mut(queries))
-            .zip(at)
-        {
-            let store = self.cache_of(*slot)?;
-            store.append(k, v)?;
-            attend::attend(q, store, out, &mut s.attention)?;
+        for ((k, v), (slot, _)) in k.chunks_exact(cached).zip(v.chunks_exact(cached)).zip(at) {
+            self.cache_of(*slot)?.append(k, v)?;
+        }
+        if rows < EACH_A_CORE {
+            // A few rows: each in turn, its heads spread over the cores.
+            for ((q, out), (slot, _)) in q
+                .chunks_exact(queries)
+                .zip(s.attended.chunks_exact_mut(queries))
+                .zip(at)
+            {
+                attend::attend(q, self.cache_of(*slot)?, out, &mut s.attention)?;
+            }
+        } else {
+            // Many: one dispatch, a row to a core.
+            let mut stores = Vec::with_capacity(rows);
+            for (slot, _) in at {
+                let store = match slot {
+                    0 => self.kv_store.as_ref(),
+                    n => self.others.get(n - 1),
+                };
+                let Some(store) = store else {
+                    bail!("no cache of plain rows was made for sequence {slot}")
+                };
+                stores.push(store);
+            }
+            attend::attend_each(q, &stores, &mut s.attended)?;
         }
         s.out.resize(rows * self.hidden_size, 0.0);
         products(
