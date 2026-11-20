@@ -385,20 +385,27 @@ unsafe fn q6k_block(tile: &TileQ6, act: *const i8, d_act: f32, sums: *const i32,
     out
 }
 
-/// [`q6k_block`] for four rows of input at once, each row's products added
-/// to its own of `acc`: to the bit what the block gives each row alone.
-/// Cutting a tile's six-bit values out of its bytes is as much work as
-/// multiplying them, and it is the same for every row: here it is done once
-/// for the four.
+/// [`q6k_block`] for `N` rows of input at once, each row's products added to
+/// its own of `acc`: to the bit what the block gives each row alone. Cutting
+/// a tile's six-bit values out of its bytes is more work than multiplying
+/// them, six steps to the one, and it is the same for every row: here it is
+/// done once for the `N`. Rows go by in fours, and what is left of them in a
+/// three or a two, so that no two rows read together each cut the tile
+/// again.
 #[target_feature(enable = "neon,dotprod")]
-unsafe fn q6k_block4(tile: &TileQ6, rows: [&Row; 4], block: usize, acc: [F16; 4]) -> [F16; 4] {
+unsafe fn q6k_rows<const N: usize>(
+    tile: &TileQ6,
+    rows: [&Row; N],
+    block: usize,
+    acc: [F16; N],
+) -> [F16; N] {
     let cut = Cut::new();
     let qs = tile.qs.as_ptr();
     let act = rows.map(|row| row.qs.as_ptr().add(block * QK_K));
     let sums = rows.map(|row| row.sums.as_ptr().add(block * 16));
-    let mut total = [[vdupq_n_s32(0); 4]; 4];
+    let mut total = [[vdupq_n_s32(0); 4]; N];
     for run in 0..16 {
-        let mut isum = [[vdupq_n_s32(0); 4]; 4];
+        let mut isum = [[vdupq_n_s32(0); 4]; N];
         for g in 0..4 {
             let group = qs.add((run * 4 + g) * ROWS * 3);
             let x = act.map(|act| four(act, run * 16 + g * 4));
@@ -410,7 +417,7 @@ unsafe fn q6k_block4(tile: &TileQ6, rows: [&Row; 4], block: usize, acc: [F16; 4]
             }
         }
         let scale = widened16_signed(tile.scales[run].as_ptr());
-        for n in 0..4 {
+        for n in 0..N {
             let off = vdupq_n_s32(32 * *sums[n].add(run));
             for k in 0..4 {
                 total[n][k] = vmlaq_s32(total[n][k], vsubq_s32(isum[n][k], off), scale[k]);
@@ -418,13 +425,29 @@ unsafe fn q6k_block4(tile: &TileQ6, rows: [&Row; 4], block: usize, acc: [F16; 4]
         }
     }
     let mut out = acc;
-    for n in 0..4 {
+    for n in 0..N {
         let d = scales_by(&tile.d, *rows[n].d.get_unchecked(block));
         for k in 0..4 {
             out[n][k] = vfmaq_f32(out[n][k], vcvtq_f32_s32(total[n][k]), d[k]);
         }
     }
     out
+}
+
+/// The `N` rows of `some` from `i` on through one cutting of `tile`, block
+/// `b` of each added to its own of `acc`.
+#[target_feature(enable = "neon,dotprod")]
+unsafe fn q6k_together<const N: usize>(
+    tile: &TileQ6,
+    some: &[Row],
+    i: usize,
+    b: usize,
+    acc: &mut [F16],
+) {
+    let rows: [&Row; N] = std::array::from_fn(|n| &some[i + n]);
+    let before: [F16; N] = std::array::from_fn(|n| acc[i + n]);
+    let after = q6k_rows(tile, rows, b, before);
+    acc[i..i + N].copy_from_slice(&after);
 }
 
 /// Sixteen rows' products with one block of 32 input values, added to
@@ -535,14 +558,23 @@ unsafe fn sixteens_of(w: &Tiled, first: usize, last: usize, rows: &[Row], out: &
                     Tiles::Q6K(tiles) => {
                         let tile = tiles.get_unchecked(t * per_row + b);
                         while i + 4 <= some.len() {
-                            let four = q6k_block4(
-                                tile,
-                                [&some[i], &some[i + 1], &some[i + 2], &some[i + 3]],
-                                b,
-                                [acc[i], acc[i + 1], acc[i + 2], acc[i + 3]],
-                            );
-                            acc[i..i + 4].copy_from_slice(&four);
+                            q6k_together::<4>(tile, some, i, b, &mut acc);
                             i += 4;
+                        }
+                        // Two or three left over, which is also two or
+                        // three rows read on their own, share a cutting
+                        // as the fours do. One has nothing to share it
+                        // with.
+                        match some.len() - i {
+                            3 => {
+                                q6k_together::<3>(tile, some, i, b, &mut acc);
+                                i += 3;
+                            }
+                            2 => {
+                                q6k_together::<2>(tile, some, i, b, &mut acc);
+                                i += 2;
+                            }
+                            _ => {}
                         }
                     }
                     Tiles::Q8_0(_) => {}
