@@ -1,5 +1,6 @@
 //! A served base's quantized weights as Antumbra multiplies them on a CPU
-//! with AVX-512 VNNI: sixteen rows to a tile, each SIMD lane a row.
+//! with AVX-512 VNNI, or with NEON's dot product: sixteen rows to a tile,
+//! each SIMD lane a row.
 //!
 //! candle multiplies a quantized weight through tiles of its own, and on a
 //! decoded token three things about that cost more than the arithmetic. A
@@ -27,8 +28,9 @@
 //! order its kernel reads it, and the input is quantized the way candle
 //! quantizes it. A row's product is summed in whole numbers until a block's
 //! last step, so it is the product candle computes up to the order of a few
-//! float sums. Without AVX-512 VNNI nothing is tiled and candle multiplies
-//! as before.
+//! float sums. The kernels below are AVX-512's; `tiles_neon.rs` holds
+//! aarch64's, four rows to a vector over the same tiles. On a CPU with
+//! neither nothing is tiled and candle multiplies as before.
 
 use candle_core::quantized::{GgmlDType, QTensor};
 use candle_core::{bail, DType, Device, Result, Storage, Tensor};

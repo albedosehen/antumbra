@@ -6,10 +6,12 @@ use candle_core::Device;
 
 /// Whether this CPU multiplies a quantized base through Antumbra's own tiles
 /// (`models::qwen::tiles`), which is what puts a decoded token at the rate
-/// memory is read: AVX-512 F, BW and VNNI, and F16C. Intel's Ice Lake and
-/// Tiger Lake laptop CPUs and its Xeons from Cascade Lake have them, as do
-/// AMD's CPUs from Zen 4; Intel's desktop and laptop CPUs since Alder Lake
-/// do not.
+/// memory is read. On x86-64: AVX-512 F, BW and VNNI, and F16C, which
+/// Intel's Ice Lake and Tiger Lake laptop CPUs and its Xeons from Cascade
+/// Lake have, as do AMD's CPUs from Zen 4; Intel's desktop and laptop CPUs
+/// since Alder Lake do not. On aarch64: NEON with the dot-product
+/// instructions, which every Apple silicon CPU has and ARM's server cores
+/// from Neoverse N1.
 pub fn tiles() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
@@ -31,9 +33,9 @@ pub fn tiles() -> bool {
     }
 }
 
-/// Whether this CPU multiplies six-bit tiles as well: their values are
-/// unpacked with AVX-512 VBMI, which the first CPUs with VNNI (Cascade Lake)
-/// lack.
+/// Whether this CPU multiplies six-bit tiles as well. On x86-64 their values
+/// are unpacked with AVX-512 VBMI, which the first CPUs with VNNI (Cascade
+/// Lake) lack; on aarch64 every CPU that tiles does.
 pub fn six_bit_tiles() -> bool {
     #[cfg(target_arch = "x86_64")]
     {

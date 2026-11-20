@@ -69,6 +69,23 @@ jobs:
       - name: clippy --features models
         run: cargo clippy -p antumbra-train -p antumbra-serve -p antumbra-mcp -p antumbra-cli --features models --all-targets -- -D warnings
 
+  models-arm:
+    name: candle model kernels on aarch64
+    runs-on: macos-latest  # Apple silicon: NEON with the dot product
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.96.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # The tile kernels have an aarch64 half that no x86-64 runner compiles.
+      # Lint it, and run the trainer crate's unit tests, which hold every
+      # kernel to its plain twin; nothing here loads a model.
+      - name: clippy --features models
+        run: cargo clippy -p antumbra-train --features models --all-targets -- -D warnings
+      - name: test --features models
+        run: cargo test -p antumbra-train --features models --lib
+
   hooks:
     name: agent hook scripts
     runs-on: ubuntu-latest  # jq + curl preinstalled — exercises the POSIX .sh path

@@ -232,6 +232,68 @@ unsafe fn q4k_block(tile: &TileQ4K, act: *const i8, d_act: f32, sums: *const i32
     out
 }
 
+/// [`q4k_block`] for two rows of input at once, each row's products added to
+/// its own of `acc`: to the bit what the block gives each row alone. A
+/// prompt's rows are bound by this arithmetic, not by memory, and splitting
+/// each byte of the tile into its two values is the same for every row: here
+/// it is done once for the two.
+#[target_feature(enable = "neon,dotprod")]
+unsafe fn q4k_block2(tile: &TileQ4K, rows: [&Row; 2], block: usize, acc: [F16; 2]) -> [F16; 2] {
+    let mask = vdupq_n_u8(0x0F);
+    let qs = tile.qs.as_ptr();
+    let act = rows.map(|row| row.qs.as_ptr().add(block * QK_K));
+    let mut scaled = [[vdupq_n_s32(0); 4]; 2];
+    for s in 0..8 {
+        let mut low = [[vdupq_n_s32(0); 4]; 2];
+        let mut high = [[vdupq_n_s32(0); 4]; 2];
+        for g in 0..4 {
+            let group = qs.add((g * 8 + s) * ROWS * 4);
+            let first = act.map(|act| four(act, s * 32 + g * 8));
+            let second = act.map(|act| four(act, s * 32 + g * 8 + 4));
+            for k in 0..4 {
+                let w = vld1q_u8(group.add(k * 16));
+                let (l, h) = (
+                    vreinterpretq_s8_u8(vandq_u8(w, mask)),
+                    vreinterpretq_s8_u8(vshrq_n_u8::<4>(w)),
+                );
+                for n in 0..2 {
+                    low[n][k] = dot(low[n][k], l, first[n]);
+                    high[n][k] = dot(high[n][k], h, second[n]);
+                }
+            }
+        }
+        let scale = widened16(tile.scales[s].as_ptr());
+        for n in 0..2 {
+            for k in 0..4 {
+                scaled[n][k] = vmlaq_s32(scaled[n][k], vaddq_s32(low[n][k], high[n][k]), scale[k]);
+            }
+        }
+    }
+    let low16 = vdupq_n_u32(0xFFFF);
+    let mut out = acc;
+    for n in 0..2 {
+        let sums = rows[n].sums.as_ptr().add(block * 16);
+        let mut mins = [vdupq_n_s32(0); 4];
+        for (pair, both) in tile.mins.iter().enumerate() {
+            let first = vdupq_n_s32(*sums.add(4 * pair) + *sums.add(4 * pair + 1));
+            let second = vdupq_n_s32(*sums.add(4 * pair + 2) + *sums.add(4 * pair + 3));
+            for (k, mins) in mins.iter_mut().enumerate() {
+                let two = vreinterpretq_u32_u16(vmovl_u8(vld1_u8(both.as_ptr().add(k * 8))));
+                *mins = vmlaq_s32(*mins, vreinterpretq_s32_u32(vandq_u32(two, low16)), first);
+                *mins = vmlaq_s32(*mins, vreinterpretq_s32_u32(vshrq_n_u32::<16>(two)), second);
+            }
+        }
+        let by = *rows[n].d.get_unchecked(block);
+        let d = scales_by(&tile.d, by);
+        let dmin = scales_by(&tile.dmin, by);
+        for k in 0..4 {
+            let with = vfmaq_f32(out[n][k], vcvtq_f32_s32(scaled[n][k]), d[k]);
+            out[n][k] = vfmsq_f32(with, vcvtq_f32_s32(mins[k]), dmin[k]);
+        }
+    }
+    out
+}
+
 /// Which of a quarter's twelve bytes each of its sixteen fields is cut from:
 /// a row's three bytes as `[b0, b0, b1, b2]`, and beside them `[-, b1, b2,
 /// -]`, a field straddling two bytes taking its low bits from the first and
@@ -319,6 +381,48 @@ unsafe fn q6k_block(tile: &TileQ6, act: *const i8, d_act: f32, sums: *const i32,
     let mut out = acc;
     for k in 0..4 {
         out[k] = vfmaq_f32(out[k], vcvtq_f32_s32(total[k]), d[k]);
+    }
+    out
+}
+
+/// [`q6k_block`] for four rows of input at once, each row's products added
+/// to its own of `acc`: to the bit what the block gives each row alone.
+/// Cutting a tile's six-bit values out of its bytes is as much work as
+/// multiplying them, and it is the same for every row: here it is done once
+/// for the four.
+#[target_feature(enable = "neon,dotprod")]
+unsafe fn q6k_block4(tile: &TileQ6, rows: [&Row; 4], block: usize, acc: [F16; 4]) -> [F16; 4] {
+    let cut = Cut::new();
+    let qs = tile.qs.as_ptr();
+    let act = rows.map(|row| row.qs.as_ptr().add(block * QK_K));
+    let sums = rows.map(|row| row.sums.as_ptr().add(block * 16));
+    let mut total = [[vdupq_n_s32(0); 4]; 4];
+    for run in 0..16 {
+        let mut isum = [[vdupq_n_s32(0); 4]; 4];
+        for g in 0..4 {
+            let group = qs.add((run * 4 + g) * ROWS * 3);
+            let x = act.map(|act| four(act, run * 16 + g * 4));
+            for k in 0..4 {
+                let q = cut.sixes(group, k);
+                for (isum, x) in isum.iter_mut().zip(x) {
+                    isum[k] = dot(isum[k], q, x);
+                }
+            }
+        }
+        let scale = widened16_signed(tile.scales[run].as_ptr());
+        for n in 0..4 {
+            let off = vdupq_n_s32(32 * *sums[n].add(run));
+            for k in 0..4 {
+                total[n][k] = vmlaq_s32(total[n][k], vsubq_s32(isum[n][k], off), scale[k]);
+            }
+        }
+    }
+    let mut out = acc;
+    for n in 0..4 {
+        let d = scales_by(&tile.d, *rows[n].d.get_unchecked(block));
+        for k in 0..4 {
+            out[n][k] = vfmaq_f32(out[n][k], vcvtq_f32_s32(total[n][k]), d[k]);
+        }
     }
     out
 }
@@ -415,7 +519,35 @@ unsafe fn sixteens_of(w: &Tiled, first: usize, last: usize, rows: &[Row], out: &
         for (run, some) in rows.chunks(TOGETHER).enumerate() {
             let mut acc = [zeros(); TOGETHER];
             for b in 0..per_row {
-                for (acc, row) in acc.iter_mut().zip(some) {
+                // The rows that share a tile's unpacking go together, and
+                // what is left of them a row at a time.
+                let mut i = 0;
+                match &w.tiles {
+                    Tiles::Q4K(tiles) => {
+                        let tile = tiles.get_unchecked(t * per_row + b);
+                        while i + 2 <= some.len() {
+                            let two =
+                                q4k_block2(tile, [&some[i], &some[i + 1]], b, [acc[i], acc[i + 1]]);
+                            acc[i..i + 2].copy_from_slice(&two);
+                            i += 2;
+                        }
+                    }
+                    Tiles::Q6K(tiles) => {
+                        let tile = tiles.get_unchecked(t * per_row + b);
+                        while i + 4 <= some.len() {
+                            let four = q6k_block4(
+                                tile,
+                                [&some[i], &some[i + 1], &some[i + 2], &some[i + 3]],
+                                b,
+                                [acc[i], acc[i + 1], acc[i + 2], acc[i + 3]],
+                            );
+                            acc[i..i + 4].copy_from_slice(&four);
+                            i += 4;
+                        }
+                    }
+                    Tiles::Q8_0(_) => {}
+                }
+                for (acc, row) in acc[i..].iter_mut().zip(&some[i..]) {
                     *acc = block_of(w, t, b, row, *acc);
                 }
             }
