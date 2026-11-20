@@ -339,9 +339,8 @@ unsafe impl Sync for Places {}
 
 /// The sixteens `first..last` of the sketch against every one of `rows`,
 /// each row's products of them and their largest to its own of `places`.
-/// Off x86-64 it is a row after another through the one-row kernel: a run of
-/// sixteens is read from memory for the first row and from the cache for the
-/// rest.
+/// Off x86-64 one row goes through the one-row kernel, and two or more
+/// through the kernel that takes up to four rows to a cutting of the codes.
 ///
 /// SAFETY (for the caller): as the kernels' `sixteens`, for every row and
 /// its places.
@@ -353,8 +352,9 @@ unsafe fn sixteens_of_each(
     rows: &[Row],
     places: &[Places],
 ) {
-    for (row, place) in rows.iter().zip(places) {
-        kernels::sixteens(sketch, first, last, row, place.products, place.tops);
+    match (rows, places) {
+        ([row], [place]) => kernels::sixteens(sketch, first, last, row, place.products, place.tops),
+        _ => kernels::sixteens_of_each(sketch, first, last, rows, places),
     }
 }
 
@@ -756,7 +756,7 @@ mod kernels;
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod kernels {
-    use super::{Row, Sketch};
+    use super::{Places, Row, Sketch};
 
     /// Nothing is sketched on other CPUs, so nothing reaches these.
     pub(super) unsafe fn sixteens(
@@ -767,6 +767,9 @@ mod kernels {
         _: *mut f32,
         _: *mut f32,
     ) {
+    }
+
+    pub(super) unsafe fn sixteens_of_each(_: &Sketch, _: usize, _: usize, _: &[Row], _: &[Places]) {
     }
 
     pub(super) unsafe fn could_be_first(_: *const f32, _: *const f32, _: f32, _: f32) -> u16 {
@@ -1055,7 +1058,7 @@ mod tests {
         let Some(sketch) = sketched(&w, rows, cols)? else {
             return Ok(());
         };
-        for inputs in [1usize, 2, 3, 4, 7, 8, 15] {
+        for inputs in [1usize, 2, 3, 4, 5, 6, 7, 8, 15] {
             let given: Vec<Row> = (0..inputs)
                 .map(|i| quantized(&normals(100 + (inputs * 31 + i) as u64, cols)))
                 .collect();
