@@ -1428,6 +1428,12 @@ mod tests {
         Ok((a - b)?.abs()?.flatten_all()?.max(0)?.to_scalar::<f32>()? / peak)
     }
 
+    /// Whether two runs of products are the same to the bit. `==` is not
+    /// that: it takes a nothing of either sign for the other.
+    fn same_bits(a: &[f32], b: &[f32]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.to_bits() == b.to_bits())
+    }
+
     /// The forms this CPU has tiles for.
     fn forms() -> Vec<GgmlDType> {
         let mut forms = vec![GgmlDType::Q4K, GgmlDType::Q8_0];
@@ -1680,7 +1686,10 @@ mod tests {
                     )
                 };
             }
-            assert_eq!(parts, whole, "{dtype:?}");
+            assert!(
+                same_bits(&parts, &whole),
+                "{dtype:?}: the weight in parts is not the weight whole"
+            );
             let mut short = vec![0f32; 48];
             assert!(multiply(&[&tiled], &row, &mut [&mut short]).is_err());
         }
@@ -1721,7 +1730,7 @@ mod tests {
                     tiled.multiply_sixteens(0, tiled.sixteens(), &rows[..n], together.as_mut_ptr())
                 };
                 assert!(
-                    together == alone[..n * 48],
+                    same_bits(&together, &alone[..n * 48]),
                     "{dtype:?}: {n} rows together are not the rows alone"
                 );
             }
@@ -1798,7 +1807,7 @@ mod tests {
                         let mut alone = vec![0f32; rows];
                         multiply(&[&tiled], row, &mut [&mut alone])?;
                         assert!(
-                            alone == together[i * rows..(i + 1) * rows],
+                            same_bits(&alone, &together[i * rows..(i + 1) * rows]),
                             "{dtype:?}, weights {wi}, input {xi}: row {i} among {n} is not the row alone"
                         );
                     }
