@@ -16,8 +16,8 @@
 //! dispatch (`phases`): each run of the weight's rows through its tiles
 //! (`tiles`) with the adapter's `A` times the row beside them, then the
 //! adapter's `B` rows and the bias. The adapter is read from a copy of its
-//! factors at half precision, laid out for vectors (`pack`), less the ranks
-//! a blend of fewer experts leaves at nothing. The MLP is one dispatch: its
+//! factors at eight bits, laid out for vectors (`pack`), less the ranks a
+//! blend of fewer experts leaves at nothing. The MLP is one dispatch: its
 //! two wide products, then the gate and the quantizing of its result a block
 //! at a time by the cores that hold those values, then its narrow product.
 //! So the MLP's wide rows never reach the calling thread, where pulling them
@@ -85,6 +85,18 @@ pub(in crate::models::qwen) struct Scratch {
     gated: Vec<tiles::Row>,
     /// Room for a token's logits, when the last token's was handed back.
     logits: Vec<f32>,
+    /// What the head's two stages are worked out in, where a token is
+    /// chosen through its sketch.
+    sketched: sketch::Room,
+}
+
+/// What a step leaves its caller with.
+pub(in crate::models::qwen) enum Stepped {
+    /// The logits after the last token.
+    Logits(Vec<f32>),
+    /// The token the head ranks first after it, where that was all that was
+    /// asked and the head is sketched.
+    First(u32),
 }
 
 /// The f32 values of a tensor whose storage is held for reading.
@@ -225,9 +237,7 @@ unsafe fn a_unit(w: &Weight, x: &[f32], rows: usize, t: &Shared<f32>, start: usi
     let Some(pack) = w.pack else { return };
     let out = t.part(start, rows * pack.rank);
     pack.through(0, pack.cols(), x, pack.cols(), rows, out);
-    for value in out.iter_mut() {
-        *value *= pack.scale;
-    }
+    pack.scaled(out);
 }
 
 /// To the sixteens `first..last` of `w`'s products for every one of `rows`
@@ -655,12 +665,13 @@ impl Mlp {
             // thread, and nothing else reads or writes either until it is
             // done.
             let (parts, t_down) = unsafe { (parts.all(), t_down.part(0, rows * down_rank)) };
-            let scale = down.pack.map_or(0.0, |p| p.scale);
             for (at, t) in t_down.iter_mut().enumerate() {
-                let sum: f32 = (0..blocks)
+                *t = (0..blocks)
                     .map(|block| parts[block * rows * down_rank + at])
                     .sum();
-                *t = sum * scale;
+            }
+            if let Some(pack) = down.pack {
+                pack.scaled(t_down);
             }
         };
 
@@ -747,11 +758,18 @@ impl QwenLora {
     /// prompt. `None`, with nothing read or written, when this model does
     /// not read rows that way: the caller takes the tensor path, which
     /// reads and writes the same cache.
+    ///
+    /// With `first` the caller wants the token with the largest logit and
+    /// nothing else of the logits. Where the head is sketched that token is
+    /// what comes back, chosen in two stages ([`sketch`]) from under half the
+    /// bytes the whole head is; where it is not, the logits come back as
+    /// they would have.
     pub(in crate::models::qwen) fn step(
         &mut self,
         tokens: &[u32],
         position: usize,
-    ) -> CResult<Option<Vec<f32>>> {
+        first: bool,
+    ) -> CResult<Option<Stepped>> {
         if tokens.is_empty() {
             return Ok(None);
         }
@@ -821,14 +839,21 @@ impl QwenLora {
         // no tiles for the form it is in.
         let Some(head) = &self.lm_head_t else {
             let row = Tensor::from_slice(&s.normed, (1, 1, s.normed.len()), &Device::Cpu)?;
-            return Ok(Some(self.logits(&row)?.flatten_all()?.to_vec1()?));
+            let logits = self.logits(&row)?.flatten_all()?.to_vec1()?;
+            return Ok(Some(Stepped::Logits(logits)));
         };
+        quantize(&s.normed, 1, &mut s.quantized);
+        if let (true, Some(sketch)) = (first && plain(&self.lm_head_w), &self.lm_head_s) {
+            let (storage, layout) = self.lm_head_w.storage_and_layout();
+            let dense = held(&storage, layout, "the head's dense rows")?;
+            let token = sketch.first(&s.quantized[0], &s.normed, dense, &mut s.sketched)?;
+            return Ok(Some(Stepped::First(token)));
+        }
         // Every logit is written, so what the room held is nothing to it.
         let mut logits = std::mem::take(&mut s.logits);
         logits.resize(head.rows(), 0.0);
-        quantize(&s.normed, 1, &mut s.quantized);
         tiles::multiply(&[head], &s.quantized[0], &mut [&mut logits])?;
-        Ok(Some(logits))
+        Ok(Some(Stepped::Logits(logits)))
     }
 
     /// Take back the room a token's logits were handed out in, for the next
@@ -860,6 +885,9 @@ mod tests {
             tie_word_embeddings: true,
         }
     }
+
+    /// The rank of the adapter these tests read through.
+    const RANK: usize = 8;
 
     /// A base of weights drawn from a seed, under the names a Qwen checkpoint
     /// gives them: the same base in every run, so what these tests find they
@@ -919,10 +947,10 @@ mod tests {
 
     /// A model over `weights`, served at `serve`, generating: its adapter is
     /// of rank 8, drawn from a seed on the A side and, with `trained`, set
-    /// to values that are not nothing on the B side. Every factor is a value
-    /// half precision holds, as an expert trained in bf16 has: the copy a
-    /// decoded token reads is then the factors themselves, and the two paths
-    /// are compared on their arithmetic alone.
+    /// to values that are not nothing on the B side. Every factor is put as
+    /// the copy a decoded token reads holds it, at eight bits of its rank's
+    /// largest (`pack::as_held`): the copy is then the factors themselves,
+    /// and the two paths are compared on their arithmetic alone.
     fn model(
         cfg: &Config,
         weights: &HashMap<String, Tensor>,
@@ -933,7 +961,7 @@ mod tests {
         let base = VarBuilder::from_tensors(weights.clone(), DType::F32, &dev);
         let varmap = VarMap::new();
         let lora = VarBuilder::from_varmap(&varmap, DType::F32, &dev);
-        let mut model = QwenLora::build(cfg, &base, &lora, varmap, 8, 2.0, serve)?;
+        let mut model = QwenLora::build(cfg, &base, &lora, varmap, RANK, 2.0, serve)?;
         seed_lora_a(&model.varmap, 11)?;
         {
             let vars = model
@@ -951,11 +979,9 @@ mod tests {
                         .collect(),
                     false => var.flatten_all()?.to_vec1()?,
                 };
-                let halves: Vec<f32> = values
-                    .into_iter()
-                    .map(|v| pack::from_half(pack::to_half(v)))
-                    .collect();
-                var.set(&Tensor::from_vec(halves, var.shape(), &dev)?)?;
+                let mut values = values;
+                pack::as_held(&mut values, RANK, name.ends_with("lora_a"));
+                var.set(&Tensor::from_vec(values, var.shape(), &dev)?)?;
             }
         }
         model.set_grad(false);
@@ -969,6 +995,15 @@ mod tests {
         let hidden = model.hidden(&input, position, true)?;
         let last = hidden.narrow(1, tokens.len() - 1, 1)?;
         model.logits(&last)?.flatten_all()?.to_vec1::<f32>()
+    }
+
+    /// The logits a step gives when every one of them is asked for.
+    fn stepped(model: &mut QwenLora, tokens: &[u32], position: usize) -> CResult<Option<Vec<f32>>> {
+        match model.step(tokens, position, false)? {
+            Some(Stepped::Logits(logits)) => Ok(Some(logits)),
+            Some(Stepped::First(_)) => bail!("a token came back where the logits were asked for"),
+            None => Ok(None),
+        }
     }
 
     /// How far two rows of logits may be apart, of the largest logit. The two
@@ -1021,7 +1056,7 @@ mod tests {
                 for i in 0..40 {
                     let position = PROMPT.len() + i;
                     let want = forwarded(&mut by_tensors, &[token(i)], position)?;
-                    let Some(got) = by_rows.step(&[token(i)], position)? else {
+                    let Some(got) = stepped(&mut by_rows, &[token(i)], position)? else {
                         bail!("{serve:?}, {what}: token {i} was not stepped")
                     };
                     assert_eq!(got.len(), cfg.vocab_size);
@@ -1040,8 +1075,8 @@ mod tests {
                     by_rows.clear_cache();
                     forwarded(&mut by_rows, &PROMPT, 0)?;
                     let (Some(with), Some(without)) = (
-                        by_rows.step(&[token(0)], PROMPT.len())?,
-                        bare.step(&[token(0)], PROMPT.len())?,
+                        stepped(&mut by_rows, &[token(0)], PROMPT.len())?,
+                        stepped(&mut bare, &[token(0)], PROMPT.len())?,
                     ) else {
                         bail!("{serve:?}: not stepped")
                     };
@@ -1076,12 +1111,12 @@ mod tests {
                 let prompt: Vec<u32> = (0..length).map(token).collect();
                 let mut at_once = model(&cfg, &weights, Some(serve), true)?;
                 let mut one_by_one = model(&cfg, &weights, Some(serve), true)?;
-                let Some(got) = at_once.step(&prompt, 0)? else {
+                let Some(got) = stepped(&mut at_once, &prompt, 0)? else {
                     bail!("{serve:?}: a prompt of {length} was not stepped")
                 };
                 let mut want = Vec::new();
                 for (position, token) in prompt.iter().enumerate() {
-                    let Some(logits) = one_by_one.step(&[*token], position)? else {
+                    let Some(logits) = stepped(&mut one_by_one, &[*token], position)? else {
                         bail!("{serve:?}: token {position} was not stepped")
                     };
                     want = logits;
@@ -1089,8 +1124,8 @@ mod tests {
                 assert_eq!(got, want, "{serve:?}, a prompt of {length}");
                 // The caches are the same too: the next token says so.
                 let (Some(got), Some(want)) = (
-                    at_once.step(&[token(99)], length)?,
-                    one_by_one.step(&[token(99)], length)?,
+                    stepped(&mut at_once, &[token(99)], length)?,
+                    stepped(&mut one_by_one, &[token(99)], length)?,
                 ) else {
                     bail!("{serve:?}: the token after the prompt was not stepped")
                 };
@@ -1117,7 +1152,7 @@ mod tests {
         serve: GgmlDType,
         prompt: &[u32],
     ) -> CResult<Vec<f32>> {
-        match model(cfg, weights, Some(serve), true)?.step(prompt, 0)? {
+        match stepped(&mut model(cfg, weights, Some(serve), true)?, prompt, 0)? {
             Some(logits) => Ok(logits),
             None => bail!("a prompt was not stepped"),
         }
@@ -1140,7 +1175,7 @@ mod tests {
         for i in 0..6 {
             let position = PROMPT.len() + i;
             forwarded(&mut by_tensors, &[token(i)], position)?;
-            if mixed.step(&[token(i)], position)?.is_none() {
+            if stepped(&mut mixed, &[token(i)], position)?.is_none() {
                 bail!("token {i} was not stepped")
             }
         }
@@ -1154,10 +1189,50 @@ mod tests {
         by_tensors.clear_cache();
         mixed.clear_cache();
         let want = forwarded(&mut by_tensors, &[token(1)], 0)?;
-        let Some(got) = mixed.step(&[token(1)], 0)? else {
+        let Some(got) = stepped(&mut mixed, &[token(1)], 0)? else {
             bail!("a first token was not stepped")
         };
         assert!(gap(&got, &want) < CLOSE, "a sequence of one token");
+        Ok(())
+    }
+
+    /// Asked for the head's first alone, a step gives the token whose dense
+    /// row has the largest product with the row the head is given, at every
+    /// served form, and leaves what a step that gives the logits leaves.
+    #[test]
+    fn the_first_asked_for_is_the_dense_rows_first() -> CResult<()> {
+        if !tiles::six_bit() {
+            eprintln!("skipped: this CPU multiplies no sketch of the head");
+            return Ok(());
+        }
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        for serve in [GgmlDType::Q4K, GgmlDType::Q6K, GgmlDType::Q8_0] {
+            let mut chosen = model(&cfg, &weights, Some(serve), true)?;
+            let mut whole = model(&cfg, &weights, Some(serve), true)?;
+            let dense: Vec<f32> = chosen.lm_head_w.flatten_all()?.to_vec1()?;
+            for i in 0..40 {
+                let Some(Stepped::First(got)) = chosen.step(&[token(i)], i, true)? else {
+                    bail!("{serve:?}: token {i} did not come back chosen")
+                };
+                if stepped(&mut whole, &[token(i)], i)?.is_none() {
+                    bail!("{serve:?}: token {i} was not stepped")
+                }
+                let normed = &chosen.scratch.normed;
+                assert_eq!(
+                    normed, &whole.scratch.normed,
+                    "{serve:?}, token {i}: the row the head is given"
+                );
+                let mut want = (f32::NEG_INFINITY, 0);
+                for (at, row) in dense.chunks_exact(normed.len()).enumerate() {
+                    let product = slices::dot(row, normed);
+                    if product > want.0 {
+                        want = (product, at as u32);
+                    }
+                }
+                assert_eq!(got, want.1, "{serve:?}, token {i}");
+            }
+        }
         Ok(())
     }
 
@@ -1169,25 +1244,25 @@ mod tests {
         let cfg = config();
         let weights = weights(&cfg)?;
         let mut dense = model(&cfg, &weights, None, false)?;
-        assert!(dense.step(&[1], 0)?.is_none(), "a dense base");
+        assert!(dense.step(&[1], 0, false)?.is_none(), "a dense base");
         if !tiles::available() {
             return Ok(());
         }
         let mut served = model(&cfg, &weights, Some(GgmlDType::Q4K), false)?;
         served.set_grad(true);
         assert!(
-            served.step(&[1], 0)?.is_none(),
+            served.step(&[1], 0, false)?.is_none(),
             "an adapter with a gradient"
         );
         served.set_grad(false);
         assert!(
-            served.step(&[64], 0).is_err(),
+            served.step(&[64], 0, false).is_err(),
             "a token past the vocabulary"
         );
-        assert!(served.step(&[1], 0)?.is_some());
-        assert!(served.step(&[2], 1)?.is_some());
+        assert!(served.step(&[1], 0, false)?.is_some());
+        assert!(served.step(&[2], 1, false)?.is_some());
         assert!(
-            served.step(&[3], 256).is_err(),
+            served.step(&[3], 256, false).is_err(),
             "a position past the rotary table"
         );
         Ok(())

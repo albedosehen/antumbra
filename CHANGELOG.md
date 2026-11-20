@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.6 - 2026-11-19
+
+A token decoded on a CPU no longer reads the whole output head to find its largest logit, and an expert's factors are read at eight bits. A 1.5B base decodes 7 to 10% more tokens a second at every form, and a blend of three experts 3% more on top.
+
+### Before you upgrade
+
+- **A served answer may be worded differently once more, on a CPU with AVX-512 VNNI and VBMI** ([#469](https://github.com/albedosehen/antumbra/pull/469)). A greedy token is now the dense head's first for the hidden row the head is given, where it was the quantized head's: another token at one or two positions in a hundred. Nothing needs setting.
+- **An answer served over an expert may be worded differently again, on a CPU with AVX-512 VNNI** ([#470](https://github.com/albedosehen/antumbra/pull/470)): the expert's factors are read at eight bits where they were read at half precision.
+- **A server whose CPU has AVX-512 VNNI and VBMI holds 88 MB more** for a 1.5B base ([#469](https://github.com/albedosehen/antumbra/pull/469)): the head's rows a second time, as a sketch.
+
+### Serving on a CPU
+
+- **A greedy token is found through a sketch of the head** ([#469](https://github.com/albedosehen/antumbra/pull/469)). The head has a row for every token, and a decoded token read all of it, 191 MB at Q6_K and 248 MB at Q8_0 for a 1.5B base, to find the one row with the largest product. The rows are now also held as a sketch at three bits a value, 88 MB. A token's products with the sketch pick out the rows that could still be first, about forty of 151,936 at the median, and those are multiplied from the dense rows the embedding table keeps. Over two experts' 5,021 held-out positions the token was the dense head's first at every one, where the quantized head's first was another token at 74. On one laptop CPU a 1.5B base with no expert decodes 23.5 tokens a second at Q8_0 where it decoded 21.4, 29.9 where 27.9 at Q6_K, and 38.7 where 36.1 at Q4_K; with an expert on, 21.7 where 20.7, 28.8 where 26.4 and 37.3 where 34.5. Of the two experts' 113 held-out tasks, 79, 82 and 79 answers follow their behavior over Q8_0, Q6_K and Q4_K, where 80, 82 and 77 did.
+- **An expert's factors are read at eight bits** ([#470](https://github.com/albedosehen/antumbra/pull/470)). An adapter is read whole at every token beside the base, 37 MB for one expert and 111 MB for three at half precision. The copy a CPU decodes through now holds each rank's row of `A` and column of `B` as whole numbers of 127ths of its largest value. One expert's log-probabilities over 2078 held-out positions, read a token at a time, shift from the dense base's by 0.103, 0.141 and 0.421 nats on average over Q8_0, Q6_K and Q4_K, where at half precision they shifted by 0.099, 0.146 and 0.418: the order a float sum is added in moves the same reading by as much. A blend of three experts decodes 28.2 tokens a second at Q6_K where it decoded 27.4, and setting it takes 29 ms of packing where it took 41.
+
+### Known limits
+
+- **The sketch picks its rows by a margin, not by a proof.** A row is read whole when its sketched product comes within twelve of its typical errors of the best product found. The furthest any first token's product was seen above its sketched one is 5.4 of them; a row further off than twelve would be passed over, and the token would be the best of the rows that were read.
+- **Only a greedy token with nothing applied to the logits is found this way.** A temperature, a repetition penalty or an n-gram block reads the whole head as before, and so does the drift measurement, whose count of changed first-ranked tokens is the whole quantized head's.
+- **The sketch is where the six-bit tiles are:** a CPU with AVX-512 VNNI and without VBMI (Intel's Cascade Lake), and any CPU without AVX-512 VNNI, reads the whole head as before.
+- **Eight-bit factors buy less than their bytes.** One expert decodes as it did (29.0 tokens a second at Q6_K); the gain is a blend of several. Rounded to four bits the factors do cost an expert (a mean shift of 0.125 nats at Q8_0 where 0.098), so eight is where it stays.
+- **The drift on an expert's card is measured with the factors as trained,** on a GPU or a CPU.
+
 ## 0.4.5 - 2026-11-19
 
 The server answers what admission verified. Until now it decoded with two penalties that admission never used, and they rewrote answers: a type or a name written twice could come back misspelled the second time. And a server with no GPU now serves from Q6_K by default where that is the faster form.

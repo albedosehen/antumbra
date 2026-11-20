@@ -72,6 +72,7 @@ mod layers;
 mod pack;
 mod phases;
 mod rowwise;
+mod sketch;
 mod slices;
 mod tiles;
 #[cfg(target_arch = "x86_64")]
@@ -109,6 +110,10 @@ pub struct QwenLora {
     /// The served head as tiles, in place of `lm_head_q`, on a CPU that can
     /// multiply through them.
     lm_head_t: Option<tiles::Tiled>,
+    /// The tiled head's rows as a sketch, where this CPU multiplies one: a
+    /// token that is the head's first is chosen through it, from the dense
+    /// rows of `lm_head_w`.
+    lm_head_s: Option<sketch::Sketch>,
     /// Whether the model was loaded to serve: its base is quantized and
     /// carries no gradient.
     serves: bool,
@@ -162,7 +167,7 @@ impl QwenLora {
         };
         // Tied to the embeddings, the head is the largest weight there is, and
         // read whole every token; the lookup still needs the dense rows.
-        let (lm_head_q, lm_head_t) = match serve {
+        let (lm_head_q, lm_head_t, lm_head_s) = match serve {
             Some(body) => {
                 let form = head_form(body);
                 let cpu = lm_head_w.to_device(&Device::Cpu)?.to_dtype(DType::F32)?;
@@ -171,14 +176,14 @@ impl QwenLora {
                     false => None,
                 };
                 match tiled {
-                    Some(tiled) => (None, Some(tiled)),
+                    Some(tiled) => (None, Some(tiled), sketch::Sketch::of(&cpu)?),
                     None => {
                         let q = QTensor::quantize_onto(&cpu, form, base.device())?;
-                        (Some(QMatMul::from_qtensor(q)?), None)
+                        (Some(QMatMul::from_qtensor(q)?), None, None)
                     }
                 }
             }
-            None => (None, None),
+            None => (None, None, None),
         };
         Ok(Self {
             embed_tokens,
@@ -187,6 +192,7 @@ impl QwenLora {
             lm_head_w,
             lm_head_q,
             lm_head_t,
+            lm_head_s,
             serves: serve.is_some(),
             scratch: Scratch::default(),
             device: base.device().clone(),
@@ -636,6 +642,28 @@ impl QwenCausalLm {
             .to_vec())
     }
 
+    /// The logits after the last of `tokens`, the first of which is at
+    /// `start`, through the tensor path with the cache on.
+    fn forwarded_logits(&mut self, tokens: &[u32], start: usize) -> Result<Vec<f32>> {
+        let input = Tensor::new(tokens, &self.model.device)
+            .map_err(ce)?
+            .unsqueeze(0)
+            .map_err(ce)?;
+        let hidden = self.model.hidden(&input, start, true).map_err(ce)?;
+        let last = hidden.narrow(1, tokens.len() - 1, 1).map_err(ce)?;
+        self.model
+            .logits(&last)
+            .map_err(ce)?
+            .squeeze(0)
+            .map_err(ce)?
+            .squeeze(0)
+            .map_err(ce)?
+            .to_dtype(DType::F32)
+            .map_err(ce)?
+            .to_vec1()
+            .map_err(ce)
+    }
+
     fn sample_one(&mut self, prompt: &str, seed: u64) -> Result<String> {
         self.model.clear_cache();
         self.model.set_grad(false); // generation needs no gradients
@@ -655,39 +683,35 @@ impl QwenCausalLm {
             let ctx_len = if index == 0 { tokens.len() } else { 1 };
             let start = tokens.len() - ctx_len;
             // The prompt, then each token after it: through plain rows
-            // where the model reads rows that way, as tensors otherwise.
-            let stepped = self.model.step(&tokens[start..], start).map_err(ce)?;
-            let mut logits_vec: Vec<f32> = match stepped {
-                Some(logits) => logits,
-                None => {
-                    let input = Tensor::new(&tokens[start..], &self.model.device)
-                        .map_err(ce)?
-                        .unsqueeze(0)
-                        .map_err(ce)?;
-                    let hidden = self.model.hidden(&input, start, true).map_err(ce)?;
-                    let last = hidden.narrow(1, ctx_len - 1, 1).map_err(ce)?;
-                    self.model
-                        .logits(&last)
-                        .map_err(ce)?
-                        .squeeze(0)
-                        .map_err(ce)?
-                        .squeeze(0)
-                        .map_err(ce)?
-                        .to_dtype(DType::F32)
-                        .map_err(ce)?
-                        .to_vec1()
-                        .map_err(ce)?
+            // where the model reads rows that way, as tensors otherwise. A
+            // policy whose token is the largest logit says so, and has the
+            // token itself back where the head can find it without being
+            // read whole.
+            let stepped = self
+                .model
+                .step(&tokens[start..], start, policy.takes_the_first())
+                .map_err(ce)?;
+            let next = match stepped {
+                Some(Stepped::First(next)) => next,
+                logits => {
+                    let mut logits = match logits {
+                        Some(Stepped::Logits(logits)) => logits,
+                        _ => self.forwarded_logits(&tokens[start..], start)?,
+                    };
+                    // Decode policy over the generated continuation only
+                    // (not the prompt).
+                    let next = crate::decode::pick_token_in(
+                        &mut logits,
+                        &tokens[prompt_len..],
+                        &policy,
+                        &mut rng,
+                    );
+                    // The room the logits are in goes back for the next
+                    // token's.
+                    self.model.keep(logits);
+                    next
                 }
             };
-            // Decode policy over the generated continuation only (not the prompt).
-            let next = crate::decode::pick_token_in(
-                &mut logits_vec,
-                &tokens[prompt_len..],
-                &policy,
-                &mut rng,
-            );
-            // The room the logits are in goes back for the next token's.
-            self.model.keep(logits_vec);
             timing.record(index, ctx_len, step.elapsed());
             if next == self.eos {
                 break;

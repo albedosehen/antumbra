@@ -33,6 +33,27 @@ pub struct DecodePolicy {
     pub no_repeat_ngram_size: usize,
 }
 
+impl DecodePolicy {
+    /// Whether an already-generated token's logit is penalized.
+    fn penalizes(&self) -> bool {
+        self.repetition_penalty > 1.0
+    }
+
+    /// Whether a token that would repeat an n-gram is blocked. A block of
+    /// 1-grams would forbid every token already produced, which is
+    /// degenerate and not repetition avoidance, so it is off below 2.
+    fn blocks(&self) -> bool {
+        self.no_repeat_ngram_size >= 2
+    }
+
+    /// Whether this policy's token is the largest logit and nothing else:
+    /// greedy, with no penalty and no block to apply first. A model that can
+    /// find that token without every logit is told so.
+    pub fn takes_the_first(&self) -> bool {
+        self.temperature <= 0.0 && !self.penalizes() && !self.blocks()
+    }
+}
+
 /// The longest block of tokens a loop is looked for in.
 const LOOP_BLOCK_MOST: usize = 64;
 /// A loop is one block at least this many times running,
@@ -85,7 +106,7 @@ pub fn pick_token_in(
     rng: &mut StdRng,
 ) -> u32 {
     // Repetition penalty: at most once per distinct generated token.
-    if policy.repetition_penalty > 1.0 {
+    if policy.penalizes() {
         let p = policy.repetition_penalty as f32;
         let seen: HashSet<u32> = generated.iter().copied().collect();
         for t in seen {
@@ -96,10 +117,8 @@ pub fn pick_token_in(
     }
 
     // No-repeat n-gram: ban any token that would repeat an n-gram already seen.
-    // `n < 2` is a no-op: a 1-gram block would forbid re-emitting *every* token
-    // already produced, which is degenerate, not repetition avoidance.
     let n = policy.no_repeat_ngram_size;
-    if n >= 2 && generated.len() >= n {
+    if policy.blocks() && generated.len() >= n {
         let prefix = &generated[generated.len() + 1 - n..]; // last n-1 tokens
         for i in 0..=generated.len() - n {
             if &generated[i..i + n - 1] == prefix {
@@ -429,6 +448,19 @@ mod tests {
         assert_eq!(plain, 0, "without penalty greedy repeats token 0");
         let penalized = pick_token(logits, &[0], &greedy(0.0, 2.0, 0), &mut rng());
         assert_eq!(penalized, 1, "penalty pushes the repeat below token 1");
+        Ok(())
+    }
+
+    /// Only greedy decoding with nothing to apply to the logits first takes
+    /// the largest logit and nothing else: a temperature, a penalty or a
+    /// block each needs the logits themselves.
+    #[test]
+    fn only_plain_greedy_takes_the_first() -> Result<()> {
+        assert!(greedy(0.0, 1.0, 0).takes_the_first());
+        assert!(greedy(0.0, 1.0, 1).takes_the_first(), "a block of 1 is off");
+        assert!(!greedy(0.7, 1.0, 0).takes_the_first(), "a temperature");
+        assert!(!greedy(0.0, 1.2, 0).takes_the_first(), "a penalty");
+        assert!(!greedy(0.0, 1.0, 3).takes_the_first(), "a block");
         Ok(())
     }
 
