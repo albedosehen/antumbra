@@ -89,8 +89,11 @@ const FIRST: usize = 8;
 const DECIDED_AT_ONCE: usize = 16;
 
 /// The head's rows as a sketch: `rows` by `cols`.
-// Off x86-64 nothing is sketched, so nothing there reads a sketch.
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+// Where nothing is sketched, nothing reads a sketch.
+#[cfg_attr(
+    not(any(target_arch = "x86_64", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 pub(super) struct Sketch {
     /// `[sixteen rows][group of 4 values][pair of rows (8)][PAIR bytes]`: a
     /// pair's eight values in `8 * BITS` bits, the first row's four lowest
@@ -262,10 +265,10 @@ fn of_word(word: u64) -> (f32, u32) {
     (f32::from_bits((word >> 32) as u32), word as u32)
 }
 
-/// Whether this CPU multiplies a sketch of the head: its kernels are
-/// AVX-512's alone so far, on the CPUs that multiply six-bit tiles.
+/// Whether this CPU multiplies a sketch of the head: the CPUs that multiply
+/// six-bit tiles, whose instructions cut the sketch's values out as well.
 pub(super) fn available() -> bool {
-    cfg!(target_arch = "x86_64") && tiles::six_bit()
+    tiles::six_bit()
 }
 
 impl Sketch {
@@ -514,11 +517,15 @@ impl Sketch {
     }
 }
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(target_arch = "aarch64")]
+#[path = "sketch_neon.rs"]
+mod kernels;
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod kernels {
     use super::{Row, Sketch};
 
-    /// Nothing is sketched off x86-64, so nothing reaches these.
+    /// Nothing is sketched on other CPUs, so nothing reaches these.
     pub(super) unsafe fn sixteens(
         _: &Sketch,
         _: usize,

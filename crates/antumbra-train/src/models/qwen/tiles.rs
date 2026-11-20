@@ -473,7 +473,10 @@ impl Row {
     /// Block `b` of the row as a kernel outside the tiles reads it: its 256
     /// values, its scale, and the sum of its values.
     // Off x86-64 there is no such kernel.
-    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+    #[cfg_attr(
+        not(any(target_arch = "x86_64", target_arch = "aarch64")),
+        allow(dead_code)
+    )]
     pub(super) fn block(&self, b: usize) -> (&[i8], f32, i32) {
         (
             &self.qs[b * QK_K..(b + 1) * QK_K],
