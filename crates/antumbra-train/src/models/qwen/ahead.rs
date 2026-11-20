@@ -27,13 +27,21 @@
 //! six; where a row costs a third of a pass, as on a machine whose memory
 //! outruns its arithmetic, only text it has all but written before.
 //!
+//! Requests answered together read ahead too ([`pass`]): each carries its
+//! own guesses in the passes they share, as far as a pass has rows beside
+//! one for every request. The same count shares the rows out: the more
+//! requests a pass decides a token for, the less a token costs and the surer
+//! a guess has to be.
+//!
 //! On one laptop CPU clocking half its rating, with a model that reads a
 //! token a pass answering the same tasks beside it, one expert's 78 held-out
-//! tasks at Q6_K decoded 1.26 times as fast once the model had answered the
-//! tasks the expert was taught, 1.17 times with nothing remembered, and
-//! 3.9 to 4.1 times when the same tasks were asked again; 1.15 and 3.1
-//! times at Q4_K, 1.41 and 5.0 at Q8_0, 1.25 and 3.9 through a blend of
-//! three experts. Every answer was the answer a token at a time gave.
+//! tasks at Q6_K decoded 1.25 times as fast once the model had answered the
+//! tasks the expert was taught, 1.11 times with nothing remembered, and
+//! 4.0 times when the same tasks were asked again; 1.16 and 3.2 times at
+//! Q4_K, 1.41 and 5.2 at Q8_0, 1.25 and 4.0 through a blend of three
+//! experts; and with two requests answered at a time 1.15 and 2.8 times,
+//! with four 1.08 and 1.9. Every answer was the answer a token at a time
+//! gave.
 
 use std::time::{Duration, Instant};
 
