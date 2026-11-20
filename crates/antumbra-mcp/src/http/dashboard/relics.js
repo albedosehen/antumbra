@@ -150,13 +150,12 @@ function showGate(message) {
 }
 
 function showApp() {
+  // The sidebar is the signed-in user's: someone reading a public relic
+  // with no token gets the relic and no sidebar. Said before the page shows.
+  document.documentElement.classList.toggle("signed-out", !state.token);
+  showSideUser(state.token ? claims(state.token) || {} : null);
   byId("gate").hidden = true;
   byId("app").hidden = false;
-  const who = byId("who");
-  if (who) {
-    const c = state.token ? claims(state.token) : null;
-    who.textContent = c ? [c.sub, c.tenant].filter(Boolean).join(" · ") : "";
-  }
 }
 
 function signOut(message) {

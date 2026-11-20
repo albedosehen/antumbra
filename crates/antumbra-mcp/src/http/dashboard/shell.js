@@ -1,7 +1,8 @@
 // The dashboard's shell: which page is showing, the signed-in user's own
 // pages (Account, Devices and handoffs), the workspace's policy, and what the
 // Overview says is waiting. Loaded after app.js and behaviors.js and sharing
-// their helpers (h, byId, call, section, claims, signOut, numbers, stamps) and
+// their helpers (h, byId, call, section, claims, signOut, numbers, stamps),
+// side.js's (showSide, showSideUser, bareName) and
 // their errors (SignedOut, Superseded).
 //
 // Stored text is written with `textContent` through `h`, never as markup.
@@ -170,36 +171,7 @@ function keepPreferences() {
   applyPreferences(chosen);
 }
 
-// The sidebar: full, or collapsed to its icons. Kept with the preferences,
-// and put on the page by theme.js before it is drawn.
-
-function showSide(side) {
-  const collapsed = side === "collapsed";
-  const toggle = byId("side-toggle");
-  toggle.setAttribute("aria-expanded", String(!collapsed));
-  toggle.setAttribute("aria-label", collapsed ? "Expand the sidebar" : "Collapse the sidebar");
-  toggle.title = collapsed ? "Expand the sidebar ( [ )" : "Collapse the sidebar ( [ )";
-}
-
-function toggleSide() {
-  const root = document.documentElement;
-  if (root.dataset.side === "collapsed") delete root.dataset.side;
-  else root.dataset.side = "collapsed";
-  keepPreferences();
-}
-
 // Who is signed in
-
-/** A name without its kind: `user:dana` is dana. */
-function bare(id) {
-  return String(id || "").replace(/^[a-z]+:/, "");
-}
-
-function initials(name) {
-  const parts = bare(name).split(/[^A-Za-z0-9]+/).filter(Boolean);
-  const letters = parts.length > 1 ? parts[0][0] + parts[1][0] : (parts[0] || "?").slice(0, 2);
-  return letters.toUpperCase();
-}
 
 function fact(name, value, mono) {
   return h("div", { class: "fact" }, h("dt", {}, name), h("dd", mono ? { class: "mono" } : {}, value));
@@ -208,11 +180,9 @@ function fact(name, value, mono) {
 /** The signed-in identity, wherever the page says it: the bar, the menu, the
  *  sidebar and the Account page. From the token's claims, for display only. */
 function showAccount(who) {
-  const user = who && who.user ? bare(who.user) : "Signed in";
-  const workspace = who && who.tenant ? bare(who.tenant) : "";
-  for (const node of document.querySelectorAll("[data-user-name]")) node.textContent = user;
-  for (const node of document.querySelectorAll("[data-workspace-name]")) node.textContent = workspace;
-  for (const node of document.querySelectorAll("[data-initials]")) node.textContent = initials(user);
+  const workspace = who && who.tenant ? bareName(who.tenant) : "";
+  // The sidebar's foot, the menu and the Account page's card (side.js).
+  showSideUser(who || {});
   byId("who").textContent = workspace || "Workspace";
 
   const operator = Boolean(who && who.operator);
@@ -648,17 +618,11 @@ function startShell() {
     if (event.key === "Escape") closeMenu();
     // "/" goes to the search, unless something is being typed into.
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable;
-    const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
-    if (event.key === "[" && plain && !typing && !byId("app").hidden) {
-      event.preventDefault();
-      toggleSide();
-    }
     if (event.key === "/" && !typing && !byId("app").hidden) {
       event.preventDefault();
       byId("jump-query").focus();
     }
   });
-  byId("side-toggle").addEventListener("click", toggleSide);
   byId("signout-here").addEventListener("click", () => signOut(""));
   // The bar's search is the Memory page's recall, from any page.
   byId("jump").addEventListener("submit", (event) => {

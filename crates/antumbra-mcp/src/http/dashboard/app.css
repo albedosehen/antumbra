@@ -1922,3 +1922,63 @@ button.icon-button:hover {
     transition: none;
   }
 }
+
+/* The shell on the relics pages: the same sidebar beside the gallery and
+   the viewer. It shows with the page (not beside the sign-in), and not to
+   someone reading a public relic with no token. */
+.shell:has(> #app[hidden]) {
+  display: none;
+}
+
+.shell > .viewer {
+  min-width: 0;
+}
+
+:root.signed-out .shell {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+:root.signed-out .side,
+:root.signed-out #side-toggle {
+  display: none;
+}
+
+.side .wordmark {
+  margin: 0;
+}
+
+@media (min-width: 901px) {
+  :root[data-side="collapsed"] .side .brand .wordmark {
+    display: none;
+  }
+
+  /* Beside the sidebar the viewer's own mark would be a second one. */
+  :root:not(.signed-out) .relic-bar > .brand {
+    display: none;
+  }
+}
+
+/* A relic on a narrow screen has the whole of it: the pages are a tap away
+   on the gallery. */
+@media (max-width: 900px) {
+  .shell:has(> .viewer) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shell:has(> .viewer) > .side {
+    display: none;
+  }
+}
+
+/* The sidebar's icons at their own size on every page: the relics pages'
+   style sets a smaller one for its own. */
+.side .icon,
+.icon-button .icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* A bar with nothing between where you are and what you may do. */
+.crumbs + .actions {
+  margin-left: auto;
+}
