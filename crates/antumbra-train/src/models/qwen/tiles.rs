@@ -735,6 +735,20 @@ mod kernels;
 #[path = "tiles_neon_old.rs"]
 mod kernels_old;
 
+/// SCRATCH: the same file a second time, so the probe says how far two
+/// copies of one source lie apart, which is what a difference has to beat.
+#[cfg(all(test, target_arch = "aarch64"))]
+#[allow(dead_code)]
+#[path = "tiles_neon_old.rs"]
+mod kernels_old_again;
+
+/// SCRATCH: the release's kernels with the four-row kernel left as it is and
+/// a kernel for two or three rows beside it, called and not folded in.
+#[cfg(all(test, target_arch = "aarch64"))]
+#[allow(dead_code)]
+#[path = "tiles_neon_c.rs"]
+mod kernels_c;
+
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod kernels {
     use super::{Row, Tiled};
@@ -1815,15 +1829,26 @@ mod tests {
         Ok(())
     }
 
-    /// SCRATCH, not for merge: rows of a weight through the release branch's
-    /// kernels (kept beside these as a second module) and through these, turn
-    /// and turn about on one thread, the best of the rounds kept for each,
-    /// and the products of the two compared bit for bit.
+    /// SCRATCH, not for merge: rows of a six-bit weight through four sets of
+    /// kernels in one process, on one thread, the best of the rounds kept for
+    /// each and their products compared bit for bit. `release` is the
+    /// release branch's file; `again` the same file a second time, which
+    /// says how far apart two copies of one source lie; `folded` the kernel
+    /// that takes two, three or four rows, folded into its caller; `beside`
+    /// the release's four-row kernel as it is with one for two or three rows
+    /// beside it, called and not folded in.
     #[cfg(target_arch = "aarch64")]
     #[test]
     #[ignore]
     fn pace_of_rows_old_and_new() -> Result<()> {
         use std::time::Instant;
+        type Kernel = unsafe fn(&Tiled, usize, usize, &[Row], *mut f32);
+        let sets: [(&str, Kernel); 4] = [
+            ("release", kernels_old::sixteens),
+            ("again", kernels_old_again::sixteens),
+            ("folded", kernels::sixteens),
+            ("beside", kernels_c::sixteens),
+        ];
         let small = std::env::var("PACE_SMALL").is_ok();
         let weights: &[(usize, usize, &str)] = if small {
             &[(64, 1536, "in the cache")]
@@ -1834,58 +1859,54 @@ mod tests {
                 (8960, 1536, "an MLP weight"),
             ]
         };
-        for dtype in [GgmlDType::Q6K, GgmlDType::Q4K] {
-            for &(rows_w, cols, what) in weights {
-                let (Some(tiled), _) = weight(rows_w, cols, dtype)? else {
-                    bail!("{dtype:?} was not tiled")
+        for &(rows_w, cols, what) in weights {
+            let (Some(tiled), _) = weight(rows_w, cols, GgmlDType::Q6K)? else {
+                bail!("Q6K was not tiled")
+            };
+            let xs: Vec<f32> = Tensor::randn(0f32, 1.0, 32 * cols, &Device::Cpu)?.to_vec1()?;
+            let rows = quantize_rows(&xs, cols);
+            for n in [1usize, 2, 3, 4, 5, 6, 7, 8, 16, 32] {
+                let mut outs: Vec<Vec<f32>> = sets.iter().map(|_| vec![0f32; n * rows_w]).collect();
+                let mut once = |which: usize| {
+                    let at = outs[which].as_mut_ptr();
+                    let start = Instant::now();
+                    // SAFETY: each row holds the weight's values, `at` has
+                    // room for every row's products, and nothing else
+                    // writes them.
+                    unsafe { (sets[which].1)(&tiled, 0, tiled.sixteens(), &rows[..n], at) };
+                    start.elapsed().as_secs_f64()
                 };
-                let xs: Vec<f32> = Tensor::randn(0f32, 1.0, 32 * cols, &Device::Cpu)?.to_vec1()?;
-                let rows = quantize_rows(&xs, cols);
-                let counts: &[usize] = if dtype == GgmlDType::Q6K {
-                    &[1, 2, 3, 4, 5, 6, 7, 8, 16, 32]
-                } else {
-                    &[1, 2, 4]
-                };
-                for &n in counts {
-                    let mut out = [vec![0f32; n * rows_w], vec![0f32; n * rows_w]];
-                    let mut once = |old: bool| {
-                        let at = out[usize::from(old)].as_mut_ptr();
-                        let start = Instant::now();
-                        // SAFETY: each row holds the weight's values, `at`
-                        // has room for every row's products, and nothing
-                        // else writes them.
-                        unsafe {
-                            if old {
-                                kernels_old::sixteens(&tiled, 0, tiled.sixteens(), &rows[..n], at)
-                            } else {
-                                kernels::sixteens(&tiled, 0, tiled.sixteens(), &rows[..n], at)
-                            }
-                        };
-                        start.elapsed().as_secs_f64()
-                    };
-                    let first = once(true).max(once(false)).max(1e-9);
-                    let reps = ((0.02 / first) as usize).clamp(1, 2000);
-                    let (mut old, mut new) = (f64::MAX, f64::MAX);
-                    for _ in 0..(if small { 2 } else { 9 }) {
-                        let mut o = 0.0;
-                        for _ in 0..reps {
-                            o += once(true);
-                        }
-                        let mut w = 0.0;
-                        for _ in 0..reps {
-                            w += once(false);
-                        }
-                        old = old.min(o / reps as f64);
-                        new = new.min(w / reps as f64);
+                let first = (0..sets.len()).map(&mut once).fold(1e-9, f64::max);
+                let reps = ((0.02 / first) as usize).clamp(1, 2000);
+                let mut best = [f64::MAX; 4];
+                for round in 0..(if small { 2 } else { 10 }) {
+                    // Forwards and backwards by turns, so no set is always
+                    // the first to run.
+                    let mut order: Vec<usize> = (0..sets.len()).collect();
+                    if round % 2 == 1 {
+                        order.reverse();
                     }
-                    assert!(out[0] == out[1], "{dtype:?}, {n} rows: new is not old");
-                    eprintln!(
-                        "pace tiles {dtype:?} {rows_w}x{cols} ({what}), {n} rows: release {:.1} us, branch {:.1} us, ratio {:.3}",
-                        old * 1e6,
-                        new * 1e6,
-                        new / old
+                    for which in order {
+                        let mut took = 0.0;
+                        for _ in 0..reps {
+                            took += once(which);
+                        }
+                        best[which] = best[which].min(took / reps as f64);
+                    }
+                }
+                for (which, (name, _)) in sets.iter().enumerate().skip(1) {
+                    assert!(
+                        outs[which] == outs[0],
+                        "{n} rows: {name} is not the release"
                     );
                 }
+                eprintln!(
+                    "pace tiles Q6K {rows_w}x{cols} ({what}), {n} rows: release {:.1} us, again {:.3}, folded {:.3}, beside {:.3}",
+                    best[0] * 1e6,
+                    best[1] / best[0],
+                    best[2] / best[0],
+                    best[3] / best[0]
+                );
             }
         }
         Ok(())
