@@ -27,7 +27,7 @@ const PROMPTS: [&str; 6] = [
     "Write a one-line Rust function that adds two i64 values.",
 ];
 
-// MultiAdapterServe generates under block_in_place: a multi-threaded runtime.
+// The engine answers on a thread of its own; any runtime will do.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "live GPU: set ANTUMBRA_GPU_BLEND_ADAPTER and run with --ignored"]
 async fn gpu_blend_serves_an_expert_as_its_own_rank_does() -> anyhow::Result<()> {
