@@ -15,10 +15,14 @@
 //! The plugin's source is `scripts/hooks/antumbra-opencode.js`, bundled here;
 //! setup writes it with one line changed, the one that says how this machine
 //! runs `antumbra`.
+//!
+//! Started by Unity Gateway (`ug opencode`), OpenCode has another config
+//! directory, and loads the plugins there and none of these. So on a machine
+//! `ug` is on, the same file is written there too.
 
 use std::path::PathBuf;
 
-use super::{keep, kept, Finding, Ground, Kept, Report};
+use super::{gateway, keep, kept, Finding, Ground, Kept, Report};
 
 /// The plugin, as the repository has it.
 const PLUGIN: &str = include_str!("../../../../scripts/hooks/antumbra-opencode.js");
@@ -56,21 +60,40 @@ pub fn files(ground: &Ground<'_>) -> Vec<Kept> {
     }]
 }
 
+/// Every directory an OpenCode on this machine loads the plugin from, each
+/// with what setup calls it: OpenCode's own, and, on a machine Unity Gateway
+/// is on, the one under the config home `ug opencode` starts it with.
+fn places(ground: &Ground<'_>) -> Vec<(PathBuf, &'static str)> {
+    let own = config_dir(ground);
+    let theirs = gateway::opencode_config_home(ground).join("opencode");
+    let both = gateway::present(ground) && theirs != own;
+    std::iter::once((own, "OpenCode: Antumbra's plugin"))
+        .chain(both.then_some((
+            theirs,
+            "OpenCode started by Unity Gateway: Antumbra's plugin",
+        )))
+        .collect()
+}
+
 pub fn connect(ground: &Ground<'_>, report: &dyn Report) -> anyhow::Result<()> {
-    keep(
-        &config_dir(ground),
-        &files(ground),
-        "OpenCode: Antumbra's plugin (plugins/antumbra.js: the MCP bridge and the three touchpoints)",
-        report,
-    )
+    let files = files(ground);
+    for (dir, what) in places(ground) {
+        keep(
+            &dir,
+            &files,
+            &format!("{what} (plugins/antumbra.js: the MCP bridge and the three touchpoints)"),
+            report,
+        )?;
+    }
+    Ok(())
 }
 
 pub fn check(ground: &Ground<'_>) -> Vec<Finding> {
-    kept(
-        &config_dir(ground),
-        &files(ground),
-        "OpenCode: Antumbra's plugin",
-    )
+    let files = files(ground);
+    places(ground)
+        .into_iter()
+        .flat_map(|(dir, what)| kept(&dir, &files, what))
+        .collect()
 }
 
 #[cfg(test)]
@@ -163,6 +186,99 @@ mod tests {
             "{:?}",
             again.said
         );
+        Ok(())
+    }
+
+    #[test]
+    fn with_unity_gateway_here_the_plugin_is_also_where_ug_has_opencode_look() -> anyhow::Result<()>
+    {
+        let home = Scratch::new("opencode-gateway")?;
+        let ucode = home.path().join(".ucode");
+        // What ug keeps there for OpenCode: its config, and a plugin of its own.
+        let theirs = ucode.join("opencode-xdg").join("opencode");
+        std::fs::create_dir_all(theirs.join("plugin"))?;
+        std::fs::write(ucode.join("state.json"), "{}")?;
+        let config = "{ \"model\": \"databricks-anthropic/claude\" }\n";
+        std::fs::write(theirs.join("opencode.json"), config)?;
+        std::fs::write(theirs.join("plugin").join("ucode-auth.js"), "// ug's\n")?;
+        let ground = Ground {
+            home: home.path(),
+            antumbra: Program::Named,
+            env: &nothing,
+            find: &nowhere,
+        };
+        let own = home.path().join(".config").join("opencode");
+
+        let told = Told::default();
+        connect(&ground, &told)?;
+        let said = told.said.borrow().clone();
+        assert!(
+            said[0].starts_with("ok OpenCode: Antumbra's plugin"),
+            "{said:?}"
+        );
+        assert!(
+            said[1].starts_with("ok OpenCode started by Unity Gateway: Antumbra's plugin")
+                && said[1].contains("written to"),
+            "{said:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(own.join("plugins").join("antumbra.js"))?,
+            std::fs::read_to_string(theirs.join("plugins").join("antumbra.js"))?
+        );
+        // Nothing of ug's is touched.
+        assert_eq!(
+            std::fs::read_to_string(theirs.join("opencode.json"))?,
+            config
+        );
+        assert_eq!(
+            std::fs::read_to_string(theirs.join("plugin").join("ucode-auth.js"))?,
+            "// ug's\n"
+        );
+        assert!(check(&ground).iter().all(|f| f.fix.is_none()));
+
+        // ug's copy gone: the check says which is missing.
+        std::fs::remove_file(theirs.join("plugins").join("antumbra.js"))?;
+        let found = check(&ground);
+        assert!(
+            found.iter().any(|f| !f.works
+                && f.said.starts_with("OpenCode started by Unity Gateway")
+                && f.said.contains("missing")),
+            "{found:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_setup_run_from_inside_ug_opencode_still_finds_opencodes_own_directory(
+    ) -> anyhow::Result<()> {
+        let home = Scratch::new("opencode-inside")?;
+        let xdg = home.path().join(".ucode").join("opencode-xdg");
+        let named = xdg.display().to_string();
+        // What `ug opencode` gives the session, and so a setup run from it.
+        let inside = move |name: &str| (name == "XDG_CONFIG_HOME").then(|| named.clone());
+        let ug = |name: &str| (name == "ug").then(|| PathBuf::from(name));
+        let outside = gateway::outside(home.path(), &inside);
+        let ground = Ground {
+            home: home.path(),
+            antumbra: Program::Named,
+            env: &outside,
+            find: &ug,
+        };
+        assert_eq!(
+            config_dir(&ground),
+            home.path().join(".config").join("opencode")
+        );
+        connect(&ground, &Told::default())?;
+        for dir in [
+            home.path().join(".config").join("opencode"),
+            xdg.join("opencode"),
+        ] {
+            assert!(
+                dir.join("plugins").join("antumbra.js").is_file(),
+                "{}",
+                dir.display()
+            );
+        }
         Ok(())
     }
 

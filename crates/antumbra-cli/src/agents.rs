@@ -20,6 +20,10 @@
 //! [`goose`]'s config). `antumbra setup` connects every agent it finds
 //! ([`connect`]), and `antumbra setup check` reads back what it wrote
 //! ([`check`]).
+//!
+//! An agent started by Unity Gateway's `ug` may read its config from a
+//! directory of ug's, not its own, so on a machine `ug` is on the modules
+//! write there as well ([`gateway`]).
 
 use std::path::{Path, PathBuf};
 
@@ -28,6 +32,7 @@ use serde_json::Value;
 pub mod bridge;
 pub mod codex;
 pub mod copilot;
+pub mod gateway;
 pub mod gemini;
 pub mod goose;
 pub mod hook;

@@ -24,6 +24,7 @@ pub mod hooks;
 pub mod managed;
 pub mod mcp_lint;
 pub mod mcp_stdio;
+pub mod policy;
 pub mod reanchor;
 pub mod run;
 pub mod skills;
