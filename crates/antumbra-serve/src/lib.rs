@@ -363,6 +363,10 @@ impl Serve for MultiAdapterServe {
             .insert(expert.clone(), adapter_uri.to_string());
     }
 
+    fn answers_from_its_own_thread(&self) -> bool {
+        true
+    }
+
     async fn act(
         &self,
         req: antumbra_core::ports::ActRequest,

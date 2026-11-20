@@ -982,3 +982,89 @@ async fn a_tool_profile_narrows_what_is_advertised_and_served() -> anyhow::Resul
     assert_eq!(server().await?.advertised_tools().len(), 38);
     Ok(())
 }
+
+/// An engine that generates on a thread of its own and never answers: its
+/// call waits until it is dropped, and says when it is.
+struct NeverAnswers {
+    asked: Arc<tokio::sync::Notify>,
+    dropped: Arc<std::sync::atomic::AtomicBool>,
+}
+
+struct SaysWhenDropped(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for SaysWhenDropped {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[async_trait::async_trait]
+impl antumbra_core::ports::Serve for NeverAnswers {
+    async fn act(
+        &self,
+        _req: ActRequest,
+    ) -> antumbra_core::Result<antumbra_core::ports::ActOutput> {
+        let _held = SaysWhenDropped(self.dropped.clone());
+        self.asked.notify_one();
+        std::future::pending().await
+    }
+
+    fn answers_from_its_own_thread(&self) -> bool {
+        true
+    }
+}
+
+/// A client that cancels an `answer` drops the engine's call, which is how
+/// the engine learns no one waits and stops decoding for it.
+#[tokio::test]
+async fn a_cancelled_answer_drops_the_engines_call() -> anyhow::Result<()> {
+    let store = mem_store().await?;
+    router::save(
+        &store,
+        &LearnedRouter {
+            weights: vec![1.0; EMBED_DIM],
+            experts: vec![RouterExpert {
+                id: ExpertId::new("expert:adder"),
+                centroid: vec![0.0; EMBED_DIM],
+            }],
+            temperature: 0.1,
+            floor: -1.0,
+        },
+    )
+    .await?;
+    let asked = Arc::new(tokio::sync::Notify::new());
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let s = McpServer::new(
+        store,
+        Arc::new(FixedEmbedder::new(EMBED_DIM)),
+        TenantId::new("ws:test"),
+        UserId::new("user:test"),
+        "h".into(),
+        CompartmentId::new("comp:test:default"),
+        Some(Arc::new(NeverAnswers {
+            asked: asked.clone(),
+            dropped: dropped.clone(),
+        })),
+    );
+    let cancelled = tokio_util::sync::CancellationToken::new();
+    let call = s.answer_until_cancelled(
+        Parameters(AnswerParams {
+            task: "add two numbers".into(),
+            repo: None,
+            standing_only: false,
+        }),
+        cancelled.clone(),
+    );
+    let cancel = async {
+        // Not before the engine has the request.
+        asked.notified().await;
+        cancelled.cancel();
+    };
+    let (out, ()) = tokio::join!(call, cancel);
+    assert!(out.is_err(), "a cancelled call is not answered");
+    assert!(
+        dropped.load(std::sync::atomic::Ordering::SeqCst),
+        "the engine's call was dropped with it"
+    );
+    Ok(())
+}
