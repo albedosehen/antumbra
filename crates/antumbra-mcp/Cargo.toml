@@ -1,6 +1,6 @@
 [package]
 name = "antumbra-mcp"
-version = "0.4.6"
+version = "0.5.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -55,6 +55,8 @@ jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 # The relic viewer's PDF download is printed by a Gotenberg service; the same
 # blocking client the copal archive uses.
 ureq = "3"
+# The token a tool call is cancelled by, as rmcp hands it to a tool.
+tokio-util = { version = "0.7", default-features = false }
 # The `Embedder` port (and the answer-escalate test fake) are `#[async_trait]`.
 async-trait.workspace = true
 # The chunk index's keeper embeds a memory's pieces a few at a time; the tests

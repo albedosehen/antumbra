@@ -32,6 +32,7 @@ pub mod critic;
 pub mod decision;
 pub mod decode;
 pub mod device;
+pub mod draft;
 pub mod eval;
 pub mod frozen;
 pub mod grpo;
@@ -140,7 +141,10 @@ impl CandleModelLoader {
             None => self.config.clone(),
         };
         config.base_model = base_model.to_string();
-        let device = device::best_device().map_err(|e| AntumbraError::other(e.to_string()))?;
+        // A base served quantized goes where it decodes fastest, which in a
+        // Metal build is the CPU; a model that trains goes to the GPU.
+        let device = device::device_for(config.serve_quant.is_some())
+            .map_err(|e| AntumbraError::other(e.to_string()))?;
         let mut model = models::QwenCausalLm::load(device, config)?;
         if let Some(adapter) = parent_adapter {
             model.load_adapter(adapter)?;

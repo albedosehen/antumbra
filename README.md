@@ -2,219 +2,186 @@
   <img src="assets/banner.png" alt="Antumbra, a private agent substrate" width="100%">
 </p>
 
-Antumbra is a private substrate that plugs into a coding agent you already use (Claude Code, Cursor, any MCP client) and, instead of merely _remembering_, it **gets better** by training verified outcomes into frozen LoRA adapters over a shared base, and learning a competence boundary for each. Every milestone is a falsifiable experiment with a kill criterion; the sections below lay out the design and what has (and hasn't) held up so far.
+Antumbra is a private memory and specialist substrate for the coding agent you already use. It plugs into Claude Code, Gemini CLI, Codex, GitHub Copilot CLI, goose and OpenCode over MCP, gives them one memory that carries across sessions, agents and machines, and trains the rules you teach it into small experts that it serves on your own hardware. Your agent stays the hands. Antumbra is what it knows about your work, and it runs where you run it.
 
 ---
 
-## The premise
+## What it does
 
-Most "AI assistants" are one large model in someone else's data center: you rent it, you send it your data, and it is exactly as good tomorrow as today. It never learns _your_ work.
+- **A session opens knowing your work.** A hook puts your standing conventions and the memories relevant to the project into the agent's opening context, another recalls for each prompt, and a third asks for what a turn learned when it ends. One memory serves every agent you connect, on every machine.
+- **A memory about code says where it was learned.** It carries the repository, commit and branch. Recall scopes to where you are, and a memory whose commit is not on your branch, or whose branch is gone, is marked so. A GitHub App keeps those anchors right as branches merge and are deleted.
+- **The system keeps its memories itself.** It counts what recall shows, judges at the end of each turn which of those the answer drew on, links a new memory to what it restates, and lets an unused one fade. Nobody has to curate.
+- **Rules become experts.** A behavior is how you want an agent to act on a class of tasks, recorded with a check a program can run. The behaviors you accept are what your own expert is trained on: a [LoRA adapter](https://huggingface.co/docs/peft/en/developer_guides/lora) over a shared base model, admitted when it follows them better than the base does on examples held out of its training, and frozen once admitted.
+- **It serves them on the hardware you have.** A GPU, or a CPU through Antumbra's own kernels (AVX-512, AVX2 and NEON), with the requests waiting on a server answered together.
+- **Sharing is deliberate.** Memory lives in compartments you own and grant, tenancy is enforced in the database engine, and a store on a laptop syncs with one a team shares.
+- **You can see it.** A web dashboard, an operator console in the terminal, and relics: the pages an agent writes for you, kept where you can find them again.
 
-Antumbra takes the opposite approach. It maintains a **population of small, frozen specialists** [LoRA adapters](https://huggingface.co/docs/peft/en/developer_guides/lora) over one shared, code-capable base model, each good at a narrow, recurring task. When a result is **verified** (a test passes, a command works, a schema matches, you accept a draft), that competence is trained into an adapter and [**frozen** into the population](https://openreview.net/forum?id=aGOQYJfz6H). A [**router**](https://www.sciencedirect.com/science/article/pii/S111001682500122X) sends each new task to the specialist most likely to handle it (today a trained per-dimension metric over the experts' capability centroids behind a relative-coverage gate; a learned latent mixer is the north star), and a [**competence boundary**](https://eric.ed.gov/?id=ED306490) decides whether to answer locally or escalate. The payoff: over time it gets measurably better at the work you do most, on your own machine, with your data never leaving the building.
+## Quick start
 
-It is also a deliberate offramp from renting frontier models. Early on a big remote model does the heavy lifting (cold-start, the genuinely novel); as your verified memory accumulates and specialists graduate, more of your everyday work is served locally and the expensive tier shrinks, at whatever pace you choose. The portable asset is the memory, not the adapters: a specialist is a LoRA overlay on a specific base, so when you move to a stronger local model you re-derive your specialists from the memory you already captured rather than starting over. Small, open models are improving fast (2026 alone brought capable on-device models and the first million-token-context open models), so Antumbra is built to turn that curve into capability that is specialized to your work, private, and yours.
-
-Two design commitments are the heart of Antumbra:
-
-- **Frozen experts.** A graduated specialist is immutable. Immutability is the only hard guarantee that a learned skill is never silently forgotten when the system trains something new.
-- **Scope, not just skill.** Most systems accumulate what _works_. The neglected, more valuable half is the **boundary** of a rule: learning that a behavior is right in one context and wrong in a neighboring one, and _which contextual feature governs the switch_. Constraints are scoped, not absolute: "use `deno install`, not `npm install`" is true **in this repo**, not everywhere. By defining context boundaries, the system learns when to answer locally and when to escalate, which results in more accurate responses and prevents it from [interfering when it's out of its depth](https://cloud.google.com/discover/what-are-ai-hallucinations).
-
----
-
-## How it's exercised
-
-Antumbra has a CLI you run directly, but current-state is BYOA, for monitoring the loop and inspecting the population, gate, and memory. Its everyday role, though, is as the brain an agent plugs into over MCP.
-
-Coding agents `antumbra setup` connects, each one run against the real tool:
-
-- **Claude Code** (hooks in its `settings.json`, and the MCP server)
-- **Gemini CLI** (an extension: the MCP bridge and three hooks)
-- **Codex** (the MCP bridge with `codex mcp add`, and three hooks you approve in Codex)
-- **GitHub Copilot CLI** (a hooks file, and the MCP bridge in its `mcp-config.json`)
-- **goose** (a plugin: the MCP bridge and three hooks, and the file goose keeps in mind)
-- **OpenCode**, 1.x and 2.x (one plugin file)
-
-Setup connects every one of these it finds on the machine; `--agent` names them instead. What it writes for each, and what each agent leaves to you, is in **[Using Antumbra](docs/integration.md#agents-other-than-claude-code)**. Any other MCP client can reach the tools through `antumbra mcp bridge`.
-
-The lifecycle is the same for each of them:
-
-1. **Bootstrap on session start.** A hook pulls standing conventions and the memory relevant to this project into the agent's opening context. There is no cold start; it already knows "this repo uses `deno`."
-2. **Route or answer.** The agent calls the `answer`/`route` tools: a task goes to the frozen expert most likely to cover it, or escalates when out of scope.
-3. **Capture on stop.** A hook nudges the agent to write verified observations back. Those recurrent, checked traces are what `antumbra metabolize` later turns into a new permanent expert.
-
-Hook templates (PowerShell + bash, Windows/macOS/Linux) live in **[`scripts/hooks/`](scripts/hooks/)**; the walkthrough is **[Using Antumbra](docs/integration.md)**.
-
-The same engine runs two ways: **offline** (embedded store, stdio or loopback MCP, one identity, so nothing leaves the machine) and **networked** (HTTP/SSE, a signed JWT per request, engine-enforced multi-tenancy, device sync). The two are the on-device deployment and the hosted, multi-tenant one.
-
----
-
-## How it learns (not distillation)
-
-Antumbra learns from **verifiable outcomes in an environment**, not by imitating a teacher's text:
-
-- **The environment is the truth.** For coding over repos: the test that passes, the command that runs, the build that goes green. That is the reward (RAFT, reward-ranked fine-tuning over verified completions).
-- **A critic turns a failure into a diagnostic signal**, such as "`npm install` failed because this is a Deno project; use `deno install`", and names the _governing feature_ of the boundary. That is counterfactual scope extraction.
-- **Training is on the verified outcome, not the critic's words.** That keeps learning grounded in real data, and clear of "trained on a provider's outputs." A frontier model, if used at all, is an optional cold-start accelerator.
-
-This makes **coding over one's own repos the ideal first domain**: maximally verifiable (you can _run_ it), maximally context-scoped (per-repo conventions are textbook boundaries), and the data is yours.
-
----
-
-## Memory, multi-tenancy, and sharing
-
-Antumbra carries its own first-class memory and runtime rather than running alongside a separate agent engine.
-
-- **Memory store** (Penumbra): a tenant-scoped store with three networks (`world` facts, `bank` experiences, `opinion` judgments), HNSW vector recall, and per-memory provenance. The system keeps each memory's standing itself: it counts what recall shows, judges at the end of each turn which of those the answer drew on, links a new memory to what it restates, and lets an unused memory fade at its network's half-life, with knobs an operator turns while it runs ([how](docs/integration.md#how-the-system-keeps-its-memories)). It is both the **bootstrap** (existing memories seed the population with no cold start) and the **consolidation source**: an offline pass scores memories (recurrence × verifiability × stability), graduates the trusted ones into experts with an interleaved **replay** buffer that resists catastrophic forgetting, and retires an expert when a consolidated memory is later contradicted. Forgetting is a **soft-delete tombstone**, so a deletion propagates and isn't silently resurrected by another replica. The embedder is pluggable behind the `Embedder` port, so the embedding step that touches your content stays on your side.
-
-- **Engine-enforced isolation**: multi-tenancy and identity live in the SurrealDB engine, not in handler code. Record-access binds `(tenant, user)` to `$auth`, and table permissions (`WHERE tenant_id = $auth.tenant`, plus compartment ownership and grant subqueries) filter every row at the engine, so a forgotten app-side filter cannot leak. Validated live against a real `ws://` server, including the fix that runs each request on a scoped, non-root connection.
-
-- **Compartments**: named, ownable latent-spaces of memory, the unit of organization, deletion, and sharing. A user grants another `reference` or `link` capability (engine-enforced); a private compartment consolidates into a private expert. **Revocation is a tombstone** that fails closed immediately at the engine and propagates across devices.
-
-## The runtime surface
-
-- **MCP server** (`antumbra-mcp`): a Rust Model Context Protocol server exposing memory, graph, compartment, routing, and `answer` tools, over **stdio** (one local identity) or a **networked, multi-tenant HTTP** surface where each request's signed JWT `(tenant, user)` claims become the engine's `$auth` (streamable-HTTP stateful/SSE, so the server can push notifications).
-
-- **Live propagation**: when a shared compartment changes, a SurrealDB `LIVE` subscription resolves the audience (owner + grantees) and pushes a notification to each open SSE stream, so an agent learns of new or forgotten memories without polling. Validated end-to-end over the wire.
-
-- **Collector / sync** (`antumbra-sync`): keeps a local embedded store and a remote authoritative store in agreement by periodic **bidirectional last-write-wins** reconciliation (by each row's version timestamp), so memories, grants, revocations and each expert's row and status become visible across a fleet. An expert's adapter is a file and is not carried: a server pulls it for itself. CLI: `antumbra sync`, or inside a server that is told a remote (`--sync-remote`), which is how a server on an embedded store syncs without being stopped.
-
----
-
-## Current State
-
-Every milestone is a falsifiable experiment with a kill criterion.
-
-- **Storage** Leverages SurrealDB v3 for persistence storage for offline/online functionality
-- Multi-tenancy, identity, and isolation are engine-enforced and signed JWT authenticated over the wire. single process; data in SurrealDB via `surql-rs` (builder-only); training and serving via `candle`.
-
-**substrate:** one frozen, code-capable base (Qwen2.5-Coder-1.5B-Instruct) on a single 24 GB GPU, a growing library of frozen LoRA experts, and a boundary-conditioned coverage gate. The real candle trainer/server is behind a `models` feature; the default build runs a CPU demo trainer so the orchestration is exercisable without a GPU.
-
-**Validated (toward 2026-06):**
-
-- **Provenance over extraction.** Memories about code carry a git anchor (repo, commit, branch) that recall scopes to where the caller is and the session hook judges against HEAD (`[live]`, `[not-on-head]`, `[orphaned]`); inventory answers come from ingesting what the framework itself prints (`antumbra ingest -- <lister>`) and from `git log` (`antumbra git-facts`), never from a parser Antumbra would have to maintain.
-- **Native GitHub integration.** A GitHub App webhook (`--github-webhook-secret`) keeps those anchors accurate from the platform's own events: a merged pull request re-anchors the merged branch's memories to the merge commit, becomes a memory of its own, and (with the App's key) has its changed documents ingested at that commit; a deleted branch marks its memories orphaned server-side; installing the App cold-starts a repository from its default branch. The knowledge diff check run and the evidence-based dependency graph are the next increments.
-- **Training works on a real GPU.** RAFT lifts pass-rate to 1.0 under both a convention reward and a verifier that _executes_ generated code; GRPO ships beside it; the generation-quality recipe is dialed in, and a small corpus trains an expert that generalizes to held-out inputs. A 4-bit base (`antumbra train --quantize-base`) followed the same learning curve as the bf16 default in a small comparison, in about a quarter of the memory.
-- **Consolidation closes the loop:** memories score through the gate and graduate into a specialist; a private compartment consolidates into a private expert.
-- **Routing + boundary:** a real embedder drives a gate that routes to the right specialist and escalates out-of-scope queries by _relative coverage_, not an absolute floor; the counterfactual boundary composes end-to-end.
-- **Networked multi-tenancy is engine-enforced over `ws://`** (real SurrealDB v3): cross-tenant isolation and intra-tenant compartment privacy both hold; grant makes a shared memory visible and revoke fails closed, all over the wire.
-- **Multi-device:** bidirectional LWW sync converges; deletes and revocations propagate as tombstones with no resurrection; live SSE notifications reach grantees end-to-end.
-
-**Not yet / in progress:** large corpora and many experts (the real generalization-and-forgetting test at scale); the learned latent-mixing gate (the north star beyond the coverage gate); heterogeneous composition by learned cross-attention bridges (the north star). The hosted direction (the control plane and product surface) is in progress: the control-plane onboarding _core_ exists (invite-gated signup/login that provisions a tenant and issues the RS256 token the server verifies, plus magic-link auth), and the web dashboard's first, read-only slice is served at `/dashboard`, while the rest of the dashboard and OAuth providers are still to come. The CLI/TUI and the [`scripts/hooks/`](scripts/hooks/) templates are today's interface.
-
----
-
-## Install
-
-New here? Install the CLI from a release (the command names a tag rather than `latest`, so what it runs is a published, unchanging asset, and the installer checks the archive against the sha256 built into it), then, with Docker and ollama running, one command sets everything up and connects your coding agents:
+Install the CLI from a release. The command names a tag rather than `latest`, so what it runs is a published, unchanging asset, and the installer checks the archive against the sha256 built into it.
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.6/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.5.0/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.4.6/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.5.0/antumbra-cli-installer.ps1 | iex
 ```
+
+Then, with Docker and ollama running:
 
 ```bash
-antumbra setup local     # or, against a hosted workspace: antumbra setup hosted <url> --token-file <file>
-antumbra setup check
+antumbra setup local     # the store and the server on this machine
+antumbra setup check     # every piece, and what to do about any that is not right
 ```
 
-No clone is needed: outside one, setup writes the stack's compose file to `~/.antumbra/stack` and pulls the server image published for its version (`ghcr.io/albedosehen/antumbra-mcp`, for x86-64 and ARM). Run it inside a clone and it builds the server from the source instead, which the GPU build (`--gpu`) always does.
+`setup local` starts SurrealDB and the Antumbra server in Docker, pulls the embedding model, generates the stack's secrets, mints a token, and connects Claude Code and every other supported agent it finds on the machine. No clone is needed: outside one it writes the stack's compose file to `~/.antumbra/stack/docker` and pulls the server image published for its version (`ghcr.io/albedosehen/antumbra-mcp`, for x86-64 and ARM). Inside a clone it builds the server from the source.
 
-**[docs/getting-started.md](docs/getting-started.md)** walks through it, and through each step by hand, for macOS, Windows, and Linux. Agents setting it up for someone follow **[docs/agent-setup.md](docs/agent-setup.md)**. The paths below cover just the binaries.
-
-### Prebuilt binaries (no Rust toolchain)
-
-Each binary ships a one-line installer that pulls the right prebuilt build for your OS (macOS on Apple silicon and Intel, Linux on x86-64 and ARM, Windows on x86-64) from a GitHub release and checks it against the sha256 built into the script. Name the release tag, not `latest`, so the script you run is a published, unchanging asset. The `antumbra` command, which holds the operator console (`antumbra tui`):
+For a workspace someone else runs, there is nothing to start:
 
 ```bash
-# macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.6/antumbra-cli-installer.sh | sh
+antumbra setup hosted https://their-workspace.example --token-file <file>     # or --signin-link '<link>'
 ```
 
-```powershell
-# Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.4.6/antumbra-cli-installer.ps1 | iex
-```
+Start a new session in your agent. It opens with what Antumbra remembers, and what you work on goes back in.
 
-The MCP server (`antumbra-mcp`) installs the same way, with `antumbra-mcp` in place of `antumbra-cli` in the URL; `antumbra setup local` runs it in Docker instead, so most people never install it by hand. Windows `.msi` packages, per-OS archives, and a `.sha256` beside each are attached to every [release](https://github.com/albedosehen/antumbra/releases); [docs/getting-started.md](docs/getting-started.md) shows the download-verify-unpack form for a machine that should check the archive itself before anything runs.
+**[Getting started](docs/getting-started.md)** walks through this and through each step by hand, on macOS, Windows and Linux. An agent setting it up for someone follows **[docs/agent-setup.md](docs/agent-setup.md)**. To look around with nothing set up, `antumbra tui --demo` shows the console over a seeded population.
 
-### From source (needs the Rust toolchain)
+## The agents it connects
+
+| Agent | What `antumbra setup` writes |
+| --- | --- |
+| Claude Code | hooks and `env` in its `settings.json`, and the MCP server |
+| Gemini CLI | an extension: the MCP bridge and three hooks |
+| Codex | the MCP bridge with `codex mcp add`, and three hooks you approve in Codex |
+| GitHub Copilot CLI | a hooks file, and the MCP bridge in its `mcp-config.json` |
+| goose | a plugin: the MCP bridge and three hooks, and the file goose keeps in mind |
+| OpenCode, 1.x and 2.x | one plugin file |
+
+Setup connects every one of these it finds on the machine, and `--agent` names them instead. Each was run against the real tool. Where an agent reads a directory of Antumbra's own, that is all setup writes; where it reads only your files, setup adds to them with a backup and never twice. What it writes for each, and what each agent leaves to you, is in **[Using Antumbra](docs/integration.md#agents-other-than-claude-code)**.
+
+- **Any other MCP client** reaches the tools through `antumbra mcp bridge`, the server's endpoint as a command, with the token read from its file for each call and never written into the client's config.
+- **Agents started through Unity Gateway** (Databricks' `ug claude`, `ug gemini`, `ug opencode`) are followed too. Where `ug` moves an agent's config directory, setup writes there as well, and `antumbra setup check` says when a workspace's policy stops the hooks or the server. This follows `ug`'s source and was not run against a workspace: [how](docs/integration.md#agents-started-through-unity-gateway).
+- **Claude Code with its telemetry off** also loses features that have nothing to do with telemetry, with nothing said. `antumbra claude doctor` lists what is lost and what brings each back: [how](docs/integration.md#claude-code-with-its-telemetry-off).
+
+## How it learns
+
+Most assistants are one large model in someone else's data center, exactly as good tomorrow as today. Antumbra keeps a population of small, frozen specialists over one shared, code-capable base (Qwen2.5-Coder-1.5B-Instruct), and grows it from what is verified in your own work.
+
+- **From outcomes, not imitation.** What is trained on is what a check accepts: a behavior's own test of an answer, a test that passes, a command that runs. A critic may say why something failed; the reward is the verifier's.
+- **Frozen once admitted.** An admitted expert is never edited, which is the one hard guarantee that a learned skill is not lost when something new is trained. It can be retired, and revived.
+- **Scope, not only skill.** A rule is right in one context and wrong in the next: "use `deno install`, not `npm install`" is true in this repository, not everywhere. Experts are kept per scope, a boundary records where a behavior stopped holding, and the router sends a task to an expert that covers it or declines.
+- **The memory is the portable part.** An expert is an overlay on one base. Move to a stronger base and your experts are trained again from the behaviors and memories you already have.
+
+There are two kinds of expert today. **Standing experts** are trained from your accepted behaviors by the server itself, with no command to run, and are part of every answer in their scope. An expert is admitted holding the behaviors it learned, and refused when it answers one worse than the base model or when unrelated tasks fall. **Routed experts** come from the trainer (`antumbra train`: RAFT and GRPO over verified completions) and are chosen for a task by a learned router. **[Running the trainer](docs/running-the-trainer.md)** covers both, and **[Antumbra, explained for anyone](docs/antumbra-explained.md)** is the tour without the vocabulary.
+
+## Serving
+
+A server built with the `models` feature answers through the experts (the `answer` tool, `antumbra serve`, `antumbra ask`). With a CUDA GPU it serves the dense base from the GPU. With none, and on a Mac, it serves a quantized base from the CPU through kernels of its own, Q6_K unless told otherwise:
+
+- x86-64 with AVX-512 VNNI, x86-64 with AVX2, and aarch64 with NEON each decode through them, and a CPU with AVX2 writes the answer a CPU with AVX-512 writes, token for token.
+- Requests waiting on the server are answered in shared passes, each with its own blend of experts and each as it would be answered alone. Workspaces take turns, and a request past the server's bound is refused as busy.
+- A pass also carries the tokens guessed to follow and keeps each that is the model's own, so a prompt like one answered before is answered sooner, with the same answer.
+- A server with no GPU serves the experts another one trained (`--expert-source`).
+
+Measured with a 1.5B base and one expert. An Apple M4 Pro decodes 136 tokens a second from Q6_K. One 8-core laptop CPU, clocking about half its rating, decoded an expert's 78 held-out tasks at 26.8 tokens a second a token a pass, at 33.6 reading ahead, and at 105.7 when the same tasks were asked again, where llama.cpp (build b12359) decoded the same prompts with the same expert as a LoRA at about 18. The conditions, and the figures for requests answered together, are in the [changelog](CHANGELOG.md) and in [Running the trainer](docs/running-the-trainer.md#the-gpu-server-serving--standing-experts).
+
+The prebuilt binaries and the published image are the light build, which does everything but train and serve: see [Builds](#builds).
+
+## What runs where
+
+The same engine runs two ways. **Offline**: an embedded store on your disk and MCP over stdio, one identity, nothing leaving the machine. **Networked**: an HTTP server in front of SurrealDB, a signed JWT on every request, many tenants. `antumbra setup local` is the networked server on your own machine, bound to this machine alone.
+
+- **Isolation is the engine's.** Tenancy and identity live in SurrealDB, not in handler code: record access binds `(tenant, user)` to `$auth`, and table permissions filter every row, so a filter forgotten in a handler cannot leak. **[Security posture](docs/security.md)** says what holds, what depends on the deployment, and what the operator sets.
+- **Compartments** are named, ownable spaces of memory: the unit of organization, deletion and sharing. A grant gives another user `reference` or `link`, and a revocation is a tombstone that fails closed at once and reaches every device.
+- **Sync** keeps an embedded store and a remote one in agreement, last write wins by each row's version, with deletions and revocations carried as tombstones (`antumbra sync`, or a server's own `--sync-remote`). A change to a shared compartment is pushed to the sessions that can see it.
+- **The embedder is yours.** Any OpenAI-compatible `/embeddings` endpoint, set per workspace; `setup local` uses ollama's `all-minilm`.
+- **Documents and what depends on what.** Knowledge documents are chunked and recalled apart from memory, with the original kept in a copal archive when one is configured. A dependency graph, recorded from evidence, answers what a change to a service reaches (`blast_radius`).
+- **Handoffs.** A session leaves a note for a session on another of your machines, and each machine is listed with when it was last seen.
+
+| Surface | Where | For |
+| --- | --- | --- |
+| MCP | `/mcp`, or stdio | agents. 38 tools; `--tools agent` gives a coding session the 21 it needs and keeps operator actions out of its reach |
+| Tool calls over REST | `POST /mcp/call` | the hooks, the CLI and scripts |
+| Dashboard | `/dashboard` | you: memory, behaviors, experts, dependencies, knowledge, devices, and the workspace's policy |
+| Relics | `/relics` | the pages an agent published, with a gallery, a sandboxed viewer and downloads |
+| Operator console | `antumbra tui` | the population, the gate, the loop, memory and the workspace's knobs |
+| GitHub App | `POST /github/webhook` | anchors re-anchored at a merge, orphaned at a deleted branch |
+
+The Compose stack is in [`docker/`](docker/README.md): SurrealDB and the server by default, and opt-in profiles for a reranker, a copal archive, an OpenTelemetry collector, a PDF renderer for relics, and the hosted control plane.
+
+## Builds
+
+| Build | How | Adds |
+| --- | --- | --- |
+| Light | the installers above, the published image, `just install` | memory, recall, documents, routing, sync, the dashboard and the console |
+| `models` | `cargo build --release -p antumbra-mcp -p antumbra-cli --features models` | serving on the CPU, the in-process embedder, the trainer's commands |
+| `models,cuda` | the same with `--features models,cuda`, or `antumbra setup local --gpu` from a clone | training and serving on an NVIDIA GPU |
+| `models,metal` | the same with `--features models,metal` | training on Apple silicon's GPU; it serves from the CPU, which decodes faster there |
+
+- **Platforms.** Prebuilt for macOS on Apple silicon and Intel, Linux on x86-64 and ARM, and Windows on x86-64. x86-64 builds need a CPU with AVX2, FMA and F16C: Intel's since Haswell, AMD's since Excavator.
+- **The server alone** installs like the CLI, with `antumbra-mcp` in place of `antumbra-cli` in the installer's address. `setup local` runs it in Docker, so most people never install it by hand. Windows `.msi` packages, per-OS archives and a `.sha256` beside each are attached to every [release](https://github.com/albedosehen/antumbra/releases), and [Getting started](docs/getting-started.md) shows how to verify an archive before anything runs.
+- **From source** takes the Rust toolchain (1.95 or later): `just install`, or `cargo install --path crates/antumbra-cli --locked` and the same for `crates/antumbra-mcp`. The first run of a `models` build downloads the base model, about 3 GB.
+
+## The CLI
+
+One command, `antumbra`. The ones most people meet:
 
 ```bash
-just install        # builds + installs antumbra and antumbra-mcp into ~/.cargo/bin
-# or, without `just`:
-cargo install --path crates/antumbra-cli --locked
-cargo install --path crates/antumbra-mcp --locked
-```
+antumbra setup local          # or: setup hosted <url>, setup check
+antumbra tui                  # the operator console (--demo needs no server)
+antumbra claude doctor        # Claude Code with its telemetry off: what is lost, what restores it
 
-Both the prebuilt binaries and `just install` produce the light, no-GPU build. GPU training and serving are a feature-gated source build (see Run, below).
+# Keep what a framework's own lister prints, anchored to the commit it ran at,
+# and derive ownership, hotspots and co-change from git log. No parser to maintain.
+antumbra --embedder-url <url> ingest --tenant ws:me --user user:me --title routes -- deno task routes
+antumbra --embedder-url <url> git-facts --tenant ws:me --user user:me --compartment comp:repo --days 90
 
-## Run
-
-```bash
-# Operator console (ratatui): a live view of the population, gate, loop, and
-# memory, read from the Antumbra server with the address and token the hooks
-# use. `antumbra --tui` is the same; `--demo` shows a seeded population with no
-# server. An operator's token (antumbra-mcp --mint-token --operator, which
-# `antumbra setup local` mints) also shows the substrate and may act on it.
-antumbra tui
-
-# Drive the durable loop with the scripted DEMO trainer (--demo: it always
-# graduates; real training is `train` under --features models), then inspect
-# it. The CLI keeps one persistent on-disk store by default, so state from one
-# command is there for the next.
-antumbra schema                        # print the generated DDL
-antumbra loop --demo --generations 3
-antumbra status
-
-# Anything that embeds (remember, route, ingest, ...) needs an embedder: bring an
-# OpenAI-compatible /embeddings endpoint (Ollama serving all-minilm), or pass
-# --fake-embedder for a demo (a byte histogram: NOT semantic). Without
-# --features models a command refuses to run with neither, rather than degrade.
-antumbra --embedder-url http://127.0.0.1:11434/v1/embeddings route "reverse a string"
-
-# Answer inventory questions without a parser: store what the framework's own
-# lister prints, stamped with the repo, commit, and branch it ran at (add
-# --copal-addr and the original is archived to copal first, the document of
-# record, exactly as the server does); and derive ownership / hotspots /
-# co-change from git log, anchored to the commit range.
-antumbra --embedder-url ... ingest --tenant ws:me --user user:me --title routes -- deno task routes
-antumbra git-facts --tenant ws:me --user user:me --compartment comp:repo --days 90
-
-# Bidirectional sync between this local store and a remote authoritative SurrealDB.
+# Keep this store and a remote one in agreement.
 antumbra sync --remote ws://host:8000/rpc --remote-user root --remote-pass <pw>
 ```
 
-Real training and serving need the GPU build (a CUDA GPU and the Qwen weights, plus `python` for the exec verifiers), which is a source build behind the `models,cuda` features:
+And the rest, by what they are for:
 
-```bash
-cargo run -p antumbra-cli --features models,cuda -- \
-  train --corpus corpora/arith.json --run arith --generations 1
-cargo run -p antumbra-cli --features models,cuda -- \
-  ask "Write a Python function add(a, b) that returns their sum."   # route -> load adapter -> generate
-```
+- **The store and the population:** `migrate`, `schema`, `status`, `experts`, `route`, `seed`, `remember`, `propose-compartments`, `retire`, `revive`, `revoke-token`, `set-embedder`, `get-embedder`, `reembed`.
+- **Agents:** `hook` (answers another agent's hook in that agent's own shape) and `mcp bridge`.
+- **Training and serving,** with `--features models`: `train`, `teach`, `eval`, `behave`, `evolve`, `populate`, `consolidate`, `metabolize`, `memory-import`, `scope`, `gate-train`, `gate-sweep`, `gate-outcomes`, `compose`, `ask`, `serve`.
+- **Verifiers:** `verifier` (propose a check, measure it against ground truth, and only then let it grant reward) and `critic`.
+- **A demo with no model:** `antumbra loop --demo --generations 3`, then `antumbra status`.
 
-The networked MCP server (`antumbra-mcp --http 0.0.0.0:8081 --url ws://... --db-user root --db-pass <pw> --embedder-url <your /embeddings endpoint> --tools agent`, with a JWT key; `--tools agent` advertises only the eleven tools a coding agent needs, so operator actions are never one agent call away and every session carries less tool text; without `--features models` the server refuses to start with no embedder rather than fall back to the `--fake-embedder` stand-in) and its live multi-tenant validation are reproducible with the probes under `docs/` (against a SurrealDB v3 server, e.g. `docker run -p 8000:8000 surrealdb/surrealdb:v3.0.5 start --user root --pass root
-memory`). See **[Running the trainer](docs/running-the-trainer.md)** for the CUDA recipe and the validated generation-quality settings.
+A command that embeds needs an embedder: `--embedder-url` naming an `/embeddings` endpoint (ollama serving `all-minilm` is one), or a `models` build's own. With neither it refuses to run rather than fall back to a stand-in, which `--fake-embedder` asks for by name, for a demo.
 
----
+## Where it stands
+
+- **In daily use:** the memory loop across the six agents, anchors and the GitHub App, handoffs and devices, documents, the dashboard, relics, the console, sync, and tenancy enforced by the engine over a networked SurrealDB.
+- **Working, in a `models` build:** standing experts trained from accepted behaviors and audited on examples they never saw, and serving on a GPU or a CPU. Training takes a GPU.
+- **Experimental:** routed experts and the learned router, the generational loop that grows a population by itself (`evolve`, `populate`), and the verifier namespace.
+- **Not there yet:** many experts over large corpora, which is the real test of generalization and forgetting; a learned latent mixer in place of the coverage gate; composing experts by learned bridges. The hosted control plane has invite-gated signup, magic-link login and token issuance, and no OAuth providers. The dashboard cannot mint a token or manage members.
+
+What changed in each release, with what was measured and what was not run, is in the [changelog](CHANGELOG.md).
 
 ## Documentation
 
-- **[Getting started](docs/getting-started.md)**: end-to-end setup on macOS, Windows, and Linux. Start here.
-- **[Antumbra, explained for anyone](docs/antumbra-explained.md)**: a plain-English tour with diagrams and analogies (no ML background needed).
-- **[Using Antumbra](docs/integration.md)**: wire it into a coding agent (the bootstrap/capture lifecycle hooks), offline vs networked. Start here.
-- **[Architecture](docs/architecture.md)**: system, substrate, decision chain, training and data flow, schema.
-- **[Security posture](docs/security.md)**: the trust model, engine-enforced isolation, and the threat-model conclusions of the security review.
-- **[Running the trainer](docs/running-the-trainer.md)**: the CUDA GPU recipe.
+- **[Getting started](docs/getting-started.md)**: setup on macOS, Windows and Linux, the quick way and by hand.
+- **[Setting up Antumbra: a guide for coding agents](docs/agent-setup.md)**: for an agent doing the setup on someone's behalf, with what setup changes and how to undo it.
+- **[Antumbra, explained for anyone](docs/antumbra-explained.md)**: a plain-English tour, no ML background needed.
+- **[Using Antumbra](docs/integration.md)**: the three touchpoints, each agent, Unity Gateway, anchors and the GitHub App, the dashboard, relics, behaviors, handoffs, the console, documents and copal, the dependency graph.
+- **[Running the trainer](docs/running-the-trainer.md)**: training, the CUDA build, the GPU server, standing experts, and serving on a CPU with its measurements.
+- **[Architecture](docs/architecture.md)** and the **[diagram atlas](docs/diagrams.md)**: the thesis, the system, the training flow and the schema.
+- **[Security posture](docs/security.md)**: the trust model and what an operator must configure.
+- **[Glossary](docs/glossary.md)**: the trainer's vocabulary (RAFT, GRPO, LoRA, QLoRA).
+- **[The Docker stack](docker/README.md)**, **[the hook scripts](scripts/hooks/README.md)**, **[test coverage](docs/coverage.md)**, **[Contributing](CONTRIBUTING.md)**.
 
 ### Crates
 
-`antumbra-core` (domain types, ports) · `antumbra-auth` (JWT token contract) · `antumbra-store` (SurrealDB persistence via surql-rs) · `antumbra-embed` (HTTP `/embeddings` client behind the `Embedder` port) · `antumbra-copal` (the copal document-of-record archive client, shared by the server and the CLI) · `antumbra-http` (the agent and the tool-surface client the CLI and the console call the server with: one set of refusals) · `antumbra-gate` (router/coverage gate) · `antumbra-boundary` (counterfactual scope) · `antumbra-rerank` (cross-encoder `/rerank` client behind the `Reranker` port) · `antumbra-bench` (retrieval-quality harness) · `antumbra-critic` (verifiers + credit assignment) · `antumbra-train` (candle Qwen + LoRA trainer) · `antumbra-serve` (resident multi-adapter serving) · `antumbra-loop` (generational loop) · `antumbra-sync` (collector/sync + live propagation) · `antumbra-mcp` (MCP server, stdio + networked) · `antumbra-control` (hosted-onboarding control plane) · `antumbra-control-server` (the control plane's HTTP surface: invite-gated signup + magic-link login) · `antumbra-cli` · `antumbra-tui`.
+A Rust workspace of 22 crates, and the control server as a workspace of its own.
+
+- **Domain and storage:** `antumbra-core` (types, lifecycle state machines, ports) · `antumbra-store` (SurrealDB persistence through surql-rs, schema as code, vector recall) · `antumbra-auth` (the JWT token contract) · `antumbra-sync` (last-write-wins replication between stores).
+- **In and out:** `antumbra-embed` (an `/embeddings` client) · `antumbra-rerank` (a cross-encoder `/rerank` client) · `antumbra-copal` (the document-of-record archive client) · `antumbra-ingest` (the one path a knowledge document takes into the store) · `antumbra-github` (the GitHub App: webhook verification and its handlers) · `antumbra-http` (how Antumbra's own binaries call the server).
+- **Learning:** `antumbra-train` (the candle Qwen2.5-Coder and LoRA trainer, and the CPU kernels) · `antumbra-serve` (one resident base, many adapters) · `antumbra-critic` (verifier-first reward) · `antumbra-gate` (the coverage gate and router) · `antumbra-boundary` (counterfactual scope search) · `antumbra-loop` (the durable generational loop) · `antumbra-eclipse` (the loop's standing instruments: held-out slices, impossible tasks, re-verification) · `antumbra-bench` (a retrieval-quality benchmark).
+- **Surfaces:** `antumbra-mcp` (the MCP server, the dashboard and relics) · `antumbra-cli` (the `antumbra` command) · `antumbra-tui` (the operator console) · `antumbra-control` and `antumbra-control-server` (hosted onboarding: signup, login and token issuance, run apart from the data plane).
 
 ## License
 

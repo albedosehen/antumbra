@@ -9,7 +9,7 @@
 use super::*;
 
 mod step;
-pub(super) use step::{Scratch, Stepped};
+pub(super) use step::{Next, Scratch, Stepped};
 
 // --- linear-algebra helpers ------------------------------------------------
 
@@ -100,6 +100,11 @@ pub(super) fn repeat_kv(x: Tensor, n_rep: usize) -> CResult<Tensor> {
 /// `Tiled` is a served weight held as Antumbra's own tiles, on a CPU that can
 /// multiply through them (`tiles`): fewer bytes to read than candle's, and
 /// the one copy of the weight.
+// With the Metal backend candle's quantized tensor is some 300 bytes, far
+// more than the other forms. There is one of these to a projection, a few
+// hundred to a model, and each is read at every token: a box would save
+// kilobytes and add a hop to every read.
+#[cfg_attr(feature = "metal", allow(clippy::large_enum_variant))]
 pub(super) enum BaseWeight {
     Dense(Tensor),
     Quantized(QTensor),
@@ -133,6 +138,11 @@ pub(super) struct LoraLinear {
     /// The factors as plain rows read them (`pack`), made when rows are
     /// first read and let go when the factors are set.
     packed: Option<pack::Packed>,
+    /// The packed factors of other blends of experts, kept so that requests
+    /// answered together may each read its own: blend `n`'s are
+    /// `kept[n - 1]`, and nothing where that blend leaves this projection
+    /// to its base.
+    kept: Vec<Option<pack::Packed>>,
 }
 
 /// The spread a fresh adapter's `lora_a` factors are drawn with; `lora_b`
@@ -207,6 +217,7 @@ impl LoraLinear {
             enabled: true,
             grad: true,
             packed: None,
+            kept: Vec::new(),
         })
     }
 
@@ -255,6 +266,23 @@ impl LoraLinear {
     /// Let the packed copy go: the factors were set.
     pub(super) fn forget_pack(&mut self) {
         self.packed = None;
+    }
+
+    /// Keep the factors as they are packed now as blend `blend`'s (one or
+    /// more; nothing is the blend the factors themselves are): what a row of
+    /// that blend reads from then on, whatever the factors are set to after.
+    /// With the adapter off, that blend reads the base alone here.
+    pub(super) fn keep_pack(&mut self, blend: usize) {
+        if blend == 0 {
+            return;
+        }
+        if self.kept.len() < blend {
+            self.kept.resize_with(blend, || None);
+        }
+        self.kept[blend - 1] = match self.enabled {
+            true => self.packed.clone(),
+            false => None,
+        };
     }
 
     /// The frozen base's product with `x`, before the adapter and the bias.
@@ -526,6 +554,9 @@ pub(super) struct Attention {
     /// joining them to the cache copied every position so far in every layer
     /// for every token, and attention reads it where it lies.
     kv_store: Option<kv::KvStore>,
+    /// The caches of the other sequences decoded beside that one
+    /// ([`Attention::step_each`]): sequence `n`'s is `others[n - 1]`.
+    others: Vec<kv::KvStore>,
 }
 
 impl Attention {
@@ -587,6 +618,7 @@ impl Attention {
             kv_cache: None,
             kv_store: (base.device().is_cpu() && base.dtype() == DType::F32)
                 .then(|| kv::KvStore::new(num_kv_heads, head_dim)),
+            others: Vec::new(),
         })
     }
 
@@ -666,6 +698,13 @@ impl Attention {
         }
     }
 
+    /// Forget the positions from `len` on in the cache of plain rows.
+    pub(super) fn truncate(&mut self, len: usize) {
+        if let Some(store) = &mut self.kv_store {
+            store.truncate(len);
+        }
+    }
+
     pub(super) fn packs(&self) -> bool {
         [&self.q_proj, &self.k_proj, &self.v_proj, &self.o_proj]
             .iter()
@@ -684,6 +723,13 @@ impl Attention {
         self.k_proj.forget_pack();
         self.v_proj.forget_pack();
         self.o_proj.forget_pack();
+    }
+
+    pub(super) fn keep_packs(&mut self, blend: usize) {
+        self.q_proj.keep_pack(blend);
+        self.k_proj.keep_pack(blend);
+        self.v_proj.keep_pack(blend);
+        self.o_proj.keep_pack(blend);
     }
 
     pub(super) fn set_lora(&mut self, on: bool) {
@@ -807,6 +853,12 @@ impl Mlp {
         self.down_proj.forget_pack();
     }
 
+    pub(super) fn keep_packs(&mut self, blend: usize) {
+        self.gate_proj.keep_pack(blend);
+        self.up_proj.keep_pack(blend);
+        self.down_proj.keep_pack(blend);
+    }
+
     pub(super) fn set_grad(&mut self, on: bool) {
         self.gate_proj.set_grad(on);
         self.up_proj.set_grad(on);
@@ -887,6 +939,10 @@ impl DecoderLayer {
         self.self_attn.clear_cache();
     }
 
+    pub(super) fn truncate(&mut self, len: usize) {
+        self.self_attn.truncate(len);
+    }
+
     /// Whether any of this layer's adapters has a copy to make.
     pub(super) fn packs(&self) -> bool {
         self.self_attn.packs() || self.mlp.packs()
@@ -900,6 +956,11 @@ impl DecoderLayer {
     pub(super) fn forget_packs(&mut self) {
         self.self_attn.forget_packs();
         self.mlp.forget_packs();
+    }
+
+    pub(super) fn keep_packs(&mut self, blend: usize) {
+        self.self_attn.keep_packs(blend);
+        self.mlp.keep_packs(blend);
     }
 
     pub(super) fn set_lora(&mut self, on: bool) {
@@ -949,6 +1010,26 @@ mod tests {
             .flatten_all()?
             .max(0)?
             .to_scalar::<f32>()
+    }
+
+    /// Normals drawn from a seed, the same in every run. A test that holds a
+    /// product to a bound on what quantizing costs draws from here: how far
+    /// a quantized product lies from the dense one is the luck of the draw,
+    /// so a bound on it is a bound on a draw. Drawn afresh each run, a Q4_K
+    /// product lay past its bound about one run in a hundred and twenty.
+    fn drawn<S: Into<candle_core::Shape>>(seed: u64, stdev: f64, shape: S) -> CResult<Tensor> {
+        use rand::RngExt as _;
+        let shape = shape.into();
+        let mut rng = StdRng::seed_from_u64(seed);
+        let values: Vec<f32> = (0..shape.elem_count())
+            .map(|_| {
+                // Box-Muller: two uniforms make one standard normal.
+                let u1: f64 = rng.random::<f64>().max(f64::MIN_POSITIVE);
+                let u2: f64 = rng.random::<f64>();
+                ((-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos() * stdev) as f32
+            })
+            .collect();
+        Tensor::from_vec(values, shape, &Device::Cpu)
     }
 
     /// Attention as it was computed before: K and V repeated to the query
@@ -1043,20 +1124,21 @@ mod tests {
             enabled: true,
             grad: false,
             packed: None,
+            kept: Vec::new(),
         }
     }
 
     /// A base served quantized multiplies close to the dense one, and the
     /// adapter on top of it is added exactly: the LoRA branch never touches
-    /// the quantized weight.
+    /// the quantized weight. The weight, the factors and the rows are drawn
+    /// from seeds, since the bounds are on what quantizing costs these.
     #[test]
     fn a_served_base_tracks_the_dense_one_and_keeps_the_adapter_exact() -> CResult<()> {
-        let dev = Device::Cpu;
         let (out_f, in_f, rank) = (8, 256, 4);
-        let w = Tensor::randn(0f32, 1.0, (out_f, in_f), &dev)?;
-        let a = Tensor::randn(0f32, 0.1, (rank, in_f), &dev)?;
-        let b = Tensor::randn(0f32, 0.1, (out_f, rank), &dev)?;
-        let x = Tensor::randn(0f32, 1.0, (1, 3, in_f), &dev)?;
+        let w = drawn(1, 1.0, (out_f, in_f))?;
+        let a = drawn(2, 0.1, (rank, in_f))?;
+        let b = drawn(3, 0.1, (out_f, rank))?;
+        let x = drawn(4, 1.0, (1, 3, in_f))?;
         let dense = linear(BaseWeight::Dense(w.clone()), &a, &b).forward(&x)?;
         let peak = dense.abs()?.flatten_all()?.max(0)?.to_scalar::<f32>()?;
         for (dtype, bound) in [(GgmlDType::Q8_0, 0.03), (GgmlDType::Q4K, 0.15)] {

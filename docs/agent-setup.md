@@ -33,18 +33,18 @@ If it is missing, install it from a release with the installer for their OS. The
 
 ```sh
 # macOS and Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.6/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.5.0/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.4.6/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.5.0/antumbra-cli-installer.ps1 | iex
 ```
 
 To check the archive before anything runs before anything runs, download it and the `.sha256` the release carries beside it, compare, and unpack the binary onto your PATH (the installer does the same comparison, against the sums built into the pinned script):
 
 ```bash
-v=v0.4.6; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
+v=v0.5.0; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
 curl --proto '=https' --tlsv1.2 -LsSfO "https://github.com/albedosehen/antumbra/releases/download/$v/antumbra-cli-$t.tar.xz"{,.sha256}
 shasum -a 256 -c "antumbra-cli-$t.tar.xz.sha256" && tar -xJf "antumbra-cli-$t.tar.xz"
 ```
@@ -121,6 +121,8 @@ On Windows goose runs its hooks with `sh`; when setup says there is none on the 
 
 **Codex runs none of the hooks until the person approves them.** Tell them: start Codex, type `/hooks`, approve Antumbra's three. You cannot do this for them, and setup's last lines say when it is needed.
 
+**Unity Gateway.** When the person starts their agents with `ug`, setup has written for those too, and says so. One case needs them: when setup or the check says `ug claude` relays a Claude subscription, that launch leaves their own settings out, so they start it with the command printed, `ug claude --settings ~/.antumbra/claude-settings.json`. And when the check says an organization's or a workspace's file stops the hooks or the server, that file is not yours or theirs to edit: tell them what it says, and who it says to ask. `docs/integration.md` has both under "Agents started through Unity Gateway".
+
 ## What setup changed
 
 Say this if they ask:
@@ -133,6 +135,7 @@ Say this if they ask:
 - goose, when it is connected: the plugin `~/.agents/plugins/antumbra` (a manifest, `.mcp.json` and `hooks/hooks.json`); one line, `GOOSE_MOIM_MESSAGE_FILE`, added to goose's `config.yaml` when it names no such file, with a backup beside it; and `~/.antumbra/goose/`, where the hooks keep what goose is to read.
 - Copilot CLI, when it is connected: `~/.copilot/hooks/antumbra.json`, and `mcpServers.antumbra` added to `~/.copilot/mcp-config.json`, with a backup beside it, `mcp-config.json.antumbra-backup-<time>`.
 - Codex, when it is connected: `[mcp_servers.antumbra]` in `~/.codex/config.toml`, written by `codex mcp add`, and hooks on SessionStart, UserPromptSubmit and Stop added to `~/.codex/hooks.json`, with a backup beside it, `hooks.json.antumbra-backup-<time>`.
+- On a machine with Unity Gateway (`ug`), for the agents it starts from a directory of its own: the same Gemini CLI extension in `~/.ucode/.gemini-home/.gemini/extensions/antumbra`, the same OpenCode plugin file in `~/.ucode/opencode-xdg/opencode/plugins/`, and `~/.antumbra/claude-settings.json`, Claude Code settings that hold Antumbra's hooks and nothing of theirs. Nothing `ug` wrote is edited.
 - The server: this machine is listed among their devices under its `ANTUMBRA_HOST_ID`, as a memory node. Each session start names it again, which keeps "last seen" current. If they want a particular name, set `ANTUMBRA_HOST_ID` in the settings' `env` before running setup, since setup keeps a name that is already there.
 - Local only: the stack's compose file and `.env` in `~/.antumbra/stack/docker` (or `docker/.env` in the clone, when setup ran from one), the containers `antumbra-surrealdb` and `antumbra-mcp` (they restart with Docker), and the database in `~/.antumbra/surrealdb`.
 
@@ -143,7 +146,7 @@ claude mcp remove antumbra --scope user
 docker compose -f ~/.antumbra/stack/docker/docker-compose.yml down   # local only (from a clone: docker/docker-compose.yml)
 ```
 
-Then restore the settings backup over `~/.claude/settings.json` and delete `~/.antumbra`. For Gemini CLI: `gemini extensions uninstall antumbra`, or delete `~/.gemini/extensions/antumbra`. For OpenCode: delete `~/.config/opencode/plugins/antumbra.js`. For goose: delete `~/.agents/plugins/antumbra` and the `GOOSE_MOIM_MESSAGE_FILE` line of its `config.yaml`. For Copilot CLI: delete `~/.copilot/hooks/antumbra.json` and the `antumbra` entry of `~/.copilot/mcp-config.json` (`copilot mcp remove antumbra`). For Codex: `codex mcp remove antumbra`, and restore the backup over `~/.codex/hooks.json` (or delete the three entries whose command is `antumbra hook codex ...`).
+Then restore the settings backup over `~/.claude/settings.json` and delete `~/.antumbra`. For Gemini CLI: `gemini extensions uninstall antumbra`, or delete `~/.gemini/extensions/antumbra`. For OpenCode: delete `~/.config/opencode/plugins/antumbra.js`. For goose: delete `~/.agents/plugins/antumbra` and the `GOOSE_MOIM_MESSAGE_FILE` line of its `config.yaml`. For Copilot CLI: delete `~/.copilot/hooks/antumbra.json` and the `antumbra` entry of `~/.copilot/mcp-config.json` (`copilot mcp remove antumbra`). For Codex: `codex mcp remove antumbra`, and restore the backup over `~/.codex/hooks.json` (or delete the three entries whose command is `antumbra hook codex ...`). For what was written beside Unity Gateway's files: delete `~/.ucode/.gemini-home/.gemini/extensions/antumbra` and `~/.ucode/opencode-xdg/opencode/plugins/antumbra.js`; `claude-settings.json` goes with `~/.antumbra`.
 
 ## When something goes wrong
 

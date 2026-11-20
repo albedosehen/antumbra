@@ -116,7 +116,15 @@ async fn an_expert_serves_on_the_cpu() -> Outcome<()> {
     // One expert, at the rank it was trained at, through load_adapter: a bf16
     // expert into the f32 model the CPU holds.
     let start = Instant::now();
-    let mut one = QwenCausalLm::load(Device::Cpu, cfg.clone())?;
+    // On the CPU unless told otherwise: `ANTUMBRA_SERVE_DEVICE=best` takes
+    // the build's best device, which is how a `metal` or `cuda` build's GPU
+    // is measured by the same prompts as the CPU beside it.
+    let device = match std::env::var("ANTUMBRA_SERVE_DEVICE").as_deref() {
+        Ok("best") => antumbra_train::device::best_device()?,
+        _ => Device::Cpu,
+    };
+    eprintln!("on {device:?}");
+    let mut one = QwenCausalLm::load(device.clone(), cfg.clone())?;
     if let Some(a) = &adapter {
         one.load_adapter(a)?;
     }
@@ -141,7 +149,7 @@ async fn an_expert_serves_on_the_cpu() -> Outcome<()> {
         lora_alpha: cfg.lora_alpha * 4.0,
         ..cfg.clone()
     };
-    let mut four = QwenCausalLm::load(Device::Cpu, blend_cfg)?;
+    let mut four = QwenCausalLm::load(device, blend_cfg)?;
     if let Some(a) = &adapter {
         let specs = vec![(a.clone(), 0.25f32); 4];
         four.load_blend(&specs)?;

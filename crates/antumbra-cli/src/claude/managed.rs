@@ -39,12 +39,11 @@ pub struct Managed {
     pub variables: BTreeMap<String, String>,
 }
 
-/// Read the managed files in `dir`, merged as Claude Code merges them:
-/// `managed-settings.json` first, then every `*.json` in `managed-settings.d/`
-/// in name order, hidden files left out, a later file's keys over an earlier
-/// one's. `None` when there are none. A file that does not parse contributes
-/// nothing, as a settings file that does not parse contributes nothing.
-pub fn read(dir: &Path) -> Option<Managed> {
+/// The managed files in `dir` in the order Claude Code merges them
+/// (`managed-settings.json` first, then every `*.json` in
+/// `managed-settings.d/` in name order, hidden files left out), and the one
+/// a report names. `None` when there are none.
+fn listed(dir: &Path) -> Option<(PathBuf, Vec<PathBuf>)> {
     let main = dir.join("managed-settings.json");
     let drop_ins = dir.join("managed-settings.d");
     let mut parts: Vec<PathBuf> = drop_ins
@@ -66,14 +65,38 @@ pub fn read(dir: &Path) -> Option<Managed> {
     } else {
         return None;
     };
+    Some((named, std::iter::once(main).chain(parts).collect()))
+}
+
+/// Each managed file in `dir` that holds a JSON object, with its path, in
+/// the order Claude Code merges them. For what is read a file at a time: a
+/// policy key that only the organization's files may set, and which of them
+/// set it.
+pub fn files(dir: &Path) -> Vec<(PathBuf, serde_json::Map<String, serde_json::Value>)> {
+    listed(dir)
+        .into_iter()
+        .flat_map(|(_, paths)| paths)
+        .filter_map(|path| {
+            let Some(serde_json::Value::Object(object)) = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+            else {
+                return None;
+            };
+            Some((path, object))
+        })
+        .collect()
+}
+
+/// Read the managed files in `dir`, merged as Claude Code merges them:
+/// `managed-settings.json` first, then every `*.json` in `managed-settings.d/`
+/// in name order, hidden files left out, a later file's keys over an earlier
+/// one's. `None` when there are none. A file that does not parse contributes
+/// nothing, as a settings file that does not parse contributes nothing.
+pub fn read(dir: &Path) -> Option<Managed> {
+    let (named, _) = listed(dir)?;
     let mut merged = serde_json::Map::new();
-    for path in std::iter::once(main).chain(parts) {
-        let Some(serde_json::Value::Object(object)) = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-        else {
-            continue;
-        };
+    for (_, object) in files(dir) {
         for (key, value) in object {
             match (merged.get_mut(&key), value) {
                 // The env block merges name by name, like the files do.

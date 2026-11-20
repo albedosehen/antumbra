@@ -12,18 +12,18 @@ With [Docker](https://docs.docker.com/get-docker/) and [ollama](https://ollama.c
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.4.6/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.5.0/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.4.6/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.5.0/antumbra-cli-installer.ps1 | iex
 ```
 
 To check the archive yourself before anything runs, download it and the `.sha256` the release carries beside it, compare, and unpack the binary onto your PATH (the installer does the same comparison, against the sums built into the pinned script):
 
 ```bash
-v=v0.4.6; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
+v=v0.5.0; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
 curl --proto '=https' --tlsv1.2 -LsSfO "https://github.com/albedosehen/antumbra/releases/download/$v/antumbra-cli-$t.tar.xz"{,.sha256}
 shasum -a 256 -c "antumbra-cli-$t.tar.xz.sha256" && tar -xJf "antumbra-cli-$t.tar.xz"
 ```
@@ -169,15 +169,20 @@ ANTUMBRA_HOST_ID=<this machine's name>
 
 then add the lifecycle hooks. **[`scripts/hooks/README.md`](../scripts/hooks/README.md)** has copy-paste `settings.json` blocks: a `bash` / `.sh` set for macOS/Linux and a `pwsh` / `.ps1` set for Windows. (`antumbra setup` writes these for you.)
 
-## Optional: serving + autonomy (needs an NVIDIA GPU)
+## Optional: answers from experts, and training your own
 
-The stack above is the default, GPU-free server: memory, recall, routing. To also have your agent get **answers served from trained experts** (the `answer` tool) and have Antumbra **train the behaviors you accept into your own standing expert**, run the GPU build on a machine with an NVIDIA card (Linux, or Windows via WSL2):
+The stack above is the light server: memory, recall, routing. Two more things take a server built with the `models` feature, which the published image is not:
+
+- **Answers served from trained experts** (the `answer` tool). A server with a GPU serves them from it, and one with none serves them from its CPU.
+- **Training the behaviors you accept into your own standing expert**, which takes a GPU.
+
+On a machine with an NVIDIA card (Linux, or Windows via WSL2), the GPU build does both:
 
 ```bash
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
 ```
 
-See [Running the trainer → the GPU server](running-the-trainer.md#the-gpu-server-serving--standing-experts) for the build details, the native (non-Docker) recipe, and standing experts. Without a GPU, `answer` escalates cleanly and everything else works as normal.
+See [Running the trainer → the GPU server](running-the-trainer.md#the-gpu-server-serving--standing-experts) for the build details, the native (non-Docker) recipe, standing experts, and serving on a CPU, which includes a server with no GPU serving the experts another one trained (`--expert-source`). With the light server, `answer` escalates cleanly and everything else works as normal.
 
 ## Just kicking the tires?
 

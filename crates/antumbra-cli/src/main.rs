@@ -464,6 +464,7 @@ async fn run() -> anyhow::Result<()> {
                         prompt: task.clone(),
                         adapters: vec![],
                         weights: Vec::new(),
+                        owner: None,
                     })
                     .await?;
                 println!("---");

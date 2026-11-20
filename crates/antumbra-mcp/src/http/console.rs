@@ -1,7 +1,9 @@
 //! The operator console's routes, for `antumbra tui`: `GET /console/snapshot`
 //! reads what the console shows, and `POST /console/action` carries out an
-//! operator's action ([`antumbra_core::console`]). Both take the same bearer
-//! token as `/mcp`. Neither is an MCP tool, so no agent is offered them.
+//! operator's action ([`antumbra_core::console`]). `GET /console/knobs` names
+//! the workspace policy's knobs and their ranges, for the dashboard's form
+//! over them. All take the same bearer token as `/mcp`. None is an MCP tool,
+//! so no agent is offered them.
 //!
 //! The snapshot's workspace part is read through the caller's scoped
 //! connection, so the engine's permissions keep it to that workspace. Its
@@ -33,6 +35,30 @@ pub(super) fn routes() -> Router<Arc<HttpState>> {
     Router::new()
         .route("/console/snapshot", get(snapshot))
         .route("/console/action", post(action))
+        .route("/console/knobs", get(knobs))
+}
+
+/// The workspace policy's knobs, for a client that draws a form over them:
+/// each one's key, what it does, its range and its step, as the server holds
+/// them ([`antumbra_core::usage::KNOBS`]). The same for every workspace, and
+/// behind the token all the same, as everything the console reads is.
+async fn knobs(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Response {
+    if verified(&state, &req, "/console/knobs").is_none() {
+        return unauthorized();
+    }
+    let knobs: Vec<_> = antumbra_core::usage::KNOBS
+        .iter()
+        .map(|knob| {
+            json!({
+                "key": knob.key,
+                "help": knob.help,
+                "min": knob.min,
+                "max": knob.max,
+                "step": knob.step,
+            })
+        })
+        .collect();
+    Json(json!({ "knobs": knobs })).into_response()
 }
 
 /// The request's verified token, or `None` (said on stderr) for a 401.

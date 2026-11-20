@@ -104,13 +104,23 @@ services:
       # How the base model is held to serve experts: auto, off, q8_0, q6_k or
       # q4_k. On an image with no GPU backend (the dense base reads about 6 GB
       # a token on a CPU) auto serves from a Q6_K base where the CPU has its
-      # fast kernels (AVX-512 VNNI and VBMI) and from a Q8_0 base on any other
-      # CPU; on a GPU image it serves from the dense base. Every quantized form rewords an expert's answers, and a
-      # smaller one decodes faster on a CPU: q8_0 moves answers least; on a
-      # CPU with AVX-512 VNNI q6_k decodes about 1.3 times as fast and moves
-      # them half again as much, and q4_k about 1.7 times as fast and four
-      # times as much. off keeps the base dense anywhere.
+      # fast kernels (an x86-64 CPU's AVX2, which these images need anyway,
+      # or an Arm CPU's NEON with its dot product) and from a Q8_0 base on
+      # any other CPU; on a GPU image it serves from the dense base. Every
+      # quantized form rewords an expert's answers, and a smaller one decodes
+      # faster on a CPU: q8_0 moves answers least; on a CPU with AVX-512 VNNI
+      # q6_k decodes about 1.3 times as fast and moves them half again as
+      # much, and q4_k about 1.7 times as fast and four times as much. off
+      # keeps the base dense anywhere.
       - ANTUMBRA_SERVE_QUANT=${ANTUMBRA_SERVE_QUANT:-auto}
+      # Whether an answer is decoded several tokens a pass on a CPU that
+      # serves a quantized base: the same answer, in fewer passes over the
+      # weights. The server guesses from what it wrote for earlier requests
+      # through the same experts, kept in memory while it runs, so an answer
+      # like an earlier one comes back faster and a caller who can time
+      # answers can tell that it did. off decodes a token a pass and
+      # remembers nothing.
+      - ANTUMBRA_SERVE_AHEAD=${ANTUMBRA_SERVE_AHEAD:-on}
       - ANTUMBRA_BEHAVE_ROUNDS=${ANTUMBRA_BEHAVE_ROUNDS:-3}
       - ANTUMBRA_BEHAVE_LR=${ANTUMBRA_BEHAVE_LR:-1.5e-4}
       # How sure admission has to be, from a behavior's held-out counts, that

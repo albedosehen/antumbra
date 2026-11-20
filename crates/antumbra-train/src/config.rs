@@ -78,9 +78,15 @@ impl ServeQuant {
     /// How this build serves on this machine when nothing says otherwise. A
     /// build with no GPU backend serves on the CPU, where the dense f32 base
     /// reads about 6 GB a token, so it serves quantized: from Q6_K where the
-    /// CPU multiplies six-bit tiles ([`crate::device::six_bit_tiles`]), and
-    /// from Q8_0 on any other, where Q6_K would go through slower kernels
-    /// than Q8_0 does. A GPU build keeps the dense base it trained on.
+    /// CPU multiplies six-bit tiles ([`crate::device::six_bit_by_default`]:
+    /// an x86-64 CPU with AVX2, FMA and F16C, which the release builds need
+    /// anyway, and an aarch64 one with NEON's dot product), and from Q8_0 on
+    /// any other, where Q6_K would go through slower kernels than Q8_0
+    /// does. A CUDA build keeps the dense base it trained on. A
+    /// Metal build serves as a build with no GPU does, from the CPU
+    /// ([`crate::device::serves_from_cpu`]), where a token is decoded at more
+    /// than twice the rate Metal decodes it from the dense base; `off` keeps
+    /// the dense base on Metal.
     ///
     /// No quantized form is the dense base. Q8_0 moves an expert least: over
     /// two experts' held-out positions (2078 and 865) its log-probabilities
@@ -97,9 +103,10 @@ impl ServeQuant {
     /// about 100 and about 290 of the first expert's 2078) moves by ten or
     /// twenty with nothing but the order a sum is added in.
     pub fn for_build() -> Option<Self> {
-        if cfg!(any(feature = "cuda", feature = "metal")) {
+        let on_gpu = cfg!(any(feature = "cuda", feature = "metal"));
+        if on_gpu && !crate::device::serves_from_cpu() {
             None
-        } else if crate::device::six_bit_tiles() {
+        } else if crate::device::six_bit_by_default() {
             Some(ServeQuant::Q6K)
         } else {
             Some(ServeQuant::Q8_0)
@@ -235,6 +242,14 @@ pub struct RaftConfig {
     /// it: the same set trained first and third in one server came out learned
     /// and refused.
     pub seed: Option<u64>,
+    /// Decode greedily several tokens a pass where the model can
+    /// ([`crate::draft`]): guesses ride along with the token in hand and are
+    /// kept where they are the model's own next token, so what is written
+    /// is what a token at a time writes. The guesses come from what the
+    /// model wrote for earlier requests through the same blend of experts,
+    /// which it remembers between them. Off unless a caller sets it;
+    /// serving sets it.
+    pub read_ahead: bool,
 }
 
 impl Default for RaftConfig {
@@ -267,6 +282,7 @@ impl Default for RaftConfig {
             replay_ratio: 0.0,
             batch_size: 1,
             seed: None,
+            read_ahead: false,
         }
     }
 }
@@ -319,12 +335,16 @@ impl RaftConfig {
     /// `fn add(a: i64, b: i32) -> i6`), and the penalty reworded four answers
     /// in five. What they were for, a model that repeats itself without end,
     /// is ended where it starts ([`crate::decode::loops`]).
+    ///
+    /// And it reads ahead ([`RaftConfig::read_ahead`]): the same tokens,
+    /// in fewer passes over the weights.
     pub fn for_serving(max_new_tokens: usize, temperature: f64) -> Self {
         Self {
             max_new_tokens,
             temperature,
             top_p: 0.9,
             serve_quant: ServeQuant::for_build(),
+            read_ahead: true,
             ..Self::default()
         }
     }
@@ -438,17 +458,19 @@ mod tests {
         Ok(())
     }
 
-    /// A build with no GPU backend serves quantized unless told otherwise, and
-    /// a GPU build serves dense; either can be told.
+    /// A build that serves from the CPU serves quantized unless told
+    /// otherwise, and one that serves from its GPU serves dense; either can
+    /// be told.
     #[test]
     fn a_setting_names_the_build_default_a_dense_base_or_a_form() -> Result<()> {
         // On a CPU, Q6_K where it multiplies six-bit tiles and Q8_0 where it
         // does not.
         let build = ServeQuant::for_build();
-        if cfg!(any(feature = "cuda", feature = "metal")) {
+        let on_gpu = cfg!(any(feature = "cuda", feature = "metal"));
+        if on_gpu && !crate::device::serves_from_cpu() {
             assert_eq!(build, None);
         } else {
-            let fast = crate::device::six_bit_tiles();
+            let fast = crate::device::six_bit_by_default();
             assert_eq!(
                 build,
                 Some(if fast {
@@ -521,6 +543,8 @@ mod tests {
         // Serving holds the base as the build serves it; training never does.
         assert_eq!(cfg.serve_quant, ServeQuant::for_build());
         assert_eq!(RaftConfig::default().serve_quant, None);
+        // Serving reads ahead; nothing else does unless it asks.
+        assert!(cfg.read_ahead && !RaftConfig::default().read_ahead);
         Ok(())
     }
 }

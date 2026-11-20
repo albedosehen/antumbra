@@ -1,5 +1,6 @@
 //! A served base's quantized weights as Antumbra multiplies them on a CPU
-//! with AVX-512 VNNI: sixteen rows to a tile, each SIMD lane a row.
+//! with AVX-512 VNNI, or with NEON's dot product: sixteen rows to a tile,
+//! each SIMD lane a row.
 //!
 //! candle multiplies a quantized weight through tiles of its own, and on a
 //! decoded token three things about that cost more than the arithmetic. A
@@ -20,15 +21,17 @@
 //!
 //! Each form a base is served in has a tile: Q4_K, Q8_0, and Q6_K, which is
 //! also the head's form over a Q4_K base, at the size of its plain blocks.
-//! Six-bit values are unpacked with AVX-512 VBMI, which the first CPUs with
-//! VNNI lack; there a Q6_K weight is candle's to multiply.
+//! Six-bit values are cut out of their bytes with AVX-512 VBMI, which the
+//! first CPUs with VNNI lack; there, as on a CPU with AVX2 alone, they are
+//! packed the other way round and cut out with two multiplies.
 //!
 //! A tile holds what the plain blocks hold, each SIMD lane a row, in the
 //! order its kernel reads it, and the input is quantized the way candle
 //! quantizes it. A row's product is summed in whole numbers until a block's
 //! last step, so it is the product candle computes up to the order of a few
-//! float sums. Without AVX-512 VNNI nothing is tiled and candle multiplies
-//! as before.
+//! float sums. The kernels below are AVX-512's; `tiles_neon.rs` holds
+//! aarch64's, four rows to a vector over the same tiles. On a CPU with
+//! neither nothing is tiled and candle multiplies as before.
 
 use candle_core::quantized::{GgmlDType, QTensor};
 use candle_core::{bail, DType, Device, Result, Storage, Tensor};
@@ -86,17 +89,44 @@ struct TileQ6 {
     /// Each run of 16's scale, a row a byte.
     scales: [[i8; ROWS]; 16],
     /// `[group of 4 values (64)][row (16)][3 bytes]`: a row's four 6-bit
-    /// values in 24 bits, the first of them lowest. Each value is 32 more
-    /// than the weight's, so it is unsigned for the dot-product step.
+    /// values in 24 bits, the first of them lowest or highest as the kernel
+    /// that reads them cuts them out ([`Sixes`]). Each value is 32 more than
+    /// the weight's, so it is unsigned for the dot-product step.
     qs: [u8; QK_K / 4 * ROWS * 3],
+}
+
+/// Which way round a row's four six-bit values lie in their three bytes of
+/// a tile. The tiles are packed on the CPU that multiplies them, so they are
+/// packed for the instructions it cuts them out with.
+#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Sixes {
+    /// The first value lowest in the 24 bits: what AVX-512 VBMI's shifts and
+    /// NEON's tables cut out.
+    FirstLowest,
+    /// The first value highest, the bytes in that order: what AVX2 cuts out
+    /// with two multiplies (`tiles_avx2.rs`).
+    FirstHighest,
+}
+
+/// The way round this CPU's six-bit tiles are packed.
+fn sixes() -> Sixes {
+    #[cfg(target_arch = "x86_64")]
+    if !wide_six_bit() {
+        return Sixes::FirstHighest;
+    }
+    Sixes::FirstLowest
 }
 
 const _: () = assert!(std::mem::size_of::<TileQ6>() == 3360);
 const _: () = assert!(std::mem::size_of::<TileQ4K>() == 2368);
 const _: () = assert!(std::mem::size_of::<TileQ8>() == 544);
 
-// Off x86-64 nothing is tiled, so nothing there reads a tile.
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+// Where nothing is tiled, nothing reads a tile.
+#[cfg_attr(
+    not(any(target_arch = "x86_64", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 enum Tiles {
     /// `[sixteen rows][block of 256]`.
     Q4K(Vec<TileQ4K>),
@@ -118,10 +148,25 @@ pub(super) fn available() -> bool {
     crate::device::tiles()
 }
 
-/// Whether this CPU can multiply through six-bit tiles as well: their values
-/// are unpacked with AVX-512 VBMI, which the first CPUs with VNNI lack.
+/// Whether this CPU can multiply through six-bit tiles as well.
 pub(super) fn six_bit() -> bool {
     crate::device::six_bit_tiles()
+}
+
+/// Whether this CPU multiplies through the AVX-512 kernels, and so takes the
+/// plain-row steps of `wide` in vectors of sixteen as well: the other x86-64
+/// CPUs that tile multiply through AVX2 and take those steps in vectors of
+/// eight (`wide::avx2`).
+#[cfg(target_arch = "x86_64")]
+pub(super) fn wide() -> bool {
+    crate::device::wide_tiles()
+}
+
+/// Whether this CPU multiplies six-bit tiles, and the head's sketch, through
+/// AVX-512: with VBMI, which the first CPUs with VNNI lack.
+#[cfg(target_arch = "x86_64")]
+pub(super) fn wide_six_bit() -> bool {
+    crate::device::wide_tiles() && is_x86_feature_detected!("avx512vbmi")
 }
 
 /// The 4-bit value `v` of a plain Q4_K block's 128 bytes: the low nibbles of
@@ -166,6 +211,7 @@ fn six(ql: &[u8], qh: &[u8], i: usize) -> u8 {
 /// Tile the plain Q6_K blocks of `tiles.len() / kb` sixteens of rows, `kb`
 /// blocks a row.
 fn pack_q6k(blocks: &[u8], kb: usize, tiles: &mut [TileQ6]) {
+    let order = sixes();
     for (t, tile) in tiles.iter_mut().enumerate() {
         let (first_row, b) = (t / kb * ROWS, t % kb);
         for r in 0..ROWS {
@@ -176,11 +222,20 @@ fn pack_q6k(blocks: &[u8], kb: usize, tiles: &mut [TileQ6]) {
                 tile.scales[s][r] = *scale as i8;
             }
             for g in 0..QK_K / 4 {
-                let four = (0..4).fold(0u32, |all, j| {
-                    all | (u32::from(six(ql, qh, 4 * g + j)) << (6 * j))
-                });
-                tile.qs[(g * ROWS + r) * 3..(g * ROWS + r) * 3 + 3]
-                    .copy_from_slice(&four.to_le_bytes()[..3]);
+                let value = |j: usize| u32::from(six(ql, qh, 4 * g + j));
+                let bytes = match order {
+                    Sixes::FirstLowest => {
+                        let four = (0..4).fold(0u32, |all, j| all | (value(j) << (6 * j)));
+                        let [low, middle, high, _] = four.to_le_bytes();
+                        [low, middle, high]
+                    }
+                    Sixes::FirstHighest => {
+                        let four = (0..4).fold(0u32, |all, j| (all << 6) | value(j));
+                        let [_, high, middle, low] = four.to_be_bytes();
+                        [high, middle, low]
+                    }
+                };
+                tile.qs[(g * ROWS + r) * 3..(g * ROWS + r) * 3 + 3].copy_from_slice(&bytes);
             }
         }
     }
@@ -468,7 +523,10 @@ impl Row {
     /// Block `b` of the row as a kernel outside the tiles reads it: its 256
     /// values, its scale, and the sum of its values.
     // Off x86-64 there is no such kernel.
-    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+    #[cfg_attr(
+        not(any(target_arch = "x86_64", target_arch = "aarch64")),
+        allow(dead_code)
+    )]
     pub(super) fn block(&self, b: usize) -> (&[i8], f32, i32) {
         (
             &self.qs[b * QK_K..(b + 1) * QK_K],
@@ -529,7 +587,7 @@ fn quantize(x: &[f32]) -> Row {
 /// Quantize `x` into `row`, whose room is kept from one row to the next: a
 /// decoded token quantizes four rows a layer.
 pub(super) fn quantize_into(x: &[f32], row: &mut Row) {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     if available() {
         // SAFETY: `available` found the features the kernel is built for.
         unsafe { kernels::quantize(x, row) };
@@ -666,11 +724,15 @@ pub(super) fn forward(group: &[&Tiled], x: &Tensor) -> Result<Vec<Tensor>> {
         .collect()
 }
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(target_arch = "aarch64")]
+#[path = "tiles_neon.rs"]
+mod kernels;
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod kernels {
     use super::{Row, Tiled};
 
-    /// Nothing is tiled off x86-64, so nothing reaches this.
+    /// Nothing is tiled on other CPUs, so nothing reaches this.
     pub(super) fn multiply(_: &[&Tiled], _: &[Row], _: &mut [&mut [f32]]) {}
 
     pub(super) unsafe fn sixteens(_: &Tiled, _: usize, _: usize, _: &[Row], _: *mut f32) {}
@@ -678,8 +740,67 @@ mod kernels {
     pub(super) unsafe fn quantize_block(_: *const f32, _: *mut f32, _: *mut i8, _: *mut i32) {}
 }
 
+/// The x86-64 kernels: AVX-512's where the CPU has them for the form a
+/// weight is in, and AVX2's otherwise.
 #[cfg(target_arch = "x86_64")]
 mod kernels {
+    use super::{avx2, avx512, Row, Tiled, Tiles};
+
+    /// Whether `w` is multiplied through AVX-512: six-bit tiles need VBMI as
+    /// well, which the first CPUs with VNNI lack.
+    fn wide(w: &Tiled) -> bool {
+        match &w.tiles {
+            Tiles::Q6K(_) => super::wide_six_bit(),
+            _ => super::wide(),
+        }
+    }
+
+    pub(super) fn multiply(group: &[&Tiled], rows: &[Row], outs: &mut [&mut [f32]]) {
+        match group.iter().all(|w| wide(w)) {
+            true => avx512::multiply(group, rows, outs),
+            false => avx2::multiply(group, rows, outs),
+        }
+    }
+
+    /// SAFETY (for the caller): this CPU tiles ([`super::available`]), and
+    /// the rest as the kernel it is handed to asks.
+    pub(super) unsafe fn sixteens(
+        w: &Tiled,
+        first: usize,
+        last: usize,
+        rows: &[Row],
+        out: *mut f32,
+    ) {
+        match wide(w) {
+            true => avx512::sixteens(w, first, last, rows, out),
+            false => avx2::sixteens(w, first, last, rows, out),
+        }
+    }
+
+    /// SAFETY (for the caller): this CPU tiles ([`super::available`]).
+    pub(super) unsafe fn quantize(x: &[f32], row: &mut Row) {
+        match super::wide() {
+            true => avx512::quantize(x, row),
+            false => avx2::quantize(x, row),
+        }
+    }
+
+    /// SAFETY (for the caller): this CPU tiles ([`super::available`]), and
+    /// the rest as the kernel it is handed to asks.
+    pub(super) unsafe fn quantize_block(xs: *const f32, d: *mut f32, qs: *mut i8, sums: *mut i32) {
+        match super::wide() {
+            true => avx512::quantize_block(xs, d, qs, sums),
+            false => avx2::quantize_block(xs, d, qs, sums),
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[path = "tiles_avx2.rs"]
+mod avx2;
+
+#[cfg(target_arch = "x86_64")]
+mod avx512 {
     use super::super::phases::{dispatch, Phase};
     use super::{Row, TileQ4K, TileQ6, TileQ8, Tiled, Tiles, QK8_0, QK_K, ROWS};
     use std::arch::x86_64::*;
@@ -1017,6 +1138,20 @@ mod kernels {
         out
     }
 
+    /// [`q6k_block_of`] for the first `N` of `rows`, their products added
+    /// to the first `N` of `acc`.
+    #[target_feature(enable = "avx512f,avx512bw,avx512vnni,avx512vbmi,f16c")]
+    unsafe fn q6k_block_some<const N: usize>(
+        tile: &TileQ6,
+        rows: &[Row],
+        block: usize,
+        acc: &mut [__m512],
+    ) {
+        let some: [&Row; N] = std::array::from_fn(|i| &rows[i]);
+        let held: [__m512; N] = std::array::from_fn(|i| acc[i]);
+        acc[..N].copy_from_slice(&q6k_block_of(tile, some, block, held));
+    }
+
     /// Sixteen rows' products with one block of 32 input values, added to
     /// `acc`. The weights are stored 128 up, so the input's sum over the
     /// block, 128 times, comes back off.
@@ -1049,6 +1184,11 @@ mod kernels {
     /// Rows whose running sums are kept at once while a sixteen's tiles go
     /// by.
     const TOGETHER: usize = 32;
+
+    /// Rows a six-bit tile is cut once for: each has a sum and a total in
+    /// hand through the block, and eight rows' are what the registers hold
+    /// beside the tile's own vectors.
+    const Q6K_TOGETHER: usize = 8;
 
     /// Sixteen `t` of `w` against the one row `row`.
     #[target_feature(enable = "avx512f,avx512bw,avx512vnni,f16c")]
@@ -1134,25 +1274,36 @@ mod kernels {
             Tiles::Q6K(tiles) => {
                 let kb = w.cols / QK_K;
                 for (b, tile) in tiles[t * kb..(t + 1) * kb].iter().enumerate() {
-                    let mut i = 0;
-                    while i + 4 <= rows.len() {
-                        let four = q6k_block_of::<4>(
-                            tile,
-                            [&rows[i], &rows[i + 1], &rows[i + 2], &rows[i + 3]],
-                            b,
-                            [acc[i], acc[i + 1], acc[i + 2], acc[i + 3]],
-                        );
-                        acc[i..i + 4].copy_from_slice(&four);
-                        i += 4;
-                    }
-                    for (acc, row) in acc[i..].iter_mut().zip(&rows[i..]) {
-                        *acc = q6k_block(
-                            tile,
-                            row.qs.as_ptr().add(b * QK_K),
-                            *row.d.get_unchecked(b),
-                            row.sums.as_ptr().add(b * 16),
-                            *acc,
-                        );
+                    // The rows share the cutting of the tile, as many to a
+                    // cutting as have their sums in hand at once: as few
+                    // cuttings as that allows, the rows spread evenly over
+                    // them (nine rows are five and four, not eight and one
+                    // alone).
+                    let (mut rows, mut acc) = (rows, &mut *acc);
+                    let mut cuttings = rows.len().div_ceil(Q6K_TOGETHER);
+                    while !rows.is_empty() {
+                        let n = rows.len().div_ceil(cuttings);
+                        cuttings -= 1;
+                        match n {
+                            8 => q6k_block_some::<8>(tile, rows, b, acc),
+                            7 => q6k_block_some::<7>(tile, rows, b, acc),
+                            6 => q6k_block_some::<6>(tile, rows, b, acc),
+                            5 => q6k_block_some::<5>(tile, rows, b, acc),
+                            4 => q6k_block_some::<4>(tile, rows, b, acc),
+                            3 => q6k_block_some::<3>(tile, rows, b, acc),
+                            2 => q6k_block_some::<2>(tile, rows, b, acc),
+                            _ => {
+                                acc[0] = q6k_block(
+                                    tile,
+                                    rows[0].qs.as_ptr().add(b * QK_K),
+                                    *rows[0].d.get_unchecked(b),
+                                    rows[0].sums.as_ptr().add(b * 16),
+                                    acc[0],
+                                );
+                            }
+                        }
+                        rows = &rows[n..];
+                        acc = &mut acc[n..];
                     }
                 }
             }
@@ -1277,6 +1428,12 @@ mod tests {
         Ok((a - b)?.abs()?.flatten_all()?.max(0)?.to_scalar::<f32>()? / peak)
     }
 
+    /// Whether two runs of products are the same to the bit. `==` is not
+    /// that: it takes a nothing of either sign for the other.
+    fn same_bits(a: &[f32], b: &[f32]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.to_bits() == b.to_bits())
+    }
+
     /// The forms this CPU has tiles for.
     fn forms() -> Vec<GgmlDType> {
         let mut forms = vec![GgmlDType::Q4K, GgmlDType::Q8_0];
@@ -1294,13 +1451,68 @@ mod tests {
         Ok((tiled, QMatMul::from_qtensor(q)?))
     }
 
+    /// How near candle's own product a form's tiles come on this CPU. candle
+    /// quantizes the input as the tiles do, 256 values to a scale, except for
+    /// a Q8_0 weight on a CPU without AVX-512 VNNI, where it gives every 32
+    /// values a scale of their own: there the two products are of two
+    /// roundings of the input, a hundredth or two apart.
+    /// [`tiles_multiply_what_they_hold`] holds the tiles to the bit there.
+    fn as_candle(dtype: GgmlDType) -> f32 {
+        #[cfg(target_arch = "x86_64")]
+        let as_the_tiles = wide();
+        #[cfg(not(target_arch = "x86_64"))]
+        let as_the_tiles = false;
+        if !as_the_tiles && dtype == GgmlDType::Q8_0 {
+            3e-2
+        } else {
+            1e-5
+        }
+    }
+
+    /// A weight multiplied through its tiles is the weight as quantized
+    /// times the rows as quantized, on any CPU that tiles: the product of
+    /// the values the tiles and the quantized rows stand for, to within the
+    /// order of a few float sums.
+    #[test]
+    fn tiles_multiply_what_they_hold() -> Result<()> {
+        if !available() {
+            return Ok(());
+        }
+        for dtype in forms() {
+            let w = Tensor::randn(0f32, 0.05, (48, 512), &Device::Cpu)?;
+            let q = QTensor::quantize(&w, dtype)?;
+            let held = q.dequantize(&Device::Cpu)?;
+            let Some(tiled) = Tiled::pack(&q)? else {
+                bail!("{dtype:?} was not tiled")
+            };
+            for n in [1usize, 5, 35] {
+                let x = Tensor::randn(0f32, 1.0, (n, 512), &Device::Cpu)?;
+                let mut read = Vec::with_capacity(n * 512);
+                for row in x.to_vec2::<f32>()? {
+                    let row = quantize_plainly(&row);
+                    read.extend(
+                        row.qs
+                            .iter()
+                            .enumerate()
+                            .map(|(i, q)| row.d[i / QK_K] * f32::from(*q)),
+                    );
+                }
+                let want = Tensor::from_vec(read, (n, 512), &Device::Cpu)?.matmul(&held.t()?)?;
+                let got = forward(&[&tiled], &x)?;
+                let gap = largest_gap(&got[0], &want)?;
+                assert!(gap < 1e-5, "{dtype:?}, {n} rows: off by {gap} of the peak");
+            }
+        }
+        Ok(())
+    }
+
     /// A weight multiplied through its tiles is the product candle computes,
     /// at both forms, for one row and for a prompt's, and for weights that
     /// share their rows as for one alone.
     #[test]
     fn tiles_multiply_as_candle_does() -> Result<()> {
         if !available() {
-            eprintln!("skipped: this CPU has no AVX-512 VNNI, so nothing is tiled");
+            eprintln!("skipped: nothing is tiled on this CPU");
             return Ok(());
         }
         for dtype in forms() {
@@ -1321,7 +1533,10 @@ mod tests {
                 assert_eq!(got_b.dims(), want_b.dims());
                 for (got, want) in [(got_a, &want_a), (got_b, &want_b)] {
                     let gap = largest_gap(got, want)?;
-                    assert!(gap < 1e-5, "{dtype:?} {shape:?}: off by {gap} of the peak");
+                    assert!(
+                        gap < as_candle(dtype),
+                        "{dtype:?} {shape:?}: off by {gap} of the peak"
+                    );
                 }
                 let alone = forward(&[&b], &x)?;
                 let [alone] = alone.as_slice() else {
@@ -1349,7 +1564,10 @@ mod tests {
             let x = Tensor::cat(&[&dead, &live], 2)?;
             let got = forward(&[&tiled], &x)?;
             let gap = largest_gap(&got[0], &candle.forward(&x)?)?;
-            assert!(gap < 1e-5, "{dtype:?}: off by {gap} of the peak");
+            assert!(
+                gap < as_candle(dtype),
+                "{dtype:?}: off by {gap} of the peak"
+            );
             let none = Tensor::zeros((1, 1, 512), DType::F32, &Device::Cpu)?;
             let got = forward(&[&tiled], &none)?;
             let most = got[0].abs()?.flatten_all()?.max(0)?.to_scalar::<f32>()?;
@@ -1468,9 +1686,133 @@ mod tests {
                     )
                 };
             }
-            assert_eq!(parts, whole, "{dtype:?}");
+            assert!(
+                same_bits(&parts, &whole),
+                "{dtype:?}: the weight in parts is not the weight whole"
+            );
             let mut short = vec![0f32; 48];
             assert!(multiply(&[&tiled], &row, &mut [&mut short]).is_err());
+        }
+        Ok(())
+    }
+
+    /// Rows multiplied together are each row multiplied alone, to the bit,
+    /// at every form and for every number of rows that is taken another way:
+    /// one, the few that share a tile's cutting, what is left over after
+    /// them, and more than are kept together.
+    #[test]
+    fn rows_multiplied_together_are_each_multiplied_alone() -> Result<()> {
+        if !available() {
+            return Ok(());
+        }
+        for dtype in forms() {
+            let (Some(tiled), _) = weight(48, 768, dtype)? else {
+                bail!("{dtype:?} was not tiled")
+            };
+            let most = 2 * 32 + 3;
+            let mut xs: Vec<f32> = Tensor::randn(0f32, 1.0, most * 768, &Device::Cpu)?.to_vec1()?;
+            // A block of nothing in one row, and a row of nothing.
+            xs[5 * 768 + 256..5 * 768 + 512].fill(0.0);
+            xs[9 * 768..10 * 768].fill(0.0);
+            let rows = quantize_rows(&xs, 768);
+            let mut alone = vec![0f32; most * 48];
+            for (row, out) in rows.iter().zip(alone.chunks_exact_mut(48)) {
+                multiply(&[&tiled], row, &mut [out])?;
+            }
+            for n in [
+                1usize, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 19, 20, 23, 24, 27, 31,
+                32, 33, 34, 35, 48, most,
+            ] {
+                let mut together = vec![0f32; n * 48];
+                // SAFETY: each row holds the weight's 768 values, `together`
+                // every row's 48 products, and nothing else writes them.
+                unsafe {
+                    tiled.multiply_sixteens(0, tiled.sixteens(), &rows[..n], together.as_mut_ptr())
+                };
+                assert!(
+                    same_bits(&together, &alone[..n * 48]),
+                    "{dtype:?}: {n} rows together are not the rows alone"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Weights and input values at the ends of their ranges multiply to what
+    /// they stand for, alone and among other rows. The kernels sum products
+    /// in sixteen bits for as long as they fit, and the ends are where the
+    /// sums are widest: every stored value its form's least or its most,
+    /// against input values of 127 and of -127.
+    #[test]
+    fn values_at_their_extremes_multiply_as_any_do() -> Result<()> {
+        if !available() {
+            return Ok(());
+        }
+        let (rows, cols, n) = (32usize, 512usize, 35usize);
+        // A run of sixteen weights: all one value; one, then fifteen of the
+        // other sign just under it; and nothing, then fifteen of one value.
+        let weights: [fn(usize) -> f32; 3] = [
+            |_| 0.05,
+            |i| if i % 16 == 0 { 0.05 } else { -0.0485 },
+            |i| if i % 16 == 0 { 0.0 } else { 0.05 },
+        ];
+        // A block of 256 input values: all one value, which is quantized to
+        // -127; one below nothing and the rest above, quantized to 127; and
+        // the two signs turn about.
+        let inputs: [fn(usize) -> f32; 3] = [
+            |_| 1.0,
+            |i| if i % 256 == 0 { -1.0 } else { 1.0 },
+            |i| if i % 2 == 0 { -1.0 } else { 1.0 },
+        ];
+        for dtype in forms() {
+            for (wi, weight) in weights.iter().enumerate() {
+                let w: Vec<f32> = (0..rows * cols).map(|i| weight(i % cols)).collect();
+                let w = Tensor::from_vec(w, (rows, cols), &Device::Cpu)?;
+                let q = QTensor::quantize(&w, dtype)?;
+                let held = q.dequantize(&Device::Cpu)?;
+                let Some(tiled) = Tiled::pack(&q)? else {
+                    bail!("{dtype:?} was not tiled")
+                };
+                for (xi, input) in inputs.iter().enumerate() {
+                    let xs: Vec<f32> = (0..n * cols).map(|i| input(i % cols)).collect();
+                    let given = quantize_rows(&xs, cols);
+                    let read: Vec<f32> = given
+                        .iter()
+                        .flat_map(|row| {
+                            row.qs
+                                .iter()
+                                .enumerate()
+                                .map(|(i, q)| row.d[i / QK_K] * f32::from(*q))
+                        })
+                        .collect();
+                    let want =
+                        Tensor::from_vec(read, (n, cols), &Device::Cpu)?.matmul(&held.t()?)?;
+                    let x = Tensor::from_vec(xs, (n, cols), &Device::Cpu)?;
+                    let got = forward(&[&tiled], &x)?;
+                    // Against the sizes summed, 26 a row, and not the sum: the
+                    // signs that turn about leave next to nothing of it. A
+                    // sum that left its sixteen bits would be out by far
+                    // more than the order of a float sum.
+                    let gap = (&got[0] - &want)?
+                        .abs()?
+                        .flatten_all()?
+                        .max(0)?
+                        .to_scalar::<f32>()?;
+                    assert!(
+                        gap < 1e-5 * 0.05 * cols as f32,
+                        "{dtype:?}, weights {wi}, input {xi}: off by {gap}"
+                    );
+                    let together: Vec<f32> = got[0].flatten_all()?.to_vec1()?;
+                    for (i, row) in given.iter().enumerate() {
+                        let mut alone = vec![0f32; rows];
+                        multiply(&[&tiled], row, &mut [&mut alone])?;
+                        assert!(
+                            same_bits(&alone, &together[i * rows..(i + 1) * rows]),
+                            "{dtype:?}, weights {wi}, input {xi}: row {i} among {n} is not the row alone"
+                        );
+                    }
+                }
+            }
         }
         Ok(())
     }

@@ -807,3 +807,40 @@ async fn a_revoked_token_is_refused_like_an_expired_one() -> anyhow::Result<()> 
     );
     Ok(())
 }
+
+/// The policy's knobs are read with a token and not without one, and every
+/// knob the policy has is among them with a range the default sits in.
+#[tokio::test]
+async fn the_policys_knobs_are_named_with_their_ranges() -> anyhow::Result<()> {
+    let app = router(state().await?);
+    let ask = |tok: Option<String>| -> anyhow::Result<Request<Body>> {
+        let mut req = Request::builder().method("GET").uri("/console/knobs");
+        if let Some(tok) = tok {
+            req = req.header(header::AUTHORIZATION, format!("Bearer {tok}"));
+        }
+        Ok(req.body(Body::empty())?)
+    };
+    let refused = app.clone().oneshot(ask(None)?).await?.status();
+    anyhow::ensure!(refused == StatusCode::UNAUTHORIZED, "no token: {refused}");
+
+    let res = app.oneshot(ask(Some(valid_token()?))?).await?;
+    anyhow::ensure!(res.status() == StatusCode::OK, "{}", res.status());
+    let body: serde_json::Value = serde_json::from_str(&body_text(res).await?)?;
+    let knobs = body["knobs"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("no knobs: {body}"))?;
+    let policy = serde_json::to_value(antumbra_core::MemoryPolicy::default())?;
+    let fields = policy
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("the policy is not an object"))?;
+    anyhow::ensure!(knobs.len() == fields.len(), "{} knobs", knobs.len());
+    for knob in knobs {
+        let key = knob["key"].as_str().unwrap_or_default();
+        anyhow::ensure!(fields.contains_key(key), "unknown knob {key}");
+        let (min, max) = (knob["min"].as_f64(), knob["max"].as_f64());
+        anyhow::ensure!(min < max, "{key}: {min:?}..{max:?}");
+        anyhow::ensure!(knob["step"].as_f64() > Some(0.0), "{key}: no step");
+        anyhow::ensure!(!knob["help"].as_str().unwrap_or_default().is_empty());
+    }
+    Ok(())
+}

@@ -39,7 +39,7 @@ use serde_json::{json, Value};
 use antumbra_http::{SurfaceClient, DEVICE_HEADER};
 
 use crate::agents::{self, Agent};
-use crate::claude::hooks;
+use crate::claude::{hooks, managed, policy};
 
 /// Where the store's vectors come from: ollama's default address.
 const OLLAMA: &str = "http://127.0.0.1:11434";
@@ -1052,7 +1052,7 @@ fn cleartext_problem(address: &str, allow_http: bool) -> Option<String> {
 /// The host in what follows a URL's scheme: the authority up to the first
 /// `/`, `?` or `#`, without userinfo or a port, and a bracketed IPv6 address
 /// without its brackets.
-fn host_of(rest: &str) -> &str {
+pub(crate) fn host_of(rest: &str) -> &str {
     let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
     let authority = authority.rsplit('@').next().unwrap_or(authority);
     if let Some(bracketed) = authority.strip_prefix('[') {
@@ -1065,7 +1065,7 @@ fn host_of(rest: &str) -> &str {
 }
 
 /// Whether `host` names this machine: `localhost`, or a loopback address.
-fn is_this_machine(host: &str) -> bool {
+pub(crate) fn is_this_machine(host: &str) -> bool {
     host.eq_ignore_ascii_case("localhost")
         || host
             .parse::<std::net::IpAddr>()
@@ -1084,7 +1084,10 @@ fn finish(
     state: &Value,
     steps: &Steps,
 ) -> anyhow::Result<()> {
-    let env = |name: &str| std::env::var(name).ok();
+    let variable = |name: &str| std::env::var(name).ok();
+    // A setup run from a session Unity Gateway started inherits what `ug`
+    // set for the agent it started, which is not the user's own.
+    let env = agents::gateway::outside(home, &variable);
     let find = |name: &str| find_program(name);
     let ground = agents::Ground {
         home,
@@ -1093,10 +1096,30 @@ fn finish(
         find: &find,
     };
     let chosen = chosen(common, &ground)?;
+    // Claude Code's own settings, as they stand when they are asked for.
+    let settings = || -> Value {
+        json_at(
+            &common
+                .claude_dir
+                .clone()
+                .unwrap_or_else(|| home.join(".claude"))
+                .join("settings.json"),
+        )
+        .unwrap_or(Value::Null)
+    };
     let mut connected: Vec<&str> = Vec::new();
     if chosen.claude {
         connect_claude(home, antumbra, common, url, workspace, steps)?;
         connected.push(CLAUDE);
+        // Claude Code as Unity Gateway starts it: a launch that leaves the
+        // user's settings out is given Antumbra's in a file of its own.
+        if agents::gateway::present(&ground) {
+            let launch = json_at(&agents::gateway::claude_settings(&ground))
+                .as_ref()
+                .and_then(agents::gateway::claude_launch);
+            let alone = claude_settings_alone(antumbra, url, workspace, &settings())?;
+            agents::gateway::connect_claude(antumbra, &alone, launch, steps)?;
+        }
     } else if common.no_claude {
         steps.info("left Claude Code alone (--no-claude)");
     } else {
@@ -1123,16 +1146,7 @@ fn finish(
         }
     }
     // After the settings, so the name read is the one the hooks will report.
-    let settings: Value = std::fs::read_to_string(
-        common
-            .claude_dir
-            .clone()
-            .unwrap_or_else(|| home.join(".claude"))
-            .join("settings.json"),
-    )
-    .ok()
-    .and_then(|t| serde_json::from_str(&t).ok())
-    .unwrap_or(Value::Null);
+    let settings = settings();
     let token = std::fs::read_to_string(antumbra.join("token.txt"))
         .map(|t| t.trim().to_string())
         .unwrap_or_default();
@@ -1383,6 +1397,55 @@ fn script_command(path: &Path) -> String {
     }
 }
 
+/// What setup wires into Claude Code's settings, but for whether its file
+/// memory is turned off: the hooks, run from `dir` (`~/.antumbra/hooks`),
+/// where the server is, and this machine's name where the settings give none.
+fn claude_wiring(dir: &Path, url: &str, workspace: &str) -> settings::Wiring {
+    settings::Wiring {
+        hooks: platform_hooks()
+            .into_iter()
+            .map(|(event, script, timeout)| {
+                settings::Hook::script(event, script, script_command(&dir.join(script)), timeout)
+            })
+            .chain(skill_hooks())
+            .collect(),
+        env: vec![
+            ("ANTUMBRA_URL".into(), url.to_string()),
+            ("ANTUMBRA_WORKSPACE_ID".into(), workspace.to_string()),
+        ],
+        env_default: vec![("ANTUMBRA_HOST_ID".into(), host_id())],
+        auto_memory_off: false,
+        file: "settings.json",
+    }
+}
+
+/// Claude Code settings that hold what setup wires and nothing else, for a
+/// launch that leaves the user's own out (see [`agents::gateway`]): the
+/// hooks, where the server is, the name `settings` (the user's own) has this
+/// machine's sessions report, and Claude Code's file memory off where
+/// `settings` has it off.
+fn claude_settings_alone(
+    antumbra: &Path,
+    url: &str,
+    workspace: &str,
+    settings: &Value,
+) -> anyhow::Result<String> {
+    let wiring = settings::Wiring {
+        env_default: vec![("ANTUMBRA_HOST_ID".into(), session_host(settings))],
+        auto_memory_off: settings.get("autoMemoryEnabled") == Some(&Value::Bool(false)),
+        file: agents::gateway::CLAUDE_SETTINGS,
+        ..claude_wiring(&antumbra.join("hooks"), url, workspace)
+    };
+    Ok(settings::wire("", &wiring)?.text)
+}
+
+/// The JSON a file holds, or nothing when it is not there or does not parse.
+fn json_at(path: &Path) -> Option<Value> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+}
+
 fn connect_claude(
     home: &Path,
     antumbra: &Path,
@@ -1420,20 +1483,8 @@ fn connect_claude(
             || confirm("Turn off Claude Code's own file memory, so Antumbra is the one store?")?
     };
     let wiring = settings::Wiring {
-        hooks: platform_hooks()
-            .into_iter()
-            .map(|(event, script, timeout)| {
-                settings::Hook::script(event, script, script_command(&dir.join(script)), timeout)
-            })
-            .chain(skill_hooks())
-            .collect(),
-        env: vec![
-            ("ANTUMBRA_URL".into(), url.to_string()),
-            ("ANTUMBRA_WORKSPACE_ID".into(), workspace.to_string()),
-        ],
-        env_default: vec![("ANTUMBRA_HOST_ID".into(), host_id())],
         auto_memory_off,
-        file: "settings.json",
+        ..claude_wiring(&dir, url, workspace)
     };
     let wired = settings::wire(&text, &wiring)?;
     // A hook wired by hand somewhere else is worth a word; setup's own, from an
@@ -1657,6 +1708,115 @@ fn stamp_of(said: &Value, host: &str) -> Stamp {
     }
 }
 
+/// The name setup registers the MCP server under with Claude Code.
+const CLAUDE_SERVER: &str = "antumbra";
+
+/// What is said of a file that is the organization's to change.
+const THEIRS: &str = "that file is your organization's: ask whoever manages it";
+
+/// What is said of a file Unity Gateway writes. It writes it from the
+/// workspace's configuration and writes it again, so what it holds is the
+/// workspace's to change and not the user's to edit.
+const WORKSPACES: &str =
+    "that file is Unity Gateway's, written from your workspace's configuration: ask whoever manages the workspace";
+
+/// Whose a file that stops something is to change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Whose {
+    Organization,
+    Workspace,
+    User,
+}
+
+impl Whose {
+    /// `by` is the organization's when `managed`, and the workspace's when it
+    /// is `gateway`, the settings file Unity Gateway passes Claude Code.
+    fn of(by: &Path, managed: bool, gateway: Option<&Path>) -> Self {
+        if managed {
+            Whose::Organization
+        } else if gateway == Some(by) {
+            Whose::Workspace
+        } else {
+            Whose::User
+        }
+    }
+}
+
+/// What the check says when a file stops the hooks setup wired into Claude
+/// Code, and what to do about it. Nothing when they run. `gateway` is the
+/// settings file Unity Gateway passes, where the launch judged is its.
+fn hooks_held_back(hooks: &policy::Hooks, gateway: Option<&Path>) -> Option<(String, String)> {
+    let policy::Hooks::Stopped { by, key, managed } = hooks else {
+        return None;
+    };
+    let why = match *key {
+        "allowManagedHooksOnly" => "Claude Code runs only your organization's hooks",
+        "strictPluginOnlyCustomization" => "Claude Code runs no hook from a settings file of yours",
+        _ => "Claude Code's hooks are turned off",
+    };
+    let said = format!(
+        "{why} ({key} in {}), so Antumbra's do not run: nothing is recalled for a prompt, and nothing asks for what a turn learned",
+        by.display()
+    );
+    let tools = "The memory tools still work when they are asked for";
+    let fix = match Whose::of(by, *managed, gateway) {
+        Whose::Organization => format!("{THEIRS}. {tools}"),
+        Whose::Workspace => format!("{WORKSPACES}. {tools}"),
+        Whose::User => format!("remove {key} from that file"),
+    };
+    Some((said, fix))
+}
+
+/// What the check says when a file keeps Claude Code from loading the MCP
+/// server setup registered at `url`, and what to do about it. Nothing when it
+/// loads. `gateway` is the settings file Unity Gateway passes, where the
+/// launch judged is its.
+fn server_held_back(
+    server: &policy::Server,
+    url: &str,
+    gateway: Option<&Path>,
+) -> Option<(String, String)> {
+    let policy::Server::Blocked { by, managed, why } = server else {
+        return None;
+    };
+    let whose = Whose::of(by, *managed, gateway);
+    let by = by.display();
+    let (said, fix) = match why {
+        policy::Why::Fixed => (
+            format!("{by} fixes the MCP servers Claude Code loads, and \"{CLAUDE_SERVER}\" is not one of them, so it is not connected"),
+            format!("{THEIRS}, to add it there"),
+        ),
+        policy::Why::PluginsOnly => (
+            format!("Claude Code loads no MCP server a user registered (strictPluginOnlyCustomization in {by}), so \"{CLAUDE_SERVER}\" is not connected"),
+            THEIRS.to_string(),
+        ),
+        policy::Why::Denied => (
+            format!("a deniedMcpServers entry in {by} blocks the MCP server \"{CLAUDE_SERVER}\" ({url}), so it is not connected"),
+            match whose {
+                Whose::Organization => THEIRS.to_string(),
+                Whose::Workspace => WORKSPACES.to_string(),
+                Whose::User => "remove that entry from that file".to_string(),
+            },
+        ),
+        policy::Why::Unlisted { entry, open } => (
+            format!("{by} lists the MCP servers Claude Code may load (allowedMcpServers), and \"{CLAUDE_SERVER}\" ({url}) is not one, so it is not connected"),
+            match (whose, *open) {
+                (Whose::User, _) => format!("add {entry} to allowedMcpServers in that file"),
+                (Whose::Workspace, _) => format!("{WORKSPACES}, to add {entry}"),
+                (Whose::Organization, false) => format!("{THEIRS}, to add {entry}"),
+                // Without `allowManagedMcpServersOnly` the list is one the
+                // user's own settings add to, which the vendor's page says
+                // in as many words. Whether to is between them and whoever
+                // set the list, so it is said and not done.
+                (Whose::Organization, true) => format!(
+                    "{THEIRS}, to add {entry}. Claude Code also counts an allowedMcpServers of your own settings as part of that list (allowManagedMcpServersOnly is not set)"
+                ),
+            },
+        ),
+    };
+    Some((said, fix))
+}
+
 fn check(args: &CheckArgs) -> anyhow::Result<()> {
     let home = home()?;
     let antumbra = home.join(".antumbra");
@@ -1680,6 +1840,23 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
         println!("      {fix}");
     };
     let ok = |said: String| println!("  \u{2713} {said}");
+    // One thing found about an agent: in place, or what to do about it. What
+    // works, or waits on something setup cannot change, is said as a
+    // differing hook of Claude Code's is, and is not a failed check.
+    let say = |finding: agents::Finding, fail: &mut dyn FnMut(String, String)| match finding.fix {
+        None => println!("  \u{2713} {}", finding.said),
+        Some(fix) if finding.works => println!("  ! {}; {fix}", finding.said),
+        Some(fix) => fail(finding.said, fix),
+    };
+    let variable = |name: &str| std::env::var(name).ok();
+    let env = agents::gateway::outside(&home, &variable);
+    let find = |name: &str| find_program(name);
+    let ground = agents::Ground {
+        home: &home,
+        antumbra: agents::Program::this(find_program("antumbra").is_some()),
+        env: &env,
+        find: &find,
+    };
 
     let token_path = antumbra.join("token.txt");
     let token = std::fs::read_to_string(&token_path)
@@ -1764,10 +1941,20 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
         .clone()
         .unwrap_or_else(|| home.join(".claude"));
     let settings_path = claude.join("settings.json");
-    let settings: Value = std::fs::read_to_string(&settings_path)
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or(Value::Null);
+    let settings: Value = json_at(&settings_path).unwrap_or(Value::Null);
+    // What decides whether Claude Code runs what setup wired: the
+    // organization's files, then the user's own. Reading back what setup
+    // wrote cannot see a policy that stops it.
+    let theirs: Vec<policy::Source> = managed::files(&managed::dir())
+        .into_iter()
+        .map(|(path, object)| policy::Source::managed(path, Value::Object(object)))
+        .collect();
+    let own = policy::Source::user(settings_path.clone(), settings.clone());
+    let plain: Vec<policy::Source> = theirs.iter().cloned().chain([own.clone()]).collect();
+    let fixed = policy::fixed(&managed::dir());
+    let server_url = format!("{url}/mcp");
+    let hooks_run = policy::hooks(&plain);
+    let server_loads = policy::server(&plain, fixed.as_ref(), CLAUDE_SERVER, &server_url);
     // A setup that recorded its agents is checked for those. One from before
     // setup recorded them connected Claude Code, and is checked for that.
     let recorded: Option<Vec<String>> = state.get("agents").and_then(Value::as_array).map(|all| {
@@ -1814,6 +2001,9 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
                 "run setup again to write it".into(),
             ),
         }
+        }
+        if let Some((said, fix)) = hooks_held_back(&hooks_run, None) {
+            fail(said, fix);
         }
         // The agent's own connection runs this one, not the settings' hooks, so the
         // comparison above never sees it.
@@ -1870,8 +2060,14 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
         );
     }
     if claude_connected {
-        match find_program("claude") {
-            Some(claude) => {
+        // A server the organization keeps out is gone from Claude Code's own
+        // list, and registering it again is refused, so that is what is said.
+        match (
+            server_held_back(&server_loads, &server_url, None),
+            find_program("claude"),
+        ) {
+            (Some((said, fix)), _) => fail(said, fix),
+            (None, Some(claude)) => {
                 let registered = Command::new(claude)
                     .args(["mcp", "get", "antumbra"])
                     .stdout(Stdio::null())
@@ -1888,9 +2084,52 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
                     );
                 }
             }
-            None => println!(
+            (None, None) => println!(
             "  ! the claude command is not on your PATH, so the MCP registration was not checked"
         ),
+        }
+    }
+    // Claude Code as Unity Gateway starts it: the settings of Antumbra's own
+    // for a launch that leaves the user's out, and what such a launch's own
+    // settings stop that a plain launch's do not.
+    if claude_connected && agents::gateway::present(&ground) {
+        let passed_path = agents::gateway::claude_settings(&ground);
+        let passed = json_at(&passed_path);
+        let launch = passed.as_ref().and_then(agents::gateway::claude_launch);
+        let workspace = state
+            .get("workspace")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        match claude_settings_alone(&antumbra, &url, workspace, &settings) {
+            Ok(alone) => {
+                for finding in agents::gateway::check_claude(&antumbra, &alone, launch) {
+                    say(finding, &mut fail);
+                }
+            }
+            Err(e) => fail(format!("{e}"), "run setup again".into()),
+        }
+        if let Some(passed) = passed {
+            let with_own = launch != Some(agents::gateway::ClaudeLaunch::WithoutUserSettings);
+            let through: Vec<policy::Source> = theirs
+                .iter()
+                .cloned()
+                .chain([policy::Source::user(passed_path.clone(), passed)])
+                .chain(with_own.then_some(own))
+                .collect();
+            let through_ug = |said: String| format!("started by `ug claude`: {said}");
+            let gateway = Some(passed_path.as_path());
+            let hooks_there = policy::hooks(&through);
+            if let Some((said, fix)) =
+                hooks_held_back(&hooks_there, gateway).filter(|_| hooks_there != hooks_run)
+            {
+                fail(through_ug(said), fix);
+            }
+            let server_there = policy::server(&through, fixed.as_ref(), CLAUDE_SERVER, &server_url);
+            if let Some((said, fix)) = server_held_back(&server_there, &server_url, gateway)
+                .filter(|_| server_there != server_loads)
+            {
+                fail(through_ug(said), fix);
+            }
         }
     }
     // The other agents: what setup wrote for each, read back, and the scripts
@@ -1910,23 +2149,18 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
                 );
             }
         }
-        let env = |name: &str| std::env::var(name).ok();
-        let find = |name: &str| find_program(name);
-        let ground = agents::Ground {
-            home: &home,
-            antumbra: agents::Program::this(find_program("antumbra").is_some()),
-            env: &env,
-            find: &find,
-        };
         for agent in others {
             for finding in agents::check(agent, &ground) {
-                match finding.fix {
-                    None => ok(finding.said),
-                    // Said, as a differing hook of Claude Code's is, and not
-                    // a failed check: it works, or it waits on a program
-                    // setup cannot install.
-                    Some(fix) if finding.works => println!("  ! {}; {fix}", finding.said),
-                    Some(fix) => fail(finding.said, fix),
+                say(finding, &mut fail);
+            }
+            // What an organization's requirements stop of it, which what
+            // setup wrote does not show.
+            if agent == Agent::Codex {
+                let requirements = agents::codex::requirements(&variable);
+                if let Ok(text) = std::fs::read_to_string(&requirements) {
+                    for finding in agents::codex::held_back(&text, &requirements) {
+                        say(finding, &mut fail);
+                    }
                 }
             }
         }
@@ -2478,6 +2712,237 @@ mod tests {
             stamp_of(&json!({ "devices": [] }), "windows"),
             Stamp::Unsaid
         );
+        Ok(())
+    }
+
+    #[test]
+    fn the_settings_for_a_launch_without_the_users_hold_what_setup_wires_and_no_more(
+    ) -> anyhow::Result<()> {
+        let antumbra = Path::new("/home/me/.antumbra");
+        // The user's own settings: a name for this machine, file memory off,
+        // and things that are theirs alone.
+        let theirs = json!({
+            "env": { "ANTUMBRA_HOST_ID": "laptop", "EDITOR": "vi" },
+            "autoMemoryEnabled": false,
+            "model": "opus",
+            "permissions": { "defaultMode": "auto" }
+        });
+        let text = claude_settings_alone(antumbra, "https://memory.example", "ws:team", &theirs)?;
+        let alone: Value = serde_json::from_str(&text)?;
+        let Some(object) = alone.as_object() else {
+            anyhow::bail!("not an object: {text}");
+        };
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["autoMemoryEnabled", "env", "hooks"]);
+        assert_eq!(
+            alone["env"],
+            json!({
+                "ANTUMBRA_URL": "https://memory.example",
+                "ANTUMBRA_WORKSPACE_ID": "ws:team",
+                "ANTUMBRA_HOST_ID": "laptop"
+            })
+        );
+        assert_eq!(alone["autoMemoryEnabled"], false);
+        // The hooks Claude Code's own settings get, run from Antumbra's
+        // directory, and the two that count skills.
+        for (event, script, _) in platform_hooks() {
+            let hook = alone["hooks"][event].to_string();
+            assert!(
+                hook.contains(script) && hook.contains(".antumbra"),
+                "{event}: {hook}"
+            );
+        }
+        for event in ["PostToolUse", "UserPromptExpansion"] {
+            let hook = alone["hooks"][event].to_string();
+            assert!(hook.contains(SKILL_USED), "{event}: {hook}");
+        }
+
+        // Where the user's settings leave file memory alone, so do these, and
+        // a machine nobody named has the name setup gives it.
+        let plain = claude_settings_alone(
+            antumbra,
+            "http://127.0.0.1:8081",
+            "ws:default",
+            &Value::Null,
+        )?;
+        let alone: Value = serde_json::from_str(&plain)?;
+        assert!(alone.get("autoMemoryEnabled").is_none());
+        assert!(alone["env"]["ANTUMBRA_HOST_ID"]
+            .as_str()
+            .is_some_and(|host| !host.is_empty()));
+        // The same in, the same out, so the check can compare the file with it.
+        assert_eq!(
+            plain,
+            claude_settings_alone(
+                antumbra,
+                "http://127.0.0.1:8081",
+                "ws:default",
+                &Value::Null
+            )?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn what_a_policy_stops_is_said_with_whose_it_is_to_change() -> anyhow::Result<()> {
+        use policy::{Hooks, Server, Why};
+        let theirs = PathBuf::from("managed-settings.json");
+        let mine = PathBuf::from("settings.json");
+        // The settings Unity Gateway passes, where the launch judged is its.
+        let passed = PathBuf::from("ucode-settings.json");
+        let gateway = Some(passed.as_path());
+        let url = "https://memory.example/mcp";
+
+        assert_eq!(hooks_held_back(&Hooks::Run, None), None);
+        let stopped = |by: &Path, key: &'static str, managed: bool| {
+            hooks_held_back(
+                &Hooks::Stopped {
+                    by: by.to_path_buf(),
+                    key,
+                    managed,
+                },
+                gateway,
+            )
+        };
+        let Some((said, fix)) = stopped(&theirs, "allowManagedHooksOnly", true) else {
+            anyhow::bail!("hooks the organization stops were not said");
+        };
+        assert!(
+            said.contains("only your organization's hooks")
+                && said.contains("allowManagedHooksOnly in managed-settings.json"),
+            "{said}"
+        );
+        // Theirs to change, and what still works meanwhile.
+        assert!(
+            fix.contains("your organization's") && fix.contains("memory tools"),
+            "{fix}"
+        );
+        let Some((said, fix)) = stopped(&mine, "disableAllHooks", false) else {
+            anyhow::bail!("hooks the user turned off were not said");
+        };
+        assert!(said.contains("disableAllHooks in settings.json"), "{said}");
+        assert_eq!(fix, "remove disableAllHooks from that file");
+        // The file ug writes is not the user's to edit: ug writes it again.
+        let Some((_, fix)) = stopped(&passed, "disableAllHooks", false) else {
+            anyhow::bail!("hooks ug's settings turn off were not said");
+        };
+        assert!(
+            fix.contains("Unity Gateway's") && !fix.contains("remove"),
+            "{fix}"
+        );
+
+        assert_eq!(server_held_back(&Server::Loads, url, None), None);
+        let entry = json!({ "serverUrl": url }).to_string();
+        let blocked = |by: &Path, managed: bool, why: Why| {
+            server_held_back(
+                &Server::Blocked {
+                    by: by.to_path_buf(),
+                    managed,
+                    why,
+                },
+                url,
+                gateway,
+            )
+        };
+        let unlisted = |by: &Path, managed: bool, open: bool| {
+            blocked(
+                by,
+                managed,
+                Why::Unlisted {
+                    entry: entry.clone(),
+                    open,
+                },
+            )
+        };
+        // The organization's list, kept to its own: only they can add to it.
+        let Some((said, fix)) = unlisted(&theirs, true, false) else {
+            anyhow::bail!("a server the list leaves out was not said");
+        };
+        assert!(
+            said.contains("managed-settings.json lists the MCP servers")
+                && said.contains(url)
+                && said.contains("not connected"),
+            "{said}"
+        );
+        assert!(
+            fix.contains("your organization's") && fix.contains(&entry),
+            "{fix}"
+        );
+        assert!(!fix.contains("your own settings"), "{fix}");
+        // One the user's own settings add to: both are said, theirs first.
+        let Some((_, fix)) = unlisted(&theirs, true, true) else {
+            anyhow::bail!("a server the list leaves out was not said");
+        };
+        assert!(
+            fix.starts_with("that file is your organization's")
+                && fix.contains("allowManagedMcpServersOnly is not set"),
+            "{fix}"
+        );
+        // A list of the user's own is theirs to add to.
+        let Some((_, fix)) = unlisted(&mine, false, true) else {
+            anyhow::bail!("a server the list leaves out was not said");
+        };
+        assert_eq!(
+            fix,
+            format!("add {entry} to allowedMcpServers in that file")
+        );
+        // One in the file ug writes is the workspace's.
+        let Some((said, fix)) = unlisted(&passed, false, true) else {
+            anyhow::bail!("a server ug's list leaves out was not said");
+        };
+        assert!(said.contains("ucode-settings.json lists"), "{said}");
+        assert!(
+            fix.contains("Unity Gateway's") && fix.contains(&entry) && !fix.starts_with("add "),
+            "{fix}"
+        );
+
+        for (by, why, managed, in_said, in_fix) in [
+            (
+                &theirs,
+                Why::Denied,
+                true,
+                "a deniedMcpServers entry in managed-settings.json",
+                "your organization's",
+            ),
+            (
+                &mine,
+                Why::Denied,
+                false,
+                "a deniedMcpServers entry in settings.json",
+                "remove that entry",
+            ),
+            (
+                &passed,
+                Why::Denied,
+                false,
+                "a deniedMcpServers entry in ucode-settings.json",
+                "whoever manages the workspace",
+            ),
+            (
+                &theirs,
+                Why::Fixed,
+                true,
+                "fixes the MCP servers",
+                "your organization's",
+            ),
+            (
+                &theirs,
+                Why::PluginsOnly,
+                true,
+                "strictPluginOnlyCustomization",
+                "your organization's",
+            ),
+        ] {
+            let Some((said, fix)) = blocked(by, managed, why.clone()) else {
+                anyhow::bail!("{why:?} was not said");
+            };
+            assert!(
+                said.contains(in_said) && said.contains("\"antumbra\""),
+                "{said}"
+            );
+            assert!(fix.contains(in_fix), "{fix}");
+        }
         Ok(())
     }
 

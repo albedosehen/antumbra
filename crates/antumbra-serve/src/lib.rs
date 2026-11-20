@@ -13,6 +13,11 @@ use async_trait::async_trait;
 use antumbra_core::ports::Serve;
 
 mod probe;
+
+// The schedule is plain logic over a trait: tested in every build, used by
+// the engine a `models` build has.
+#[cfg(any(feature = "models", test))]
+mod engine;
 pub use probe::GenerateVerifyProbe;
 
 #[cfg(feature = "models")]
@@ -65,7 +70,9 @@ pub struct MultiAdapterServe {
     // expert the keeper just trained) through a shared `&self`, instead of
     // snapshotting at build.
     registry: std::sync::RwLock<std::collections::HashMap<antumbra_core::ExpertId, String>>,
-    state: tokio::sync::Mutex<Resident>,
+    /// Where requests go: the thread that owns the resident model, started
+    /// by the first of them.
+    worker: std::sync::Mutex<Option<std::sync::mpsc::Sender<engine::Job>>>,
 }
 
 /// How many adapters one request may blend: a routed expert and the user's
@@ -85,26 +92,174 @@ fn blend_config(trained: &antumbra_train::RaftConfig) -> antumbra_train::RaftCon
     }
 }
 
-/// The resident base and which blend's factors currently sit on it.
+/// Blends of experts the resident model keeps at once, so that requests
+/// answered together may each read its own.
+#[cfg(feature = "models")]
+const KEPT_BLENDS: usize = 8;
+
+/// Requests that may wait for the engine at once. One past it is refused
+/// with "busy" where it would have queued: at a few seconds an answer,
+/// thirty-two answered together, the last of this many waits about a
+/// minute, which is as long as a caller's patience is likely to be.
+#[cfg(feature = "models")]
+const WAITING_AT_MOST: usize = 256;
+
+/// Held by a call to [`MultiAdapterServe::act`] for as long as it waits:
+/// when the call ends, by an answer or by its future being dropped, the
+/// flag is set and the engine lets go of the request.
 #[cfg(feature = "models")]
 #[derive(Default)]
-struct Resident {
-    model: Option<antumbra_train::models::QwenCausalLm>,
-    current: Option<BlendKey>,
+struct Waiting(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+#[cfg(feature = "models")]
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
-/// What tells one resident blend from another: each adapter's file and the
-/// bits of its weight. The file, not the expert: a retrained expert keeps its
-/// id and is served from another file, and must not pass for what is loaded.
+/// The resident model as the schedule drives it: loaded when it is first
+/// asked for, and the requests it is answering side by side.
 #[cfg(feature = "models")]
-type BlendKey = Vec<(String, u32)>;
+struct Resident {
+    base_model: String,
+    config: antumbra_train::RaftConfig,
+    model: Option<antumbra_train::models::QwenCausalLm>,
+    together: antumbra_train::models::Together,
+    /// What the model's own factors are set to, where it answers one
+    /// request at a time: a request of the same blend skips the swap.
+    loaded: Option<engine::BlendKey>,
+    runtime: tokio::runtime::Runtime,
+    seed: u64,
+}
 
 #[cfg(feature = "models")]
-fn blend_key(specs: &[(String, f32)]) -> BlendKey {
-    specs
-        .iter()
-        .map(|(path, weight)| (path.clone(), weight.to_bits()))
-        .collect()
+impl Resident {
+    /// The base, loaded with neutral factors the first time: the trainer's
+    /// loader, so the model is byte-identical to what training produced.
+    fn model(&mut self) -> antumbra_core::Result<&mut antumbra_train::models::QwenCausalLm> {
+        if self.model.is_none() {
+            let loader = antumbra_train::CandleModelLoader::new(blend_config(&self.config));
+            let model = self.runtime.block_on(antumbra_train::ModelLoader::load(
+                &loader,
+                &self.base_model,
+                None,
+            ))?;
+            self.model = Some(model);
+            self.loaded = None;
+        }
+        match self.model.as_mut() {
+            Some(model) => Ok(model),
+            None => Err(antumbra_core::AntumbraError::other(
+                "the base model is not resident after loading",
+            )),
+        }
+    }
+}
+
+#[cfg(feature = "models")]
+impl engine::Model for Resident {
+    fn keep(&mut self, blend: u16, specs: &[(String, f32)]) -> antumbra_core::Result<bool> {
+        // Keeping a blend sets the model's own factors to it on the way.
+        self.loaded = None;
+        self.model()?.keep_blend(blend, specs)
+    }
+
+    fn admit(&mut self, prompt: &str, blend: u16) -> antumbra_core::Result<Option<usize>> {
+        self.seed = self.seed.wrapping_add(1);
+        let seed = self.seed;
+        let mut together = std::mem::take(&mut self.together);
+        let place = self
+            .model()
+            .and_then(|model| model.admit(&mut together, prompt, blend, seed));
+        self.together = together;
+        place
+    }
+
+    fn advance(&mut self) -> antumbra_core::Result<Vec<(usize, String)>> {
+        let mut together = std::mem::take(&mut self.together);
+        let ended = self
+            .model()
+            .and_then(|model| model.advance(&mut together))
+            .map(|ended| {
+                ended
+                    .into_iter()
+                    .filter_map(|place| together.take(place).map(|answer| (place, answer)))
+                    .collect()
+            });
+        self.together = together;
+        ended
+    }
+
+    fn leave(&mut self, place: usize) {
+        self.together.leave(place);
+    }
+
+    fn reset(&mut self) {
+        self.together = antumbra_train::models::Together::default();
+    }
+
+    fn alone(&mut self, prompt: &str, specs: &[(String, f32)]) -> antumbra_core::Result<String> {
+        use antumbra_train::CausalLm;
+        let key = engine::blend_key(specs);
+        // Swap only when the blend differs from the one that is loaded.
+        if self.loaded.as_ref() != Some(&key) {
+            // A failed load can leave the factors half-written: forget what
+            // was loaded before trying.
+            self.loaded = None;
+            self.model()?.load_blend(specs)?;
+            self.loaded = Some(key);
+        }
+        let handle = self.runtime.handle().clone();
+        let model = self.model()?;
+        let outputs = handle.block_on(model.generate(prompt, 1))?;
+        Ok(outputs.into_iter().next().unwrap_or_default())
+    }
+}
+
+/// The thread that owns the resident model: it takes requests as they come,
+/// and gives the schedule a turn for as long as any waits or is being
+/// answered. It ends when the engine that feeds it is dropped.
+#[cfg(feature = "models")]
+fn serve_requests(
+    base_model: String,
+    config: antumbra_train::RaftConfig,
+    jobs: std::sync::mpsc::Receiver<engine::Job>,
+) {
+    let runtime = match tokio::runtime::Builder::new_current_thread().build() {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            // No runtime, no model: every request is told why.
+            for job in jobs {
+                (job.reply)(Err(antumbra_core::AntumbraError::other(format!(
+                    "the serving thread could not start a runtime: {err}"
+                ))));
+            }
+            return;
+        }
+    };
+    let mut resident = Resident {
+        base_model,
+        config,
+        model: None,
+        together: antumbra_train::models::Together::default(),
+        loaded: None,
+        runtime,
+        seed: 0,
+    };
+    let mut schedule = engine::Schedule::new(KEPT_BLENDS, WAITING_AT_MOST);
+    loop {
+        if schedule.idle() {
+            match jobs.recv() {
+                Ok(job) => schedule.push(job),
+                Err(_) => return,
+            }
+        }
+        while let Ok(job) = jobs.try_recv() {
+            schedule.push(job);
+        }
+        schedule.turn(&mut resident);
+    }
 }
 
 #[cfg(feature = "models")]
@@ -116,7 +271,7 @@ impl MultiAdapterServe {
             base_model: base_model.into(),
             config,
             registry: std::sync::RwLock::new(std::collections::HashMap::new()),
-            state: tokio::sync::Mutex::new(Resident::default()),
+            worker: std::sync::Mutex::new(None),
         }
     }
 
@@ -208,13 +363,16 @@ impl Serve for MultiAdapterServe {
             .insert(expert.clone(), adapter_uri.to_string());
     }
 
+    fn answers_from_its_own_thread(&self) -> bool {
+        true
+    }
+
     async fn act(
         &self,
         req: antumbra_core::ports::ActRequest,
     ) -> antumbra_core::Result<antumbra_core::ports::ActOutput> {
         use antumbra_core::ports::{ActOutput, StepOutput};
         use antumbra_core::AntumbraError;
-        use antumbra_train::CausalLm;
 
         let blend = req.blend();
         if blend.is_empty() {
@@ -229,55 +387,62 @@ impl Serve for MultiAdapterServe {
                 blend.len()
             )));
         }
-        // Resolve before touching the device: an unknown expert is a config
-        // error, not a generation failure, and must not pay a model load.
-        self.resolve(&blend)?;
+        // Resolved before the request is handed on: an unknown expert is a
+        // config error, not a generation failure, and must not pay a model
+        // load. The files named are the ones registered now.
+        let specs = self.resolve(&blend)?;
 
-        // candle generation is synchronous and device-bound. Run it under
-        // `block_in_place` so the runtime spawns a replacement worker and other
-        // tasks are not starved while a request is served (a v1 serving-throughput concern). Requires
-        // a multi-threaded runtime.
-        let final_output = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let mut st = self.state.lock().await;
-                // Resolved again now the engine is this request's: one that
-                // waited here while an expert was retrained loads the file
-                // registered since, not the one that was there when it asked.
-                let specs = self.resolve(&blend)?;
-                let key = blend_key(&specs);
-                if st.model.is_none() {
-                    // Load the base with neutral (zero) LoRA factors; adapters are
-                    // swapped in below. Reuse the trainer's loader so the model is
-                    // byte-identical to what training produced.
-                    let loader = antumbra_train::CandleModelLoader::new(blend_config(&self.config));
-                    let model =
-                        antumbra_train::ModelLoader::load(&loader, &self.base_model, None).await?;
-                    st.model = Some(model);
-                    st.current = None;
-                }
-                // Swap only when the blend differs from the resident one; repeated
-                // requests for the same blend reuse the loaded factors.
-                if st.current.as_ref() != Some(&key) {
-                    // A failed load can leave the factors half-written: forget
-                    // what was resident before trying.
-                    st.current = None;
-                    let Some(model) = st.model.as_mut() else {
-                        return Err(AntumbraError::other(
-                            "the base model is not resident after loading",
-                        ));
-                    };
-                    model.load_blend(&specs)?;
-                    st.current = Some(key);
-                }
-                let Some(model) = st.model.as_mut() else {
+        // The model is one thread's: candle generation is synchronous and
+        // device-bound, and requests that wait together are answered
+        // together, a pass over the weights for all of them. The request
+        // goes to that thread and its answer comes back here.
+        let (answer, answered) = tokio::sync::oneshot::channel();
+        // Set when this call ends, however it ends: a caller that hung up
+        // or timed out drops it with the future, and the engine stops
+        // decoding for a request no one waits for.
+        let waiting = Waiting::default();
+        let gone = waiting.0.clone();
+        let job = engine::Job {
+            gone: Box::new(move || gone.load(std::sync::atomic::Ordering::Relaxed)),
+            owner: req.owner.unwrap_or_default(),
+            prompt: req.prompt,
+            specs,
+            reply: Box::new(move |result| {
+                // A caller that stopped waiting has no use for it.
+                let _ = answer.send(result);
+            }),
+        };
+        {
+            // A poisoned lock holds a sender or nothing, never half of one.
+            let mut worker = self
+                .worker
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let job = match worker.as_ref() {
+                Some(jobs) => jobs.send(job).err().map(|unsent| unsent.0),
+                None => Some(job),
+            };
+            if let Some(job) = job {
+                // No thread yet, or the one there has gone: start one.
+                let (jobs, taken) = std::sync::mpsc::channel();
+                let (base_model, config) = (self.base_model.clone(), self.config.clone());
+                std::thread::Builder::new()
+                    .name("antumbra-serve".into())
+                    .spawn(move || serve_requests(base_model, config, taken))
+                    .map_err(|e| {
+                        AntumbraError::other(format!("the serving thread did not start: {e}"))
+                    })?;
+                if jobs.send(job).is_err() {
                     return Err(AntumbraError::other(
-                        "the base model is not resident after loading",
+                        "the serving thread ended before it took a request",
                     ));
-                };
-                let outputs = model.generate(&req.prompt, 1).await?;
-                antumbra_core::Result::Ok(outputs.into_iter().next().unwrap_or_default())
-            })
-        })?;
+                }
+                *worker = Some(jobs);
+            }
+        }
+        let final_output = answered
+            .await
+            .map_err(|_| AntumbraError::other("the serving thread ended before it answered"))??;
 
         Ok(ActOutput {
             steps: vec![StepOutput {
@@ -339,6 +504,7 @@ mod tests {
             prompt: "hello".into(),
             adapters: vec![],
             weights: Vec::new(),
+            owner: None,
         };
         let Err(err) = serve.act(req).await else {
             return Err(AntumbraError::other("the seam served the request"));
@@ -372,6 +538,7 @@ mod tests {
             prompt: "hi".into(),
             adapters: vec![],
             weights: Vec::new(),
+            owner: None,
         };
         let msg = refused(&serve, req).await?;
         assert!(msg.contains("no adapter selected"), "{msg}");
@@ -386,6 +553,7 @@ mod tests {
             prompt: "hi".into(),
             adapters: vec![ExpertId::new("expert:ghost")],
             weights: Vec::new(),
+            owner: None,
         };
         let msg = refused(&serve, req).await?;
         assert!(msg.contains("no adapter registered"), "{msg}");
@@ -433,15 +601,15 @@ mod tests {
         let serve = MultiAdapterServe::new("base", Default::default())
             .with_adapter(expert.clone(), "adapters/a.1.safetensors");
         let blend = [(expert.clone(), 1.0f32)];
-        let before = blend_key(&serve.resolve(&blend)?);
+        let before = engine::blend_key(&serve.resolve(&blend)?);
         assert_eq!(
             before,
-            blend_key(&serve.resolve(&blend)?),
+            engine::blend_key(&serve.resolve(&blend)?),
             "the same file at the same weight is the blend already resident"
         );
 
         serve.register_expert(&expert, "adapters/a.2.safetensors");
-        let after = blend_key(&serve.resolve(&blend)?);
+        let after = engine::blend_key(&serve.resolve(&blend)?);
 
         assert_ne!(before, after);
         assert_eq!(
@@ -453,7 +621,7 @@ mod tests {
 
     #[test]
     fn a_blend_at_another_weight_is_another_blend() {
-        let at = |weight: f32| blend_key(&[("adapters/a.safetensors".to_string(), weight)]);
+        let at = |weight: f32| engine::blend_key(&[("adapters/a.safetensors".to_string(), weight)]);
         assert_eq!(at(0.5), at(0.5));
         assert_ne!(at(0.5), at(1.0));
     }

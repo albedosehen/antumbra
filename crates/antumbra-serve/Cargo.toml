@@ -1,6 +1,6 @@
 [package]
 name = "antumbra-serve"
-version = "0.4.6"
+version = "0.5.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -58,7 +58,7 @@ metal = ["models", "candle-core/metal", "candle-nn/metal", "candle-transformers/
 anyhow.workspace = true
 # The embedded store the consolidation tests stand up.
 antumbra-store = { path = "../antumbra-store", features = ["testing"] }
-tokio = { workspace = true, features = ["rt", "macros"] }
+tokio = { workspace = true, features = ["rt", "macros", "time"] }
 # Counterfactual search drives the real probe in tests (depends only on core).
 antumbra-boundary = { path = "../antumbra-boundary" }
 

@@ -492,6 +492,32 @@ mod tests {
                 page.contains(&format!(r#"src="{prefix}relics.js""#)),
                 "{name}"
             );
+            // The sidebar the dashboard has, with the same pages in the same
+            // order, each leading back to it; and the script that collapses it.
+            assert!(
+                page.contains(&format!(r#"src="{prefix}side.js""#)),
+                "{name}"
+            );
+            let pages = |html: &str| -> Vec<String> {
+                html.split("data-nav=\"")
+                    .skip(1)
+                    .filter_map(|rest| rest.split('"').next().map(str::to_string))
+                    .collect()
+            };
+            let dashboard = include_str!("dashboard/index.html");
+            assert_eq!(pages(page), pages(dashboard), "{name}: the sidebar's pages");
+            let home = prefix.trim_end_matches("dashboard/");
+            for nav in pages(page) {
+                assert!(
+                    page.contains(&format!(r##"href="{home}dashboard#/{nav}""##)),
+                    "{name}: {nav} does not lead to the dashboard"
+                );
+            }
+            // The held theme, before the page is drawn.
+            assert!(
+                page.contains(&format!(r#"<script src="{prefix}theme.js"></script>"#)),
+                "{name}"
+            );
             assert!(
                 page.contains(&format!(r#"href="{prefix}app.css""#)),
                 "{name}"

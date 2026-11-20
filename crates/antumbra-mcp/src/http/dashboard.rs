@@ -1,6 +1,14 @@
 //! The web dashboard: a browser surface over the same tools an agent calls.
-//! It reads, but for the two decisions a user makes on a behavior drawn
-//! from their memories: accept it, so their expert learns it, or retire it.
+//! It reads, but for the decisions that are a user's own: a behavior drawn
+//! from their memories is accepted, so their expert learns it, or retired; and
+//! a handoff one of their machines left for another is marked done; and an
+//! operator saves their workspace's policy, through the console's own action.
+//!
+//! It is one page with several views, the address's fragment naming the one
+//! showing: the workspace's (Overview, Memory, Behaviors, Experts,
+//! Dependencies, Knowledge, Policy) and the user's own (Account, Devices and
+//! handoffs). How it looks for a user (theme, density, opening page) is kept
+//! in their browser and nowhere else.
 //!
 //! The server hands out the page, its script and its style, and nothing else.
 //! None of them carries data, so they need no token. Everything the page shows
@@ -21,6 +29,17 @@ const SCRIPT: &str = include_str!("dashboard/app.js");
 /// The Behaviors section, in its own file so the main script stays readable;
 /// loaded after it and sharing its helpers.
 const BEHAVIORS: &str = include_str!("dashboard/behaviors.js");
+/// The shell: which page shows, the user's own pages (Account, Devices and
+/// handoffs), the workspace's policy and what the Overview says is waiting.
+/// Loaded last, sharing the helpers of the two before it.
+const SHELL: &str = include_str!("dashboard/shell.js");
+/// The theme, put on the page before it is first drawn: the one script
+/// loaded in the head without `defer`, by the dashboard and by the relics
+/// pages, so a held theme never shows as the system's first.
+const THEME: &str = include_str!("dashboard/theme.js");
+/// The sidebar every page shares, the relics pages among them: collapsing
+/// it, and who is signed in at its foot.
+const SIDE: &str = include_str!("dashboard/side.js");
 const STYLE: &str = include_str!("dashboard/app.css");
 /// The relics gallery and viewer (`/relics`, `/relic/<slug>`): one script and
 /// one style for both pages, self-contained because the dashboard's script
@@ -48,6 +67,18 @@ pub(super) fn routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
         )
         .route("/dashboard/app.js", get(script))
         .route("/dashboard/behaviors.js", get(behaviors))
+        .route(
+            "/dashboard/side.js",
+            get(|| async { asset("text/javascript; charset=utf-8", SIDE) }),
+        )
+        .route(
+            "/dashboard/theme.js",
+            get(|| async { asset("text/javascript; charset=utf-8", THEME) }),
+        )
+        .route(
+            "/dashboard/shell.js",
+            get(|| async { asset("text/javascript; charset=utf-8", SHELL) }),
+        )
         .route("/dashboard/app.css", get(style))
         .route(
             "/dashboard/relics.js",
@@ -109,6 +140,9 @@ mod tests {
             ("/dashboard", "text/html"),
             ("/dashboard/app.js", "text/javascript"),
             ("/dashboard/behaviors.js", "text/javascript"),
+            ("/dashboard/shell.js", "text/javascript"),
+            ("/dashboard/theme.js", "text/javascript"),
+            ("/dashboard/side.js", "text/javascript"),
             ("/dashboard/app.css", "text/css"),
             ("/dashboard/relics.js", "text/javascript"),
             ("/dashboard/relics.css", "text/css"),
@@ -146,6 +180,21 @@ mod tests {
         assert!(!PAGE.contains("onclick") && !PAGE.contains("onload"));
         assert!(PAGE.contains(r#"src="dashboard/app.js""#));
         assert!(PAGE.contains(r#"src="dashboard/behaviors.js""#));
+        assert!(PAGE.contains(r#"src="dashboard/shell.js""#));
+        assert!(SHELL.contains("function startShell"));
+        // The theme is on the page before its style is read or anything is
+        // drawn: its script comes first and is not deferred.
+        let theme = PAGE
+            .find(r#"<script src="dashboard/theme.js"></script>"#)
+            .ok_or_else(|| anyhow::anyhow!("the page does not load theme.js undeferred"))?;
+        let style = PAGE
+            .find(r#"href="dashboard/app.css""#)
+            .ok_or_else(|| anyhow::anyhow!("the page does not link its style"))?;
+        assert!(theme < style, "theme.js is loaded after the style");
+        assert!(
+            !THEME.contains("sessionStorage"),
+            "the theme reads the token's storage"
+        );
         assert!(PAGE.contains(r#"href="dashboard/app.css""#));
         // The main script starts the page only once every deferred script has
         // run, since the sections in their own files define what it loads.
@@ -162,6 +211,9 @@ mod tests {
             ("app.js", SCRIPT),
             ("behaviors.js", BEHAVIORS),
             ("relics.js", RELICS_SCRIPT),
+            ("shell.js", SHELL),
+            ("theme.js", THEME),
+            ("side.js", SIDE),
         ] {
             for sink in [
                 "innerHTML",

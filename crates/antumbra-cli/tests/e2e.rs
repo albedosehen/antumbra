@@ -48,6 +48,7 @@ async fn train_graduate_route_then_serve() -> anyhow::Result<()> {
             prompt: "reverse 'abc'".into(),
             adapters: vec![chosen],
             weights: Vec::new(),
+            owner: None,
         })
         .await?;
     assert_eq!(out.final_output, "reverse 'abc'");
