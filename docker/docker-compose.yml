@@ -104,8 +104,8 @@ services:
       # How the base model is held to serve experts: auto, off, q8_0, q6_k or
       # q4_k. On an image with no GPU backend (the dense base reads about 6 GB
       # a token on a CPU) auto serves from a Q6_K base where the CPU has its
-      # fast kernels (AVX-512 VNNI and VBMI) and from a Q8_0 base on any other
-      # CPU; on a GPU image it serves from the dense base. Every quantized form rewords an expert's answers, and a
+      # fast kernels (AVX-512 VNNI and VBMI, or an Arm CPU's NEON with its dot
+      # product) and from a Q8_0 base on any other CPU; on a GPU image it serves from the dense base. Every quantized form rewords an expert's answers, and a
       # smaller one decodes faster on a CPU: q8_0 moves answers least; on a
       # CPU with AVX-512 VNNI q6_k decodes about 1.3 times as fast and moves
       # them half again as much, and q4_k about 1.7 times as fast and four
