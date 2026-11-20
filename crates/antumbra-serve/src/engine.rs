@@ -52,6 +52,9 @@ pub(crate) struct Job {
     pub(crate) specs: Specs,
     pub(crate) reply: Reply,
     pub(crate) gone: Gone,
+    /// Who asked, for taking turns: requests of one owner do not go ahead
+    /// of another owner's that waits. Empty for a caller that names none.
+    pub(crate) owner: String,
 }
 
 /// A request being answered: where its answer goes, the slot it reads, and
@@ -60,6 +63,7 @@ struct Answering {
     reply: Reply,
     slot: usize,
     gone: Gone,
+    owner: String,
 }
 
 /// The resident model, as the schedule drives it.
@@ -130,7 +134,43 @@ impl Schedule {
             ))));
             return;
         }
+        // No one owner holds more than half the places to wait in, so that
+        // one caller's burst leaves room for another's request.
+        let theirs = self.waiting.iter().filter(|w| w.owner == job.owner).count();
+        if theirs >= (self.waiting_at_most / 2).max(1) {
+            (job.reply)(Err(AntumbraError::other(format!(
+                "the serving engine is busy: {theirs} of your requests already wait for it"
+            ))));
+            return;
+        }
         self.waiting.push_back(job);
+    }
+
+    /// Those waiting, put in the order they are taken in: owners take
+    /// turns. A request's turn is how many of its owner's requests are
+    /// ahead of it, being answered or waiting; the lower turn goes first,
+    /// and among equal turns the one that came first. Within one owner the
+    /// order is the order they came in, and with one owner nothing moves.
+    fn take_turns(&mut self) {
+        let mut ahead: HashMap<&str, usize> = HashMap::new();
+        for request in self.answering.values() {
+            *ahead.entry(request.owner.as_str()).or_default() += 1;
+        }
+        let mut turns: Vec<(usize, usize)> = Vec::with_capacity(self.waiting.len());
+        for (came, job) in self.waiting.iter().enumerate() {
+            let turn = ahead.entry(job.owner.as_str()).or_default();
+            turns.push((*turn, came));
+            *turn += 1;
+        }
+        if turns.windows(2).all(|pair| pair[0] <= pair[1]) {
+            return;
+        }
+        turns.sort_unstable();
+        let mut jobs: Vec<Option<Job>> = self.waiting.drain(..).map(Some).collect();
+        self.waiting = turns
+            .into_iter()
+            .filter_map(|(_, came)| jobs.get_mut(came).and_then(Option::take))
+            .collect();
     }
 
     /// Requests waiting to be taken in.
@@ -190,6 +230,7 @@ impl Schedule {
         if self.idle() {
             return;
         }
+        self.take_turns();
         if self.keeps == Some(false) {
             self.one_at_a_time(model);
             return;
@@ -248,6 +289,7 @@ impl Schedule {
                             reply: job.reply,
                             slot: at,
                             gone: job.gone,
+                            owner: job.owner,
                         },
                     );
                 }
@@ -420,6 +462,7 @@ mod tests {
         let (answers, id) = (answers.clone(), prompt.to_string());
         let gone = gone.clone();
         Job {
+            owner: String::new(),
             gone: Box::new(move || gone.load(Ordering::Relaxed)),
             prompt: prompt.to_string(),
             specs: vec![(blend.to_string(), 1.0)],
@@ -656,8 +699,9 @@ mod tests {
     fn a_request_past_the_bound_is_refused_at_once() -> Result<()> {
         let (mut schedule, mut model) = (Schedule::new(2, 2), Fake::keeping(8));
         let answers = Answers::default();
+        // Each its own owner's: what one owner may hold is another test's.
         for prompt in ["ab", "cd", "ef"] {
-            schedule.push(job(&answers, prompt, "a"));
+            schedule.push(owned(&answers, prompt, prompt));
         }
         let refused = answered(&answers);
         assert_eq!(refused.len(), 1);
@@ -668,6 +712,71 @@ mod tests {
         );
         run(&mut schedule, &mut model);
         assert_eq!(answered(&answers).len(), 3);
+        Ok(())
+    }
+
+    fn owned(answers: &Answers, prompt: &str, owner: &str) -> Job {
+        Job {
+            owner: owner.to_string(),
+            ..job(answers, prompt, "a")
+        }
+    }
+
+    /// One owner's burst does not go ahead of another owner's request that
+    /// came after it: with one place, they are answered turn about.
+    #[test]
+    fn owners_take_turns() -> Result<()> {
+        for mut model in [Fake::keeping(1), Fake::default()] {
+            let mut schedule = Schedule::new(2, 64);
+            let answers = Answers::default();
+            for prompt in ["a1", "a2", "a3"] {
+                schedule.push(owned(&answers, prompt, "a"));
+            }
+            schedule.push(owned(&answers, "b1", "b"));
+            schedule.push(owned(&answers, "b2", "b"));
+            run(&mut schedule, &mut model);
+            let order: Vec<String> = answered(&answers).into_iter().map(|(id, _)| id).collect();
+            assert_eq!(order, ["a1", "b1", "a2", "b2", "a3"]);
+        }
+        Ok(())
+    }
+
+    /// An owner with requests being answered waits behind one with none:
+    /// the place that comes free goes to the newcomer.
+    #[test]
+    fn an_owner_being_answered_waits_behind_one_that_is_not() -> Result<()> {
+        let (mut schedule, mut model) = (Schedule::new(2, 64), Fake::keeping(2));
+        let answers = Answers::default();
+        // One place comes free while the other is still held, and two wait
+        // for it.
+        for prompt in ["a1", "a2 at length", "a3"] {
+            schedule.push(owned(&answers, prompt, "a"));
+        }
+        schedule.turn(&mut model);
+        schedule.push(owned(&answers, "b1", "b"));
+        run(&mut schedule, &mut model);
+        let order: Vec<String> = answered(&answers).into_iter().map(|(id, _)| id).collect();
+        let at = |id: &str| order.iter().position(|o| o == id);
+        assert!(at("b1") < at("a3"), "{order:?}");
+        Ok(())
+    }
+
+    /// One owner may fill half the places to wait in and no more: its next
+    /// is refused while another owner's is taken.
+    #[test]
+    fn one_owner_does_not_fill_the_wait() -> Result<()> {
+        let (mut schedule, mut model) = (Schedule::new(2, 4), Fake::keeping(8));
+        let answers = Answers::default();
+        for prompt in ["a1", "a2", "a3"] {
+            schedule.push(owned(&answers, prompt, "a"));
+        }
+        schedule.push(owned(&answers, "b1", "b"));
+        let refused = answered(&answers);
+        assert_eq!(refused.len(), 1, "{refused:?}");
+        assert_eq!(refused[0].0, "a3");
+        assert!(matches!(&refused[0].1, Err(why) if why.contains("of your requests")));
+        run(&mut schedule, &mut model);
+        assert_eq!(answered(&answers).len(), 4);
         Ok(())
     }
 }

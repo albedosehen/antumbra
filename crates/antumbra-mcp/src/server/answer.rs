@@ -103,7 +103,10 @@ impl McpServer {
         };
         let mut blend: Vec<ExpertId> = top.into_iter().collect();
         blend.extend(standing.iter().cloned());
-        let request = ActRequest::new(next_id("answer"), p.task, blend);
+        // The workspace is who asks: where the engine answers several
+        // workspaces, they take turns.
+        let request =
+            ActRequest::new(next_id("answer"), p.task, blend).owned_by(self.tenant.as_str());
         let out = if serve.answers_from_its_own_thread() {
             // The engine generates on its own thread and this only waits, so
             // it waits here: when this call is dropped, by a client that hung
