@@ -10,6 +10,8 @@ const DOCUMENTS_SHOWN = 8;
 const RECALL_TOP_K = 20;
 const PAIRS_SHOWN = 12;
 const STATUS_ORDER = ["active", "dormant", "archived", "deleted"];
+/** The page each total is about. */
+const STAT_PAGES = { memories: "memory", documents: "knowledge", experts: "experts", boundaries: "experts", compartments: "knowledge" };
 const STATS = [
   ["memories", "Memories"],
   ["documents", "Documents"],
@@ -180,6 +182,7 @@ function clearSections() {
   byId("documents-more").hidden = true;
   byId("browse").textContent = "List all";
   byId("recall").reset();
+  clearShell();
 }
 
 async function open(token) {
@@ -196,15 +199,15 @@ async function open(token) {
 }
 
 function showIdentity(who) {
-  byId("who").textContent =
-    who && who.tenant ? `${who.tenant} · ${who.user || "unknown user"}` : "Signed in";
   const expires = byId("expires");
   if (who && typeof who.exp === "number") {
     const at = new Date(who.exp * 1000);
-    expires.textContent = `· token expires ${stamps.format(at)}`;
+    expires.textContent = `Token expires ${stamps.format(at)}`;
   } else {
     expires.textContent = "";
   }
+  // The bar, the menu, the sidebar and the Account page (shell.js).
+  showAccount(who);
 }
 
 // Loading
@@ -226,6 +229,8 @@ async function refresh() {
       }),
     ];
     if (state.memory.view) loads.push(section(byId("memories"), () => runMemory(state.memory.view)));
+    // The user's own pages and the Overview's lists (shell.js).
+    loads.push(...shellLoads());
     const results = await Promise.allSettled(loads);
     const failed = (kind) => results.some((r) => r.status === "rejected" && r.reason instanceof kind);
     if (failed(Superseded)) return false;
@@ -234,6 +239,7 @@ async function refresh() {
       return false;
     }
     byId("updated").textContent = `Updated ${clock.format(new Date())}`;
+    renderAttention();
     return true;
   } finally {
     button.disabled = false;
@@ -256,7 +262,12 @@ async function loadStats() {
   const stats = await call("workspace_stats");
   byId("stats").replaceChildren(
     ...STATS.map(([key, label]) =>
-      h("div", { class: "stat" }, h("dt", {}, label), h("dd", {}, numbers.format(stats[key] ?? 0))),
+      h(
+        "div",
+        { class: "stat" },
+        h("dt", {}, label),
+        h("dd", {}, h("a", { href: `#/${STAT_PAGES[key] || "overview"}` }, numbers.format(stats[key] ?? 0))),
+      ),
     ),
   );
   state.memories = stats.memories ?? null;
@@ -1144,6 +1155,7 @@ async function memoryAction(view) {
 }
 
 function start() {
+  startShell();
   byId("gate-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const token = byId("token").value.trim().replace(/^Bearer\s+/i, "");

@@ -1,0 +1,477 @@
+// The dashboard's shell: which page is showing, the signed-in user's own
+// pages (Account, Devices and handoffs), the workspace's policy, and what the
+// Overview says is waiting. Loaded after app.js and behaviors.js and sharing
+// their helpers (h, byId, call, section, claims, signOut, numbers, stamps) and
+// their errors (SignedOut, Superseded).
+//
+// Stored text is written with `textContent` through `h`, never as markup.
+
+const VIEWS = {
+  overview: "Overview",
+  memory: "Memory",
+  behaviors: "Behaviors",
+  experts: "Experts",
+  dependencies: "Dependencies",
+  knowledge: "Knowledge",
+  account: "Account",
+  devices: "Devices and handoffs",
+  settings: "Policy",
+};
+
+const PREFERENCES_KEY = "antumbra.dashboard.preferences";
+const PREFERENCES = { theme: ["system", "light", "dark"], density: ["comfortable", "compact"], home: ["overview", "memory", "behaviors"] };
+/** A token with fewer days left than this is said to be expiring. */
+const EXPIRING_DAYS = 30;
+const RECENT_SHOWN = 5;
+const DAY = 24 * 60 * 60 * 1000;
+
+/** The workspace's policy, in the groups a person thinks of it in: each knob's
+ *  key in the snapshot, its name, how its value reads, and what it does. */
+const POLICY = [
+  [
+    "How long memory lasts",
+    "A memory nobody recalls or reinforces fades; this is how long each kind takes to lose half its strength.",
+    [
+      ["world_half_life_days", "Facts (world)", days],
+      ["bank_half_life_days", "Experiences (bank)", days],
+      ["opinion_half_life_days", "Judgments (opinion)", days],
+      ["volatile_half_life_days", "Marked volatile", days],
+    ],
+  ],
+  [
+    "How memories are linked and counted",
+    "What the server does by itself as memories are stored and recalled.",
+    [
+      ["auto", "Automatic upkeep", onOff],
+      ["link_threshold", "Similarity that links two memories", ratio],
+      ["max_links", "Links made for one memory, at most", whole],
+      ["recurrence_threshold", "Similarity that counts as the same thing said again", ratio],
+      ["use_threshold", "Similarity that counts a recalled memory as used", ratio],
+      ["strength_weight", "How much strength counts in ranking", ratio],
+      ["pass_over_weight", "What a pass-over weighs, next to one use", ratio],
+    ],
+  ],
+  [
+    "How behaviors are taught",
+    "What happens to a behavior between being proposed and an expert learning it.",
+    [
+      ["accept_after_hours", "A proposed behavior is accepted after", hoursOrNever],
+      ["behaviors_per_expert", "Behaviors one expert is taught, at most", whole],
+      ["standing_training", "Training of standing experts", onOff],
+    ],
+  ],
+];
+
+function days(value) {
+  return `${numbers.format(value)} days`;
+}
+
+function ratio(value) {
+  return Number(value).toFixed(2);
+}
+
+function whole(value) {
+  return numbers.format(Math.round(value));
+}
+
+function onOff(value) {
+  return value ? "On" : "Paused";
+}
+
+function hoursOrNever(value) {
+  return value > 0 ? `${numbers.format(value)} hours` : "Never: you accept each one";
+}
+
+// Pages
+
+/** The page the address names, or the one the user opens on. */
+function viewOf(hash) {
+  const name = hash.replace(/^#\/?/, "");
+  return name in VIEWS ? name : null;
+}
+
+function showView(name) {
+  for (const view of document.querySelectorAll("[data-view]")) view.hidden = view.dataset.view !== name;
+  for (const link of document.querySelectorAll("[data-nav]")) {
+    if (link.dataset.nav === name) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  }
+  byId("crumb-page").textContent = VIEWS[name];
+  document.title = `${VIEWS[name]} · Antumbra`;
+  closeMenu();
+}
+
+function route() {
+  const name = viewOf(location.hash) || preferences().home;
+  showView(name);
+  window.scrollTo(0, 0);
+}
+
+// The user menu
+
+function closeMenu() {
+  byId("user-menu").hidden = true;
+  byId("user-button").setAttribute("aria-expanded", "false");
+}
+
+function toggleMenu() {
+  const menu = byId("user-menu");
+  menu.hidden = !menu.hidden;
+  byId("user-button").setAttribute("aria-expanded", String(!menu.hidden));
+}
+
+// Preferences: how the dashboard looks for this browser's user. Nothing of
+// the workspace's is kept here, and a browser that refuses storage keeps
+// them for this load only.
+
+function preferences() {
+  let kept = {};
+  try {
+    kept = JSON.parse(localStorage.getItem(PREFERENCES_KEY) || "{}") || {};
+  } catch {
+    // Refused, or not what was written: the defaults.
+  }
+  const out = {};
+  for (const [key, allowed] of Object.entries(PREFERENCES)) {
+    out[key] = allowed.includes(kept[key]) ? kept[key] : allowed[0];
+  }
+  return out;
+}
+
+function applyPreferences(chosen) {
+  const root = document.documentElement;
+  if (chosen.theme === "system") delete root.dataset.theme;
+  else root.dataset.theme = chosen.theme;
+  if (chosen.density === "compact") root.dataset.density = "compact";
+  else delete root.dataset.density;
+  for (const [key, value] of Object.entries(chosen)) {
+    const input = byId("preferences").querySelector(`input[name=${key}][value=${value}]`);
+    if (input) input.checked = true;
+  }
+}
+
+function keepPreferences() {
+  const form = new FormData(byId("preferences"));
+  const chosen = Object.fromEntries(Object.keys(PREFERENCES).map((key) => [key, form.get(key)]));
+  try {
+    localStorage.setItem(PREFERENCES_KEY, JSON.stringify(chosen));
+  } catch {
+    // Refused: this load only.
+  }
+  applyPreferences(chosen);
+}
+
+// Who is signed in
+
+/** A name without its kind: `user:dana` is dana. */
+function bare(id) {
+  return String(id || "").replace(/^[a-z]+:/, "");
+}
+
+function initials(name) {
+  const parts = bare(name).split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const letters = parts.length > 1 ? parts[0][0] + parts[1][0] : (parts[0] || "?").slice(0, 2);
+  return letters.toUpperCase();
+}
+
+function fact(name, value, mono) {
+  return h("div", { class: "fact" }, h("dt", {}, name), h("dd", mono ? { class: "mono" } : {}, value));
+}
+
+/** The signed-in identity, wherever the page says it: the bar, the menu, the
+ *  sidebar and the Account page. From the token's claims, for display only. */
+function showAccount(who) {
+  const user = who && who.user ? bare(who.user) : "Signed in";
+  const workspace = who && who.tenant ? bare(who.tenant) : "";
+  for (const node of document.querySelectorAll("[data-user-name]")) node.textContent = user;
+  for (const node of document.querySelectorAll("[data-workspace-name]")) node.textContent = workspace;
+  for (const node of document.querySelectorAll("[data-initials]")) node.textContent = initials(user);
+  byId("who").textContent = workspace || "Workspace";
+
+  const operator = Boolean(who && who.operator);
+  byId("role").replaceChildren(
+    h("span", { class: "tag" }, operator ? "operator" : "member"),
+    h("span", { class: "small muted" }, operator
+      ? "May read the server's own state and act on it from the console."
+      : "Reads and writes this workspace as you."),
+  );
+  byId("identity").replaceChildren(
+    fact("User", who && who.user ? who.user : "unknown", true),
+    fact("Workspace", who && who.tenant ? who.tenant : "unknown", true),
+    fact("Server", location.host, true),
+  );
+
+  const issued = who && typeof who.iat === "number" ? new Date(who.iat * 1000) : null;
+  const expires = who && typeof who.exp === "number" ? new Date(who.exp * 1000) : null;
+  byId("token-facts").replaceChildren(
+    fact("Issued", issued ? stamps.format(issued) : "not said"),
+    fact("Expires", expires ? stamps.format(expires) : "never"),
+    fact("Token id", who && who.jti ? who.jti : "not said", true),
+  );
+  const left = expires ? Math.max(0, Math.ceil((expires - Date.now()) / DAY)) : null;
+  const bar = byId("token-bar");
+  bar.hidden = !(issued && expires);
+  if (issued && expires) {
+    const spent = Math.min(1, Math.max(0, (Date.now() - issued) / (expires - issued)));
+    byId("token-spent").style.width = `${(spent * 100).toFixed(1)}%`;
+    bar.classList.toggle("ending", left <= EXPIRING_DAYS);
+    bar.setAttribute("aria-label", `${Math.round(spent * 100)}% of this token's life has passed`);
+  }
+  byId("token-left").textContent =
+    left === null ? "This token does not expire." : left === 0 ? "Expires today." : `${numbers.format(left)} ${left === 1 ? "day" : "days"} left.`;
+  state.shell.tokenDaysLeft = left;
+}
+
+// Devices and handoffs
+
+function ago(iso) {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "unknown";
+  const minutes = Math.max(0, Math.round((Date.now() - at) / 60000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 48 * 60) return `${Math.round(minutes / 60)} h ago`;
+  return stamps.format(at);
+}
+
+async function loadDevices() {
+  const out = await call("devices");
+  const devices = out.devices ?? [];
+  state.shell.devices = devices;
+  byId("devices-summary").textContent = devices.length
+    ? `${numbers.format(devices.length)} registered`
+    : "";
+  const rows = devices.map((d) =>
+    h(
+      "tr",
+      {},
+      h("th", { scope: "row", class: "mono" }, d.host),
+      h("td", {}, d.role === "memory" ? "Memory" : d.role === "train" ? "Trains experts" : d.role || "unknown"),
+      h("td", { class: "mono" }, d.backend || "unknown"),
+      h("td", { title: d.last_seen || "" }, d.last_seen ? ago(d.last_seen) : "never"),
+    ),
+  );
+  byId("devices").replaceChildren(
+    ...(rows.length ? rows : [h("tr", {}, h("td", { colspan: 4, class: "empty" }, "No device has registered yet: an agent's session registers the machine it runs on."))]),
+  );
+  byId("devices-brief").replaceChildren(
+    ...(devices.length
+      ? devices.map((d) =>
+          h(
+            "li",
+            { class: "brief" },
+            h("span", { class: "mono" }, d.host),
+            h("span", { class: "small muted", title: d.last_seen || "" }, d.last_seen ? `seen ${ago(d.last_seen)}` : "never seen"),
+          ),
+        )
+      : [h("li", { class: "empty" }, "No device has registered yet.")]),
+  );
+  await loadHandoffs(devices);
+}
+
+/** The handoffs waiting for any of the user's devices, each listed once. */
+async function loadHandoffs(devices) {
+  const hosts = devices.map((d) => d.host);
+  const lists = await Promise.all(
+    (hosts.length ? hosts : [undefined]).map((host) => call("handoffs", host ? { host, full: true } : { full: true })),
+  );
+  const seen = new Map();
+  for (const out of lists) for (const note of out.handoffs ?? []) seen.set(note.id, note);
+  const notes = [...seen.values()].sort((a, b) => String(b.left_at).localeCompare(String(a.left_at)));
+  state.shell.handoffs = notes.length;
+  byId("handoffs-summary").textContent = notes.length ? `${numbers.format(notes.length)} waiting` : "";
+  byId("handoffs").replaceChildren(
+    ...(notes.length ? notes.map(handoffItem) : [h("li", { class: "empty" }, "Nothing is waiting: a session leaves a handoff for another machine with leave_handoff.")]),
+  );
+  showCounts();
+}
+
+function handoffItem(note) {
+  const [title, ...rest] = String(note.content || note.title || "").split("\n");
+  const body = rest.join("\n").trim();
+  const done = h("button", { type: "button", class: "quiet" }, "Mark done");
+  const item = h(
+    "li",
+    { class: "handoff" },
+    h("p", { class: "handoff-title" }, title || "Untitled"),
+    body ? h("p", { class: "content" }, body) : null,
+    h(
+      "p",
+      { class: "meta small muted" },
+      h("span", {}, `from ${note.from_host || "unknown"}`),
+      h("span", {}, `for ${note.for_host || "any device"}`),
+      h("span", { title: note.left_at || "" }, note.left_at ? ago(note.left_at) : ""),
+      h("span", { class: "mono" }, note.id),
+    ),
+    h("div", { class: "actions-row" }, done),
+  );
+  done.addEventListener("click", async () => {
+    done.disabled = true;
+    try {
+      await call("complete_handoff", { handoff_id: note.id });
+      await section(byId("handoffs"), () => loadHandoffs(state.shell.devices));
+      renderAttention();
+    } catch (error) {
+      done.disabled = false;
+      if (error instanceof SignedOut) signOut(REFUSED);
+      else if (!(error instanceof Superseded)) done.textContent = "Could not mark it done";
+    }
+  });
+  return item;
+}
+
+// The workspace's policy, read from what the console reads.
+
+async function loadPolicy() {
+  const token = state.token;
+  const res = await fetch("console/snapshot", {
+    headers: { authorization: `Bearer ${token}` },
+    cache: "no-store",
+    credentials: "omit",
+  });
+  if (res.status === 401) throw new SignedOut();
+  if (!res.ok) throw new Error((await res.text()) || `${res.status} ${res.statusText}`);
+  const snapshot = await res.json();
+  if (state.token !== token) throw new Superseded();
+  const policy = snapshot.policy || {};
+  byId("policy-summary").textContent = snapshot.operator
+    ? "Change a value with K in the console (antumbra tui)."
+    : "Read only: an operator's token changes these.";
+  byId("policy").replaceChildren(
+    ...POLICY.map(([name, about, knobs]) =>
+      h(
+        "section",
+        { class: "panel policy-group" },
+        h("div", { class: "policy-head" }, h("h4", {}, name), h("p", { class: "muted small" }, about)),
+        h(
+          "dl",
+          { class: "facts" },
+          ...knobs
+            .filter(([key]) => key in policy)
+            .map(([key, label, says]) => h("div", { class: "fact" }, h("dt", {}, label), h("dd", {}, says(policy[key])))),
+        ),
+      ),
+    ),
+  );
+}
+
+// The Overview: what is waiting, and the latest memories.
+
+async function loadRecent() {
+  const out = await call("list_memories", { limit: RECENT_SHOWN });
+  const rows = out.memories ?? [];
+  byId("recent").replaceChildren(
+    ...(rows.length
+      ? rows.map((m) =>
+          h(
+            "li",
+            { class: "recent" },
+            h("p", { class: "recent-text" }, m.content),
+            h(
+              "p",
+              { class: "meta small muted" },
+              h("span", { class: "tag" }, m.network || "memory"),
+              m.created_at ? h("span", { title: m.created_at }, ago(m.created_at)) : null,
+            ),
+          ),
+        )
+      : [h("li", { class: "empty" }, "No memories yet: an agent stores one with store_memory.")]),
+  );
+}
+
+/** Proposed behaviors, counted from what the Behaviors page drew. */
+function proposedCount() {
+  const text = byId("behaviors-summary").textContent;
+  const found = /([\d,.\s]+) proposed/.exec(text);
+  return found ? Number(found[1].replace(/[^\d]/g, "")) : 0;
+}
+
+function showCounts() {
+  const badge = (id, count) => {
+    const node = byId(id);
+    node.hidden = !count;
+    node.textContent = count ? numbers.format(count) : "";
+  };
+  badge("nav-proposed", proposedCount());
+  badge("nav-handoffs", state.shell.handoffs);
+}
+
+function attentionItem(text, detail, href) {
+  return h("li", {}, h("a", { class: "attention", href }, h("span", { class: "attention-text" }, text), h("span", { class: "small muted" }, detail)));
+}
+
+/** What needs the user: drawn from what the other pages loaded. */
+function renderAttention() {
+  showCounts();
+  const items = [];
+  const proposed = proposedCount();
+  if (proposed) {
+    items.push(attentionItem(`${numbers.format(proposed)} proposed ${proposed === 1 ? "behavior" : "behaviors"}`, "Accept or retire", "#/behaviors"));
+  }
+  const handoffs = state.shell.handoffs;
+  if (handoffs) {
+    items.push(attentionItem(`${numbers.format(handoffs)} ${handoffs === 1 ? "handoff" : "handoffs"} waiting`, "Read and mark done", "#/devices"));
+  }
+  const left = state.shell.tokenDaysLeft;
+  if (left !== null && left <= EXPIRING_DAYS) {
+    items.push(attentionItem(left === 0 ? "Your token expires today" : `Your token expires in ${left} ${left === 1 ? "day" : "days"}`, "Mint a new one", "#/account"));
+  }
+  byId("attention").replaceChildren(...(items.length ? items : [h("li", { class: "empty" }, "Nothing is waiting for you.")]));
+}
+
+/** The shell's own loads, run beside the sections' by `refresh`. */
+function shellLoads() {
+  return [
+    section(byId("devices"), loadDevices),
+    section(byId("policy"), loadPolicy),
+    section(byId("recent"), loadRecent),
+  ];
+}
+
+/** Empty what the shell drew, at sign-out. */
+function clearShell() {
+  for (const id of ["devices", "devices-brief", "handoffs", "policy", "recent", "attention", "identity", "token-facts", "role"]) {
+    byId(id).replaceChildren();
+  }
+  for (const id of ["devices-summary", "handoffs-summary", "policy-summary", "token-left"]) byId(id).textContent = "";
+  for (const node of document.querySelectorAll("[data-user-name], [data-workspace-name], [data-initials]")) node.textContent = "";
+  state.shell = { devices: [], handoffs: 0, tokenDaysLeft: null };
+  showCounts();
+  closeMenu();
+}
+
+function startShell() {
+  state.shell = { devices: [], handoffs: 0, tokenDaysLeft: null };
+  applyPreferences(preferences());
+  byId("preferences").addEventListener("change", keepPreferences);
+  window.addEventListener("hashchange", route);
+  route();
+
+  byId("user-button").addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleMenu();
+  });
+  document.addEventListener("click", (event) => {
+    if (!byId("user-menu").hidden && !event.target.closest(".menu")) closeMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeMenu();
+    // "/" goes to the search, unless something is being typed into.
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable;
+    if (event.key === "/" && !typing && !byId("app").hidden) {
+      event.preventDefault();
+      byId("jump-query").focus();
+    }
+  });
+  byId("signout-here").addEventListener("click", () => signOut(""));
+  // The bar's search is the Memory page's recall, from any page.
+  byId("jump").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const query = byId("jump-query").value.trim();
+    if (!query) return;
+    byId("query").value = query;
+    location.hash = "#/memory";
+    memoryAction({ mode: "recall", query, network: memoryForm().network });
+    byId("jump-query").value = "";
+  });
+}
