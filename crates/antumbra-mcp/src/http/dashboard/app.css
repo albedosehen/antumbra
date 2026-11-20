@@ -1811,3 +1811,114 @@ input[type="number"]:invalid {
   padding-top: 10px;
   padding-bottom: 10px;
 }
+
+.menu-theme {
+  display: flex;
+  margin: 0 4px 8px;
+}
+
+.menu-theme label {
+  flex: 1;
+  text-align: center;
+}
+
+/* A button that is an icon. */
+.icon-button,
+button.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--ink-2);
+}
+
+.icon-button:hover,
+button.icon-button:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.main .bar #side-toggle {
+  margin-left: -8px;
+}
+
+/* The sidebar collapsed to its icons: each page keeps its place and its
+   count, and says its name on hover. Only where the sidebar is at the side. */
+@media (min-width: 901px) {
+  .shell {
+    transition: grid-template-columns 160ms ease-out;
+  }
+
+  :root[data-side="collapsed"] .shell {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  :root[data-side="collapsed"] .side {
+    padding-left: 8px;
+    padding-right: 8px;
+    overflow-x: hidden;
+  }
+
+  :root[data-side="collapsed"] .side .brand {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  :root[data-side="collapsed"] .side .brand h1,
+  :root[data-side="collapsed"] .nav-item > span:first-of-type,
+  :root[data-side="collapsed"] .side-user-text {
+    display: none;
+  }
+
+  /* A group's name gives way to a rule between the groups. */
+  :root[data-side="collapsed"] .nav-group {
+    height: 1px;
+    margin: 10px 8px;
+    overflow: hidden;
+    background: var(--line);
+    color: transparent;
+    font-size: 0;
+  }
+
+  :root[data-side="collapsed"] .nav-group:first-child {
+    display: none;
+  }
+
+  :root[data-side="collapsed"] .nav-item {
+    position: relative;
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  :root[data-side="collapsed"] .nav-item .count {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    min-width: 16px;
+    padding: 0 4px;
+    font-size: 0.625rem;
+  }
+
+  :root[data-side="collapsed"] .side-user {
+    justify-content: center;
+    padding: 6px 0;
+    border-color: transparent;
+  }
+}
+
+@media (max-width: 900px) {
+  #side-toggle {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell {
+    transition: none;
+  }
+}
