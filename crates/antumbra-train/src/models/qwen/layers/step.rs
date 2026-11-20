@@ -89,6 +89,11 @@ pub(in crate::models::qwen) struct Scratch {
     gated: Vec<tiles::Row>,
     /// Room for a token's logits, when the last token's was handed back.
     logits: Vec<f32>,
+    /// The blend of experts each row in hand is of, or nothing where every
+    /// row is of the adapter's own ([`LoraLinear::adapter_of`]); and the
+    /// blend the rows of one sequence read alone are of.
+    of: Vec<u16>,
+    blend: u16,
     /// What the head's two stages are worked out in, where a token is
     /// chosen through its sketch: a room for each row chosen at once.
     sketched: Vec<sketch::Room>,
@@ -132,12 +137,37 @@ fn quantize(x: &[f32], rows: usize, into: &mut Vec<tiles::Row>) {
 struct Weight<'a> {
     tiled: &'a tiles::Tiled,
     bias: Option<&'a [f32]>,
-    pack: Option<&'a pack::Packed>,
+    /// The runs of rows that read an adapter here, in the rows' order: rows
+    /// answered together may be of different blends of experts, and each
+    /// run of one blend reads that blend's factors.
+    runs: Vec<Run<'a>>,
 }
 
-impl Weight<'_> {
-    fn rank(&self) -> usize {
-        self.pack.map_or(0, |p| p.rank)
+/// Rows `from..to` of a dispatch, which read one blend's packed factors.
+struct Run<'a> {
+    from: usize,
+    to: usize,
+    pack: &'a pack::Packed,
+    /// Where these rows' `scale · A · x` starts in the room [`through`]
+    /// makes: a row's `rank` values together, row after row.
+    at: usize,
+}
+
+impl Run<'_> {
+    fn rows(&self) -> usize {
+        self.to - self.from
+    }
+
+    /// The values these rows' `scale · A · x` take.
+    fn room(&self) -> usize {
+        self.rows() * self.pack.rank
+    }
+
+    /// The part of this run within rows `from..to`: its first row and its
+    /// last, and where its first row's values start in the room.
+    fn within(&self, from: usize, to: usize) -> Option<(usize, usize, usize)> {
+        let (a, b) = (self.from.max(from), self.to.min(to));
+        (a < b).then(|| (a, b, self.at + (a - self.from) * self.pack.rank))
     }
 }
 
@@ -164,6 +194,43 @@ impl LoraLinear {
             false => None,
         }
     }
+
+    /// The factors a row of blend `blend` reads here: the adapter's own for
+    /// blend 0, and the ones kept for any other ([`LoraLinear::keep_pack`]).
+    fn adapter_of(&self, blend: u16) -> Option<&pack::Packed> {
+        match blend {
+            0 => self.adapter(),
+            n => self
+                .kept
+                .get(usize::from(n) - 1)
+                .and_then(Option::as_ref)
+                .filter(|p| p.rank > 0),
+        }
+    }
+
+    /// The runs of `rows` rows that read an adapter here: `of` is each
+    /// row's blend, or nothing where every row is of the adapter's own.
+    fn runs(&self, of: &[u16], rows: usize) -> Vec<Run<'_>> {
+        let mut runs: Vec<Run> = Vec::new();
+        let mut from = 0;
+        while from < rows {
+            let blend = of.get(from).copied().unwrap_or(0);
+            let mut to = from + 1;
+            while to < rows && of.get(to).copied().unwrap_or(0) == blend {
+                to += 1;
+            }
+            if let Some(pack) = self.adapter_of(blend) {
+                runs.push(Run {
+                    from,
+                    to,
+                    pack,
+                    at: 0,
+                });
+            }
+            from = to;
+        }
+        runs
+    }
 }
 
 /// The storage of each projection's bias, held while a dispatch reads it.
@@ -177,9 +244,10 @@ macro_rules! hold {
 }
 
 /// Each projection in `group` as the units of a dispatch read it, out of
-/// what `hold!` holds for them: the projection reads rows of `cols` values.
+/// what `hold!` holds for them: the projection reads `rows` rows of `cols`
+/// values, each of the blend `of` gives it.
 macro_rules! weights {
-    ($group:expr, $held:expr, $cols:expr) => {{
+    ($group:expr, $held:expr, $cols:expr, $of:expr, $rows:expr) => {{
         let mut weights = Vec::with_capacity($group.len());
         for (l, bias) in $group.iter().zip($held.iter()) {
             let tiled = l.tiled()?;
@@ -187,11 +255,13 @@ macro_rules! weights {
                 Some((storage, layout)) => Some(held(storage, layout, "a projection's bias")?),
                 None => None,
             };
-            let pack = l.adapter();
+            let runs = l.runs($of, $rows);
             let rows = tiled.rows();
             if tiled.cols() != $cols
                 || bias.is_some_and(|bias| bias.len() != rows)
-                || pack.is_some_and(|p| p.cols() != $cols || p.rows() != rows)
+                || runs
+                    .iter()
+                    .any(|r| r.pack.cols() != $cols || r.pack.rows() != rows)
             {
                 bail!(
                     "a projection of {rows} by {} and its adapter do not fit a row of {}",
@@ -199,54 +269,52 @@ macro_rules! weights {
                     $cols
                 )
             }
-            weights.push(Weight { tiled, bias, pack });
+            weights.push(Weight { tiled, bias, runs });
         }
         weights
     }};
 }
 
-/// Room in `room` for each weight's `scale · A · x` for each of `rows` rows:
-/// one weight's rows after another's, a row's `rank` values together. Where
-/// each weight's start is what comes back.
-fn through(weights: &[Weight], rows: usize, room: &mut Vec<f32>) -> Vec<usize> {
+/// Room in `room` for every run's `scale · A · x`: one weight's runs after
+/// another's, a row's `rank` values together. Each run is told where its
+/// rows start.
+fn through(weights: &mut [Weight], room: &mut Vec<f32>) {
     let mut at = 0;
-    let starts = weights
-        .iter()
-        .map(|w| {
-            let start = at;
-            at += rows * w.rank();
-            start
-        })
-        .collect();
+    for run in weights.iter_mut().flat_map(|w| w.runs.iter_mut()) {
+        run.at = at;
+        at += run.room();
+    }
     room.clear();
     room.resize(at, 0.0);
-    starts
 }
 
 /// A unit of work for each weight's adapter when any of `weights` has one
-/// on, and none otherwise.
+/// on for any row, and none otherwise.
 fn adapted(weights: &[Weight]) -> usize {
-    match weights.iter().any(|w| w.pack.is_some()) {
+    match weights.iter().any(|w| !w.runs.is_empty()) {
         true => weights.len(),
         false => 0,
     }
 }
 
-/// Weight `w`'s `scale · A · x` for every one of the `rows` rows of `x`,
-/// into its part of `t`, which starts at `start`.
+/// Weight `w`'s `scale · A · x` for every row of `x` that reads an adapter,
+/// into those rows' part of `t`.
 ///
-/// SAFETY (for the caller): `t` is the room [`through`] made for `rows`
-/// rows, and no other thread reads or writes this weight's part of it.
-unsafe fn a_unit(w: &Weight, x: &[f32], rows: usize, t: &Shared<f32>, start: usize) {
-    let Some(pack) = w.pack else { return };
-    let out = t.part(start, rows * pack.rank);
-    pack.through(0, pack.cols(), x, pack.cols(), rows, out);
-    pack.scaled(out);
+/// SAFETY (for the caller): `t` is the room [`through`] made for these
+/// weights, and no other thread reads or writes this weight's part of it.
+unsafe fn a_unit(w: &Weight, x: &[f32], t: &Shared<f32>) {
+    for run in &w.runs {
+        let cols = run.pack.cols();
+        let out = t.part(run.at, run.room());
+        run.pack
+            .through(0, cols, &x[run.from * cols..], cols, run.rows(), out);
+        run.pack.scaled(out);
+    }
 }
 
 /// To the sixteens `first..last` of `w`'s products for every one of `rows`
-/// rows in `out`: the adapter's `B` rows times each row's part of `t` (the
-/// weight's `scale · A · x`, row after row), then the bias.
+/// rows in `out`: for each run of rows that reads an adapter, its `B` rows
+/// times those rows' part of `t` (their `scale · A · x`), then the bias.
 ///
 /// SAFETY (for the caller): `out` is room for `w`'s products of every row, a
 /// row's after another's, and no other thread reads or writes these sixteens
@@ -254,8 +322,15 @@ unsafe fn a_unit(w: &Weight, x: &[f32], rows: usize, t: &Shared<f32>, start: usi
 unsafe fn finish(w: &Weight, rows: usize, first: usize, last: usize, t: &[f32], out: &Shared<f32>) {
     let (first, n) = (first * tiles::ROWS, (last - first) * tiles::ROWS);
     let width = w.tiled.rows();
-    if let Some(pack) = w.pack {
-        pack.add(first, n, t, rows, out.at().add(first), width);
+    for run in &w.runs {
+        run.pack.add(
+            first,
+            n,
+            &t[run.at..run.at + run.room()],
+            run.rows(),
+            out.at().add(run.from * width + first),
+            width,
+        );
     }
     if let Some(bias) = w.bias {
         for i in 0..rows {
@@ -289,12 +364,13 @@ fn products<const N: usize>(
     mut outs: [&mut [f32]; N],
     quantized: &mut Vec<tiles::Row>,
     room: &mut Vec<f32>,
+    of: &[u16],
 ) -> CResult<()> {
     if rows == 0 || !x.len().is_multiple_of(rows) {
         bail!("{} values are not {rows} rows", x.len())
     }
     let held = hold!(group);
-    let weights = weights!(group, held, x.len() / rows);
+    let mut weights = weights!(group, held, x.len() / rows, of, rows);
     if weights
         .iter()
         .zip(outs.iter())
@@ -305,17 +381,18 @@ fn products<const N: usize>(
     quantize(x, rows, quantized);
     let quantized = &quantized[..rows];
 
-    let starts = through(&weights, rows, room);
+    through(&mut weights, room);
+    let weights = weights;
     let t = Shared::of(room.as_mut_slice());
     let adapted = adapted(&weights);
     let shared: Vec<Shared<f32>> = outs.iter_mut().map(|out| Shared::of(out)).collect();
     let sixteens: usize = weights.iter().map(|w| w.tiled.sixteens()).sum();
     // The adapters, then the group's sixteens, one weight's after another's.
     let bases = |first: usize, last: usize| {
-        for unit in first..last.min(adapted) {
+        for w in &weights[first.min(adapted)..last.min(adapted)] {
             // SAFETY: `t` is the room made just above for these weights and
             // rows, and a unit is done by one thread.
-            unsafe { a_unit(&weights[unit], x, rows, &t, starts[unit]) };
+            unsafe { a_unit(w, x, &t) };
         }
         let Some((first, last)) = within(first, last, adapted, sixteens) else {
             return;
@@ -341,9 +418,8 @@ fn products<const N: usize>(
         // nothing writes their values now.
         let t = unsafe { t.all() };
         let mut before = 0;
-        for ((w, out), start) in weights.iter().zip(&shared).zip(starts.iter().copied()) {
+        for (w, out) in weights.iter().zip(&shared) {
             if let Some((from, to)) = within(first, last, before, w.tiled.sixteens()) {
-                let t = &t[start..start + rows * w.rank()];
                 // SAFETY: as in the phase before, in which every base row
                 // was written.
                 unsafe { finish(w, rows, from, to, t, out) };
@@ -466,6 +542,7 @@ impl Attention {
             [&mut *q, &mut *k, &mut *v],
             &mut s.quantized,
             &mut s.through,
+            &s.of,
         )?;
         // Every row is turned before any is cached, so a position past the
         // table leaves the cache as it was.
@@ -493,6 +570,7 @@ impl Attention {
             [&mut s.out],
             &mut s.quantized,
             &mut s.through,
+            &s.of,
         )
     }
 }
@@ -555,6 +633,7 @@ impl Attention {
             [&mut *q, &mut *k, &mut *v],
             &mut s.quantized,
             &mut s.through,
+            &s.of,
         )?;
         // Every row is turned before any is cached, so a position past the
         // table leaves every cache as it was.
@@ -602,6 +681,7 @@ impl Attention {
             [&mut s.out],
             &mut s.quantized,
             &mut s.through,
+            &s.of,
         )
     }
 }
@@ -642,7 +722,8 @@ impl Mlp {
         }
         let wide_group = [&self.gate_proj, &self.up_proj];
         let wide_held = hold!(wide_group);
-        let wide = weights!(wide_group, wide_held, x.len() / rows);
+        let mut wide = weights!(wide_group, wide_held, x.len() / rows, &s.of, rows);
+        through(&mut wide, &mut s.through);
         let [gate, up] = wide.as_slice() else {
             bail!("an MLP's gate and the side it gates are two projections")
         };
@@ -655,11 +736,15 @@ impl Mlp {
         }
         let narrow_group = [&self.down_proj];
         let narrow_held = hold!(narrow_group);
-        let narrow = weights!(narrow_group, narrow_held, width);
+        let mut narrow = weights!(narrow_group, narrow_held, width, &s.of, rows);
+        // The way down's `A` is read a block at a time, so its room is made
+        // for one block and kept for each: `per_block` values a block.
+        through(&mut narrow, &mut s.through_down);
+        let per_block = s.through_down.len();
         let [down] = narrow.as_slice() else {
             bail!("an MLP's way down is one projection")
         };
-        let (blocks, down_rank) = (width / BLOCK, down.rank());
+        let blocks = width / BLOCK;
 
         quantize(x, rows, &mut s.quantized);
         let quantized = &s.quantized[..rows];
@@ -673,7 +758,7 @@ impl Mlp {
             .map(|row| row.blocks(width))
             .collect();
         let gated_rows = &s.gated[..rows];
-        s.parts.resize(blocks * rows * down_rank, 0.0);
+        s.parts.resize(blocks * per_block, 0.0);
         let parts = Shared::of(&mut s.parts);
         s.out.resize(rows * down.tiled.rows(), 0.0);
         let out = Shared::of(&mut s.out);
@@ -681,15 +766,14 @@ impl Mlp {
         // The wide adapters, then the wide rows: a unit is a sixteen of the
         // gate's rows and the same sixteen of the other side's, so the core
         // that gates a block holds both.
-        let starts = through(&wide, rows, &mut s.through);
         let t_wide = Shared::of(s.through.as_mut_slice());
         let adapted = adapted(&wide);
         let sixteens = gate.tiled.sixteens();
         let wide_phase = |first: usize, last: usize| {
-            for unit in first..last.min(adapted) {
+            for w in &wide[first.min(adapted)..last.min(adapted)] {
                 // SAFETY: `t_wide` is the room made just above for these
                 // weights and rows, and a unit is done by one thread.
-                unsafe { a_unit(&wide[unit], x, rows, &t_wide, starts[unit]) };
+                unsafe { a_unit(w, x, &t_wide) };
             }
             let Some((first, last)) = within(first, last, adapted, sixteens) else {
                 return;
@@ -731,11 +815,21 @@ impl Mlp {
                 // blocks of the gated rows and their part of `parts` are
                 // this unit's alone, and a unit is done by one thread.
                 unsafe {
-                    for ((side, w), start) in wide.iter().enumerate().zip(starts.iter().copied()) {
+                    for (side, w) in wide.iter().enumerate() {
                         let at = both.at().add((side * rows + from) * width + block * BLOCK);
-                        if let Some(pack) = w.pack {
-                            let t = &t[start + from * pack.rank..start + to * pack.rank];
-                            pack.add(block * BLOCK, BLOCK, t, to - from, at, width);
+                        for run in &w.runs {
+                            let Some((a, b, start)) = run.within(from, to) else {
+                                continue;
+                            };
+                            let t = &t[start..start + (b - a) * run.pack.rank];
+                            run.pack.add(
+                                block * BLOCK,
+                                BLOCK,
+                                t,
+                                b - a,
+                                at.add((a - from) * width),
+                                width,
+                            );
                         }
                         if let Some(bias) = w.bias {
                             let bias = &bias[block * BLOCK..(block + 1) * BLOCK];
@@ -753,15 +847,17 @@ impl Mlp {
                         gate_times(g, u, m);
                         gated[i].quantize(block, &*m);
                     }
-                    if let Some(pack) = down.pack {
-                        let part =
-                            parts.part((block * rows + from) * down_rank, (to - from) * down_rank);
-                        pack.through(
+                    for run in &down.runs {
+                        let Some((a, b, start)) = run.within(from, to) else {
+                            continue;
+                        };
+                        let part = parts.part(block * per_block + start, (b - a) * run.pack.rank);
+                        run.pack.through(
                             block * BLOCK,
                             BLOCK,
-                            m.as_flattened(),
+                            &m.as_flattened()[(a - from) * BLOCK..],
                             BLOCK,
-                            to - from,
+                            b - a,
                             part,
                         );
                     }
@@ -770,21 +866,17 @@ impl Mlp {
         };
         // The way down's `scale · A` times each whole gated row: its
         // blocks' parts, added in their order.
-        s.through_down.clear();
-        s.through_down.resize(rows * down_rank, 0.0);
         let t_down = Shared::of(s.through_down.as_mut_slice());
         let gathered = || {
             // SAFETY: every block's part was written before this ran, on one
             // thread, and nothing else reads or writes either until it is
             // done.
-            let (parts, t_down) = unsafe { (parts.all(), t_down.part(0, rows * down_rank)) };
+            let (parts, t_down) = unsafe { (parts.all(), t_down.part(0, per_block)) };
             for (at, t) in t_down.iter_mut().enumerate() {
-                *t = (0..blocks)
-                    .map(|block| parts[block * rows * down_rank + at])
-                    .sum();
+                *t = (0..blocks).map(|block| parts[block * per_block + at]).sum();
             }
-            if let Some(pack) = down.pack {
-                pack.scaled(t_down);
+            for run in &down.runs {
+                run.pack.scaled(&mut t_down[run.at..run.at + run.room()]);
             }
         };
 
@@ -813,7 +905,7 @@ impl Mlp {
                     units: blocks * groups,
                     most: 1,
                     run: &gate_phase,
-                    then: (down_rank > 0).then_some(&gathered as &(dyn Fn() + Sync)),
+                    then: (per_block > 0).then_some(&gathered as &(dyn Fn() + Sync)),
                 },
                 Phase {
                     units: down.tiled.sixteens(),
@@ -886,6 +978,9 @@ pub(in crate::models::qwen) struct Next {
     pub(in crate::models::qwen) sequence: usize,
     pub(in crate::models::qwen) token: u32,
     pub(in crate::models::qwen) position: usize,
+    /// The blend of experts the sequence is answered with: 0 for the
+    /// adapter's own factors, or one kept with [`QwenLora::keep_blend`].
+    pub(in crate::models::qwen) blend: u16,
 }
 
 impl QwenLora {
@@ -941,11 +1036,30 @@ impl QwenLora {
         Ok(())
     }
 
-    /// [`QwenLora::step`] for sequence `sequence`: its prompt, read into its
-    /// own cache. `None` as that gives it, with nothing read or written.
+    /// Keep the adapter's factors as they are set now as blend `blend`'s
+    /// (one or more): what a sequence answered with that blend reads from
+    /// then on, whatever the factors are set to after. `false`, with nothing
+    /// kept, when this model does not read rows as plain values.
+    pub(in crate::models::qwen) fn keep_blend(&mut self, blend: u16) -> CResult<bool> {
+        if blend == 0 {
+            bail!("blend 0 is the adapter's own factors, which are not kept")
+        }
+        if !self.steps_plainly()? {
+            return Ok(false);
+        }
+        for layer in &mut self.layers {
+            layer.keep_packs(usize::from(blend));
+        }
+        Ok(true)
+    }
+
+    /// [`QwenLora::step`] for sequence `sequence`, answered with blend
+    /// `blend`: its prompt, read into its own cache. `None` as that gives
+    /// it, with nothing read or written.
     pub(in crate::models::qwen) fn step_in(
         &mut self,
         sequence: usize,
+        blend: u16,
         tokens: &[u32],
         position: usize,
         first: bool,
@@ -953,7 +1067,9 @@ impl QwenLora {
         for layer in &mut self.layers {
             layer.self_attn.exchange(sequence)?;
         }
+        self.scratch.blend = blend;
         let stepped = self.step(tokens, position, first);
+        self.scratch.blend = 0;
         for layer in &mut self.layers {
             layer.self_attn.exchange(sequence)?;
         }
@@ -997,6 +1113,10 @@ impl QwenLora {
         let rows = each.len();
         let at: Vec<(usize, usize)> = each.iter().map(|n| (n.sequence, n.position)).collect();
         let s = &mut self.scratch;
+        s.of.clear();
+        if each.iter().any(|n| n.blend != 0) {
+            s.of.extend(each.iter().map(|n| n.blend));
+        }
         let mut x = std::mem::take(&mut s.x);
         x.clear();
         {
@@ -1010,6 +1130,7 @@ impl QwenLora {
         for layer in &mut self.layers {
             layer.step_each(&mut x, &at, s)?;
         }
+        s.of.clear();
         self.norm.step(&x, rows, &mut s.normed)?;
         s.x = x;
         let mut stepped = Vec::with_capacity(rows);
@@ -1096,9 +1217,14 @@ impl QwenLora {
                     x.extend_from_slice(&all[at..at + width]);
                 }
             }
+            s.of.clear();
+            if s.blend != 0 {
+                s.of.resize(run.len(), s.blend);
+            }
             for layer in &mut self.layers {
                 layer.step(&mut x, position + read, run.len(), s)?;
             }
+            s.of.clear();
             read += run.len();
         }
         // The head reads the last row alone.
@@ -1455,7 +1581,7 @@ mod tests {
                         // The prompt, read into the sequence's own cache.
                         let tokens: Vec<u32> = (0..*prompt).map(|t| token(7 * i + t)).collect();
                         let (Some(Stepped::Logits(got)), Some(want)) = (
-                            together.step_in(i, &tokens, 0, false)?,
+                            together.step_in(i, 0, &tokens, 0, false)?,
                             stepped(&mut alone[i], &tokens, 0)?,
                         ) else {
                             bail!("{serve:?}: sequence {i}'s prompt was not stepped")
@@ -1468,6 +1594,7 @@ mod tests {
                         sequence: i,
                         token: next,
                         position: read[i].len(),
+                        blend: 0,
                     });
                     read[i].push(next);
                 }
@@ -1501,7 +1628,7 @@ mod tests {
             let fresh = [token(5), token(6)];
             let mut again = model(&cfg, &weights, Some(serve), true)?;
             let (Some(Stepped::Logits(got)), Some(want)) = (
-                together.step_in(2, &fresh, 0, false)?,
+                together.step_in(2, 0, &fresh, 0, false)?,
                 stepped(&mut again, &fresh, 0)?,
             ) else {
                 bail!("{serve:?}: a sequence begun again was not stepped")
@@ -1513,17 +1640,151 @@ mod tests {
                     sequence: 1,
                     token: token(1),
                     position: 4,
+                    blend: 0,
                 },
                 Next {
                     sequence: 1,
                     token: token(2),
                     position: 5,
+                    blend: 0,
                 },
             ];
             assert!(
                 together.step_each(&twice, false).is_err(),
                 "one sequence, twice"
             );
+        }
+        Ok(())
+    }
+
+    /// Set the model's `B` factors to others, as a second expert's would be.
+    fn other_factors(model: &mut QwenLora, phase: f32) -> CResult<()> {
+        {
+            let vars = model
+                .varmap
+                .data()
+                .lock()
+                .map_err(|_| candle_core::Error::msg("the varmap lock is poisoned"))?;
+            let mut names: Vec<&String> = vars.keys().filter(|n| n.ends_with("lora_b")).collect();
+            names.sort();
+            for (salt, name) in names.into_iter().enumerate() {
+                let var = &vars[name];
+                let mut values: Vec<f32> = (0..var.elem_count())
+                    .map(|i| ((i + 17 * salt) as f32 * 0.53 + phase).cos() * 0.05)
+                    .collect();
+                pack::as_held(&mut values, RANK, false);
+                var.set(&Tensor::from_vec(values, var.shape(), &Device::Cpu)?)?;
+            }
+        }
+        model.adapters_changed();
+        Ok(())
+    }
+
+    /// Sequences answered with different blends of experts in one pass give,
+    /// token for token, the logits each gives alone on a model that holds
+    /// its blend and no other: one expert, another, and the base alone,
+    /// with two sequences of one blend apart from each other.
+    #[test]
+    fn sequences_of_different_blends_are_each_decoded_alone() -> CResult<()> {
+        if !tiles::available() {
+            return Ok(());
+        }
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        let mut forms = vec![GgmlDType::Q4K, GgmlDType::Q8_0];
+        if tiles::six_bit() {
+            forms.push(GgmlDType::Q6K);
+        }
+        for serve in forms {
+            // One model holding three blends: the first expert kept as blend
+            // 1, the base alone as blend 2, and a second expert as its own.
+            let mut together = model(&cfg, &weights, Some(serve), true)?;
+            assert!(
+                together.keep_blend(1)?,
+                "{serve:?}: the first expert is kept"
+            );
+            together.set_lora(false);
+            assert!(together.keep_blend(2)?, "{serve:?}: the base alone is kept");
+            together.set_lora(true);
+            other_factors(&mut together, 0.7)?;
+            assert!(together.keep_blend(0).is_err(), "blend 0 is not kept");
+
+            let first = || model(&cfg, &weights, Some(serve), true);
+            let second = || {
+                let mut m = model(&cfg, &weights, Some(serve), true)?;
+                other_factors(&mut m, 0.7)?;
+                Ok::<_, candle_core::Error>(m)
+            };
+            let bare = || {
+                let mut m = model(&cfg, &weights, Some(serve), true)?;
+                m.set_lora(false);
+                Ok::<_, candle_core::Error>(m)
+            };
+            // Each sequence's blend, and a model that holds it alone.
+            let blends = [1u16, 0, 2, 1, 0];
+            let mut alone = [first()?, second()?, bare()?, first()?, second()?];
+            together.sequences(blends.len());
+            let mut read = vec![0usize; blends.len()];
+            for (i, blend) in blends.iter().enumerate() {
+                let prompt: Vec<u32> = (0..2 + 3 * i).map(|t| token(5 * i + t)).collect();
+                let (Some(Stepped::Logits(got)), Some(want)) = (
+                    together.step_in(i, *blend, &prompt, 0, false)?,
+                    stepped(&mut alone[i], &prompt, 0)?,
+                ) else {
+                    bail!("{serve:?}: sequence {i}'s prompt was not stepped")
+                };
+                assert_eq!(got, want, "{serve:?}: sequence {i}'s prompt, blend {blend}");
+                read[i] = prompt.len();
+            }
+            // The blends differ: the same prompt and token give other logits.
+            let probe = [token(3), token(4)];
+            let (Some(a), Some(b), Some(c)) = (
+                stepped(&mut first()?, &probe, 0)?,
+                stepped(&mut second()?, &probe, 0)?,
+                stepped(&mut bare()?, &probe, 0)?,
+            ) else {
+                bail!("{serve:?}: a probe was not stepped")
+            };
+            assert!(
+                a != b && b != c && a != c,
+                "{serve:?}: three blends, three answers"
+            );
+
+            for step in 0..8 {
+                // The sequences in another order at every step, so the runs
+                // of one blend fall differently.
+                let mut each: Vec<Next> = (0..blends.len())
+                    .map(|i| Next {
+                        sequence: i,
+                        token: token(13 * i + step),
+                        position: read[i],
+                        blend: blends[i],
+                    })
+                    .collect();
+                each.rotate_left(step % blends.len());
+                let Some(got) = together.step_each(&each, false)? else {
+                    bail!("{serve:?}: step {step} was not stepped")
+                };
+                for (next, got) in each.iter().zip(got) {
+                    let Stepped::Logits(got) = got else {
+                        bail!("{serve:?}: logits were asked for")
+                    };
+                    let Some(want) =
+                        stepped(&mut alone[next.sequence], &[next.token], next.position)?
+                    else {
+                        bail!(
+                            "{serve:?}: sequence {} was not stepped alone",
+                            next.sequence
+                        )
+                    };
+                    assert_eq!(
+                        got, want,
+                        "{serve:?}, step {step}: sequence {} of blend {}",
+                        next.sequence, next.blend
+                    );
+                    read[next.sequence] += 1;
+                }
+            }
         }
         Ok(())
     }
@@ -1549,6 +1810,7 @@ mod tests {
                     sequence: i,
                     token: token(11 * i + step),
                     position: step,
+                    blend: 0,
                 })
                 .collect();
             let Some(got) = together.step_each(&each, true)? else {

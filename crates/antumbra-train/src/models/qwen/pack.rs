@@ -81,6 +81,7 @@ const SIXTEEN: usize = 16;
 /// the factors are read. A rank's sum through `A` is multiplied once by the
 /// adapter's scale and both of the rank's steps ([`Packed::scaled`]), and
 /// what comes of that is what `B`'s whole numbers are multiplied by.
+#[derive(Clone)]
 pub(super) struct Packed {
     /// The ranks that are held: the factors' own, less those at the end
     /// that add nothing.
