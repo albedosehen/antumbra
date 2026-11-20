@@ -42,6 +42,14 @@ async fn requests_decoded_together_answer_as_alone() -> Outcome<()> {
     if let Ok(quant) = std::env::var("ANTUMBRA_CPU_QUANT") {
         cfg.serve_quant = Some(quant.parse()?);
     }
+    // `ANTUMBRA_CPU_AHEAD=1` reads ahead, as a model loaded to serve does:
+    // for timing it on and off over the same prompts on one machine.
+    cfg.read_ahead = std::env::var("ANTUMBRA_CPU_AHEAD").is_ok_and(|v| v != "0");
+    let ahead = if cfg.read_ahead {
+        ", reading ahead"
+    } else {
+        ""
+    };
     let form = cfg
         .serve_quant
         .map_or("f32".to_string(), |q| format!("{q:?}"));
@@ -54,6 +62,7 @@ async fn requests_decoded_together_answer_as_alone() -> Outcome<()> {
 
     // Each prompt alone: the answers every batch is held to.
     let mut alone = Vec::new();
+    let mut first = (0usize, 0f64, 0usize);
     for prompt in PROMPTS {
         let answer = model
             .generate(prompt, 1)
@@ -62,9 +71,22 @@ async fn requests_decoded_together_answer_as_alone() -> Outcome<()> {
             .next()
             .ok_or("one answer was asked for and none came back")?;
         alone.push(answer);
+        if let Some(t) = model.last_timing() {
+            first.0 += t.decoded;
+            first.1 += t.decode_secs;
+            first.2 += t.passes;
+        }
     }
+    // These are the only answers to prompts this model has not answered
+    // before: every batch below repeats one of them.
+    eprintln!(
+        "RESULT cpu batch {form}{ahead}: each prompt for the first time, alone: {:.1} tok/s decoded over {} in {} passes",
+        first.0 as f64 / first.1,
+        first.0,
+        first.2
+    );
 
-    let mut report = format!("RESULT cpu batch {form}:");
+    let mut report = format!("RESULT cpu batch {form}{ahead}:");
     // `ANTUMBRA_CPU_BATCH_SIZES=1,2,3` answers those many at once instead.
     let sizes: Vec<usize> = match std::env::var("ANTUMBRA_CPU_BATCH_SIZES") {
         Ok(sizes) => sizes
@@ -73,7 +95,17 @@ async fn requests_decoded_together_answer_as_alone() -> Outcome<()> {
             .collect::<Result<_, _>>()?,
         Err(_) => vec![1, 2, 4, 8, 16],
     };
-    for together in sizes {
+    // `ANTUMBRA_CPU_BATCH_ROUNDS=2` goes round the sizes again: the second
+    // time every prompt has been answered before, which is where a model
+    // that reads ahead has the most to guess from.
+    let rounds: usize = match std::env::var("ANTUMBRA_CPU_BATCH_ROUNDS") {
+        Ok(rounds) => rounds.trim().parse()?,
+        Err(_) => 1,
+    };
+    for (round, together) in (0..rounds).flat_map(|round| sizes.iter().map(move |n| (round, *n))) {
+        if round > 0 && together == sizes[0] {
+            report.push_str(" again:");
+        }
         let prompts: Vec<&str> = (0..together).map(|i| PROMPTS[i % PROMPTS.len()]).collect();
         let answers = model.generate_each(&prompts, 0)?;
         for (i, answer) in answers.iter().enumerate() {
@@ -86,9 +118,10 @@ async fn requests_decoded_together_answer_as_alone() -> Outcome<()> {
         let t = model.last_timing().ok_or("the run was not timed")?;
         let node = t.decoded as f64 / t.decode_secs;
         report.push_str(&format!(
-            " {together} at once: {node:.1} tok/s decoded ({:.1} each) over {};",
+            " {together} at once: {node:.1} tok/s decoded ({:.1} each) over {} in {} passes;",
             node / together as f64,
-            t.decoded
+            t.decoded,
+            t.passes
         ));
     }
     eprintln!("{report}");
