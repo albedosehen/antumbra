@@ -474,11 +474,6 @@ unsafe fn q8_block(tile: &TileQ8, act: *const i8, d_act: f32, acc: F16) -> F16 {
     out
 }
 
-/// SCRATCH, not for merge: the rows left over after the fours a row at a
-/// time, as they went before, so one process can time both ways.
-pub(super) static LEFT_ALONE: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
 /// Rows whose running sums are kept at once while a sixteen's tiles go by.
 const TOGETHER: usize = 32;
 
@@ -570,11 +565,7 @@ unsafe fn sixteens_of(w: &Tiled, first: usize, last: usize, rows: &[Row], out: &
                         // three rows read on their own, share a cutting
                         // as the fours do. One has nothing to share it
                         // with.
-                        match if LEFT_ALONE.load(std::sync::atomic::Ordering::Relaxed) {
-                            0
-                        } else {
-                            some.len() - i
-                        } {
+                        match some.len() - i {
                             3 => {
                                 q6k_together::<3>(tile, some, i, b, &mut acc);
                                 i += 3;

@@ -728,6 +728,13 @@ pub(super) fn forward(group: &[&Tiled], x: &Tensor) -> Result<Vec<Tensor>> {
 #[path = "tiles_neon.rs"]
 mod kernels;
 
+/// SCRATCH, not for merge: the kernels as the release branch has them, to
+/// time beside these in one process.
+#[cfg(all(test, target_arch = "aarch64"))]
+#[allow(dead_code)]
+#[path = "tiles_neon_old.rs"]
+mod kernels_old;
+
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod kernels {
     use super::{Row, Tiled};
@@ -1808,14 +1815,14 @@ mod tests {
         Ok(())
     }
 
-    /// SCRATCH, not for merge: rows of a six-bit weight with the leftover
-    /// rows a row at a time (as before) and through one cutting (as now), turn
-    /// and turn about on one thread, the best of the rounds kept for each.
+    /// SCRATCH, not for merge: rows of a weight through the release branch's
+    /// kernels (kept beside these as a second module) and through these, turn
+    /// and turn about on one thread, the best of the rounds kept for each,
+    /// and the products of the two compared bit for bit.
     #[cfg(target_arch = "aarch64")]
     #[test]
     #[ignore]
-    fn pace_of_six_bit_rows() -> Result<()> {
-        use std::sync::atomic::Ordering::Relaxed;
+    fn pace_of_rows_old_and_new() -> Result<()> {
         use std::time::Instant;
         let small = std::env::var("PACE_SMALL").is_ok();
         let weights: &[(usize, usize, &str)] = if small {
@@ -1827,46 +1834,58 @@ mod tests {
                 (8960, 1536, "an MLP weight"),
             ]
         };
-        for &(rows_w, cols, what) in weights {
-            let (Some(tiled), _) = weight(rows_w, cols, GgmlDType::Q6K)? else {
-                bail!("Q6K was not tiled")
-            };
-            let xs: Vec<f32> = Tensor::randn(0f32, 1.0, 8 * cols, &Device::Cpu)?.to_vec1()?;
-            let rows = quantize_rows(&xs, cols);
-            for n in [1usize, 2, 3, 4, 5, 6, 7, 8] {
-                let mut out = vec![0f32; n * rows_w];
-                let mut once = |alone: bool| {
-                    kernels::LEFT_ALONE.store(alone, Relaxed);
-                    let start = Instant::now();
-                    // SAFETY: each row holds the weight's values, `out`
-                    // every row's products, and nothing else writes them.
-                    unsafe {
-                        tiled.multiply_sixteens(0, tiled.sixteens(), &rows[..n], out.as_mut_ptr())
-                    };
-                    start.elapsed().as_secs_f64()
+        for dtype in [GgmlDType::Q6K, GgmlDType::Q4K] {
+            for &(rows_w, cols, what) in weights {
+                let (Some(tiled), _) = weight(rows_w, cols, dtype)? else {
+                    bail!("{dtype:?} was not tiled")
                 };
-                let first = once(true).max(once(false)).max(1e-9);
-                let reps = ((0.02 / first) as usize).clamp(1, 2000);
-                let (mut alone, mut together) = (f64::MAX, f64::MAX);
-                for _ in 0..(if small { 2 } else { 9 }) {
-                    let mut a = 0.0;
-                    for _ in 0..reps {
-                        a += once(true);
+                let xs: Vec<f32> = Tensor::randn(0f32, 1.0, 32 * cols, &Device::Cpu)?.to_vec1()?;
+                let rows = quantize_rows(&xs, cols);
+                let counts: &[usize] = if dtype == GgmlDType::Q6K {
+                    &[1, 2, 3, 4, 5, 6, 7, 8, 16, 32]
+                } else {
+                    &[1, 2, 4]
+                };
+                for &n in counts {
+                    let mut out = [vec![0f32; n * rows_w], vec![0f32; n * rows_w]];
+                    let mut once = |old: bool| {
+                        let at = out[usize::from(old)].as_mut_ptr();
+                        let start = Instant::now();
+                        // SAFETY: each row holds the weight's values, `at`
+                        // has room for every row's products, and nothing
+                        // else writes them.
+                        unsafe {
+                            if old {
+                                kernels_old::sixteens(&tiled, 0, tiled.sixteens(), &rows[..n], at)
+                            } else {
+                                kernels::sixteens(&tiled, 0, tiled.sixteens(), &rows[..n], at)
+                            }
+                        };
+                        start.elapsed().as_secs_f64()
+                    };
+                    let first = once(true).max(once(false)).max(1e-9);
+                    let reps = ((0.02 / first) as usize).clamp(1, 2000);
+                    let (mut old, mut new) = (f64::MAX, f64::MAX);
+                    for _ in 0..(if small { 2 } else { 9 }) {
+                        let mut o = 0.0;
+                        for _ in 0..reps {
+                            o += once(true);
+                        }
+                        let mut w = 0.0;
+                        for _ in 0..reps {
+                            w += once(false);
+                        }
+                        old = old.min(o / reps as f64);
+                        new = new.min(w / reps as f64);
                     }
-                    let mut t = 0.0;
-                    for _ in 0..reps {
-                        t += once(false);
-                    }
-                    alone = alone.min(a / reps as f64);
-                    together = together.min(t / reps as f64);
+                    assert!(out[0] == out[1], "{dtype:?}, {n} rows: new is not old");
+                    eprintln!(
+                        "pace tiles {dtype:?} {rows_w}x{cols} ({what}), {n} rows: release {:.1} us, branch {:.1} us, ratio {:.3}",
+                        old * 1e6,
+                        new * 1e6,
+                        new / old
+                    );
                 }
-                kernels::LEFT_ALONE.store(false, Relaxed);
-                eprintln!(
-                    "pace tiles Q6_K {rows_w}x{cols} ({what}), {n} rows: leftovers alone {:.1} us, sharing {:.1} us, ratio {:.3}",
-                    alone * 1e6,
-                    together * 1e6,
-                    together / alone
-                );
             }
         }
         Ok(())
