@@ -698,6 +698,13 @@ impl Attention {
         }
     }
 
+    /// Forget the positions from `len` on in the cache of plain rows.
+    pub(super) fn truncate(&mut self, len: usize) {
+        if let Some(store) = &mut self.kv_store {
+            store.truncate(len);
+        }
+    }
+
     pub(super) fn packs(&self) -> bool {
         [&self.q_proj, &self.k_proj, &self.v_proj, &self.o_proj]
             .iter()
@@ -930,6 +937,10 @@ impl DecoderLayer {
 
     pub(super) fn clear_cache(&mut self) {
         self.self_attn.clear_cache();
+    }
+
+    pub(super) fn truncate(&mut self, len: usize) {
+        self.self_attn.truncate(len);
     }
 
     /// Whether any of this layer's adapters has a copy to make.

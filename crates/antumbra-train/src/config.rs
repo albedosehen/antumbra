@@ -240,6 +240,14 @@ pub struct RaftConfig {
     /// it: the same set trained first and third in one server came out learned
     /// and refused.
     pub seed: Option<u64>,
+    /// Decode greedily several tokens a pass where the model can
+    /// ([`crate::draft`]): guesses ride along with the token in hand and are
+    /// kept where they are the model's own next token, so what is written
+    /// is what a token at a time writes. The guesses come from what the
+    /// model wrote for earlier requests through the same blend of experts,
+    /// which it remembers between them. Off unless a caller sets it;
+    /// serving sets it.
+    pub read_ahead: bool,
 }
 
 impl Default for RaftConfig {
@@ -272,6 +280,7 @@ impl Default for RaftConfig {
             replay_ratio: 0.0,
             batch_size: 1,
             seed: None,
+            read_ahead: false,
         }
     }
 }
@@ -324,12 +333,16 @@ impl RaftConfig {
     /// `fn add(a: i64, b: i32) -> i6`), and the penalty reworded four answers
     /// in five. What they were for, a model that repeats itself without end,
     /// is ended where it starts ([`crate::decode::loops`]).
+    ///
+    /// And it reads ahead ([`RaftConfig::read_ahead`]): the same tokens,
+    /// in fewer passes over the weights.
     pub fn for_serving(max_new_tokens: usize, temperature: f64) -> Self {
         Self {
             max_new_tokens,
             temperature,
             top_p: 0.9,
             serve_quant: ServeQuant::for_build(),
+            read_ahead: true,
             ..Self::default()
         }
     }
@@ -528,6 +541,8 @@ mod tests {
         // Serving holds the base as the build serves it; training never does.
         assert_eq!(cfg.serve_quant, ServeQuant::for_build());
         assert_eq!(RaftConfig::default().serve_quant, None);
+        // Serving reads ahead; nothing else does unless it asks.
+        assert!(cfg.read_ahead && !RaftConfig::default().read_ahead);
         Ok(())
     }
 }

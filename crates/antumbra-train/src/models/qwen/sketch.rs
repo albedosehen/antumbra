@@ -265,6 +265,43 @@ fn of_word(word: u64) -> (f32, u32) {
     (f32::from_bits((word >> 32) as u32), word as u32)
 }
 
+/// Where one input's sketched products go, a value for every row of the
+/// head, and each sixteen's largest of them.
+#[derive(Clone, Copy)]
+struct Places {
+    products: *mut f32,
+    tops: *mut f32,
+}
+
+// SAFETY: the pointers are only written through, at the places of sixteens
+// no two units of work share, for as long as the rooms they point into are
+// borrowed.
+unsafe impl Sync for Places {}
+
+/// The sixteens `first..last` of the sketch against every one of `rows`,
+/// each row's products of them and their largest to its own of `places`.
+/// Off x86-64 it is a row after another through the one-row kernel: a run of
+/// sixteens is read from memory for the first row and from the cache for the
+/// rest.
+///
+/// SAFETY (for the caller): as the kernels' `sixteens`, for every row and
+/// its places.
+#[cfg(not(target_arch = "x86_64"))]
+unsafe fn sixteens_of_each(
+    sketch: &Sketch,
+    first: usize,
+    last: usize,
+    rows: &[Row],
+    places: &[Places],
+) {
+    for (row, place) in rows.iter().zip(places) {
+        kernels::sixteens(sketch, first, last, row, place.products, place.tops);
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+use kernels::sixteens_of_each;
+
 /// Whether this CPU multiplies a sketch of the head: the CPUs that multiply
 /// six-bit tiles, whose instructions cut the sketch's values out as well.
 pub(super) fn available() -> bool {
@@ -393,8 +430,9 @@ impl Sketch {
     /// `xs` quantized, a room for each, and each one's token is written to
     /// `tokens`. Each token is the one its input gets alone. The sketch is
     /// read from memory once for all of them: a run of sixteens goes by for
-    /// every input before the next run is read, and the two stages are one
-    /// dispatch whatever the number of inputs.
+    /// every input before the next run is read, its codes cut out of their
+    /// bytes once for as many inputs as the kernel takes together, and the
+    /// two stages are one dispatch whatever the number of inputs.
     pub(super) fn first_of_each(
         &self,
         rows: &[Row],
@@ -423,7 +461,6 @@ impl Sketch {
         let sixteens = self.rows / ROWS;
         /// One input's two stages.
         struct Of<'a> {
-            row: &'a Row,
             x: &'a [f32],
             size: f32,
             products: Shared<f32>,
@@ -435,16 +472,14 @@ impl Sketch {
             reached: AtomicU32,
             read: AtomicUsize,
         }
-        let each: Vec<Of> = rows
-            .iter()
-            .zip(xs.chunks_exact(self.cols))
+        let each: Vec<Of> = xs
+            .chunks_exact(self.cols)
             .zip(rooms.iter_mut())
-            .map(|((row, x), room)| {
+            .map(|(x, room)| {
                 room.products.resize(self.rows, 0.0);
                 room.tops.resize(sixteens, 0.0);
                 room.lanes.resize(sixteens, 0);
                 Of {
-                    row,
                     x,
                     size: dot(x, x).sqrt(),
                     products: Shared::of(&mut room.products),
@@ -458,17 +493,20 @@ impl Sketch {
             .collect();
         let whole =
             |of: &Of, token: usize| dot(&dense[token * self.cols..(token + 1) * self.cols], of.x);
+        let places: Vec<Places> = each
+            .iter()
+            .map(|of| Places {
+                products: of.products.at(),
+                tops: of.tops.at(),
+            })
+            .collect();
 
         let sketched = |first: usize, last: usize| {
-            for of in &each {
-                // SAFETY: a sketch is only made where `available` found the
-                // features the kernel is built for; each row holds this
-                // sketch's columns, checked above; the rooms were sized just
-                // above; and a sixteen is done by one thread.
-                unsafe {
-                    kernels::sixteens(self, first, last, of.row, of.products.at(), of.tops.at())
-                };
-            }
+            // SAFETY: a sketch is only made where `available` found the
+            // features the kernel is built for; each row holds this sketch's
+            // columns, checked above; the rooms were sized just above; and a
+            // sixteen is done by one thread.
+            unsafe { sixteens_of_each(self, first, last, rows, &places) };
         };
         let first_read = || {
             for of in &each {
@@ -630,7 +668,7 @@ mod kernels {
 
 #[cfg(target_arch = "x86_64")]
 mod kernels {
-    use super::{Row, Sketch, BITS, BLOCK, GROUP, LEVELS, PAIR, ROWS};
+    use super::{Places, Row, Sketch, BITS, BLOCK, GROUP, LEVELS, PAIR, ROWS};
     use std::arch::x86_64::*;
 
     /// Where each byte of a group goes for its fields to be cut out: a pair
@@ -664,72 +702,120 @@ mod kernels {
         _mm512_set1_epi32(std::ptr::read_unaligned(act.add(at) as *const i32))
     }
 
-    /// The sixteens `first..last` of the sketch against the one row `row`:
-    /// each sixteen's products to `products`, and the largest of them to
-    /// `tops`. A sketched weight is its row's scale times `2 * code + 1 -
-    /// LEVELS`, so a row's product is `2 * code · input` less `LEVELS - 1`
-    /// times the input's own sum, in whole numbers over each block of 256,
-    /// then by the block's scale, and by the row's at the end.
+    /// Sixteen `t` of the sketch against `N` rows of input at once: each
+    /// row's sixteen products, as it would have them alone, to the bit. A
+    /// sketched weight is its row's scale times `2 * code + 1 - LEVELS`, so a
+    /// product is `2 * code · input` less `LEVELS - 1` times the input's own
+    /// sum, in whole numbers over each block of 256, then by the block's
+    /// scale, and by the row's at the end.
     ///
-    /// Four running sums take a group in turn, so the wait for one sum is
-    /// spent on the other three.
+    /// A group's codes are cut out of their bytes once for every row of
+    /// input. Each row keeps `SUMS` running sums that take a group in turn,
+    /// so the wait for one sum is spent on the others: with one row that is
+    /// four sums, with eight rows the eight rows' own.
     ///
-    /// SAFETY (for the caller): the CPU has the features named, `row` holds
-    /// the sketch's columns, `products` has room for every row's product and
-    /// `tops` for every sixteen's, the sixteens are among the sketch's own,
-    /// and no other thread writes their places.
+    /// SAFETY (for the caller): the CPU has the features named, `rows` holds
+    /// `N` rows of the sketch's columns, and the sixteen is among the
+    /// sketch's own.
     #[target_feature(enable = "avx512f,avx512bw,avx512vnni,avx512vbmi")]
-    pub(super) unsafe fn sixteens(
+    unsafe fn sixteen_of<const N: usize, const SUMS: usize>(
         sketch: &Sketch,
-        first: usize,
-        last: usize,
-        row: &Row,
-        products: *mut f32,
-        tops: *mut f32,
-    ) {
+        t: usize,
+        rows: &[Row],
+    ) -> [__m512; N] {
         let spread = _mm512_loadu_si512(SPREAD.as_ptr() as *const __m512i);
         let fields = _mm512_set1_epi64(FIELDS);
         let code = _mm512_set1_epi8(LEVELS as i8 - 1);
-        let blocks = sketch.cols / BLOCK;
         let per = sketch.cols / 4 * GROUP;
-        for t in first..last {
-            let mut codes = sketch.codes.as_ptr().add(t * per);
-            let mut acc = _mm512_setzero_ps();
-            for b in 0..blocks {
-                let (act, d, total) = row.block(b);
-                let act = act.as_ptr();
-                let mut sums = [_mm512_setzero_si512(); 4];
-                for step in 0..BLOCK / 16 {
-                    for (k, sum) in sums.iter_mut().enumerate() {
-                        let g = 4 * step + k;
-                        // A group is fewer bytes than the vector loaded:
-                        // what is past it is the next group's, or the slack
-                        // kept after the last, and `spread` reads none of it.
-                        let packed = _mm512_loadu_si512(codes.add(g * GROUP) as *const __m512i);
-                        let q = _mm512_and_si512(
-                            _mm512_multishift_epi64_epi8(
-                                fields,
-                                _mm512_permutexvar_epi8(spread, packed),
-                            ),
-                            code,
-                        );
-                        *sum = _mm512_dpbusd_epi32(*sum, q, four(act, 4 * g));
-                    }
-                }
-                codes = codes.add(BLOCK / 4 * GROUP);
-                let isum = _mm512_add_epi32(
-                    _mm512_add_epi32(sums[0], sums[1]),
-                    _mm512_add_epi32(sums[2], sums[3]),
+        let mut codes = sketch.codes.as_ptr().add(t * per);
+        let mut acc = [_mm512_setzero_ps(); N];
+        for b in 0..sketch.cols / BLOCK {
+            let blocks: [(*const i8, f32, i32); N] = std::array::from_fn(|i| {
+                let (act, d, total) = rows[i].block(b);
+                (act.as_ptr(), d, total)
+            });
+            let mut sums = [[_mm512_setzero_si512(); SUMS]; N];
+            for g in 0..BLOCK / 4 {
+                // A group is fewer bytes than the vector loaded: what is
+                // past it is the next group's, or the slack kept after the
+                // last, and `spread` reads none of it.
+                let packed = _mm512_loadu_si512(codes.add(g * GROUP) as *const __m512i);
+                let q = _mm512_and_si512(
+                    _mm512_multishift_epi64_epi8(fields, _mm512_permutexvar_epi8(spread, packed)),
+                    code,
                 );
+                for (sums, (act, _, _)) in sums.iter_mut().zip(&blocks) {
+                    let sum = &mut sums[g % SUMS];
+                    *sum = _mm512_dpbusd_epi32(*sum, q, four(*act, 4 * g));
+                }
+            }
+            codes = codes.add(BLOCK / 4 * GROUP);
+            for ((acc, sums), (_, d, total)) in acc.iter_mut().zip(&sums).zip(&blocks) {
+                let mut isum = sums[0];
+                for sum in &sums[1..] {
+                    isum = _mm512_add_epi32(isum, *sum);
+                }
                 let centered = _mm512_sub_epi32(
                     _mm512_slli_epi32::<1>(isum),
                     _mm512_set1_epi32((LEVELS as i32 - 1) * total),
                 );
-                acc = _mm512_fmadd_ps(_mm512_cvtepi32_ps(centered), _mm512_set1_ps(d), acc);
+                *acc = _mm512_fmadd_ps(_mm512_cvtepi32_ps(centered), _mm512_set1_ps(*d), *acc);
             }
-            let v = _mm512_mul_ps(acc, _mm512_loadu_ps(sketch.scales.as_ptr().add(t * ROWS)));
-            _mm512_storeu_ps(products.add(t * ROWS), v);
-            *tops.add(t) = _mm512_reduce_max_ps(v);
+        }
+        let scales = _mm512_loadu_ps(sketch.scales.as_ptr().add(t * ROWS));
+        for acc in acc.iter_mut() {
+            *acc = _mm512_mul_ps(*acc, scales);
+        }
+        acc
+    }
+
+    /// The sixteens `first..last` of the sketch against every one of
+    /// `rows`: each row's products of them, and the largest of each
+    /// sixteen's, to its own of `places`. The rows are taken eight, four,
+    /// two and one at a time, a sixteen's codes cut out of their bytes once
+    /// for each such run of them.
+    ///
+    /// SAFETY (for the caller): the CPU has the features named, every row
+    /// holds the sketch's columns, each of `places` has room for a product
+    /// of every row of the head and a largest for every sixteen, the
+    /// sixteens are among the sketch's own, and no other thread writes
+    /// their places.
+    #[target_feature(enable = "avx512f,avx512bw,avx512vnni,avx512vbmi")]
+    pub(super) unsafe fn sixteens_of_each(
+        sketch: &Sketch,
+        first: usize,
+        last: usize,
+        rows: &[Row],
+        places: &[Places],
+    ) {
+        for t in first..last {
+            let mut done = 0;
+            while done < rows.len().min(places.len()) {
+                let mut out = [_mm512_setzero_ps(); 8];
+                let n = match rows.len().min(places.len()) - done {
+                    8.. => {
+                        out = sixteen_of::<8, 1>(sketch, t, &rows[done..]);
+                        8
+                    }
+                    4.. => {
+                        out[..4].copy_from_slice(&sixteen_of::<4, 2>(sketch, t, &rows[done..]));
+                        4
+                    }
+                    2.. => {
+                        out[..2].copy_from_slice(&sixteen_of::<2, 4>(sketch, t, &rows[done..]));
+                        2
+                    }
+                    _ => {
+                        out[..1].copy_from_slice(&sixteen_of::<1, 4>(sketch, t, &rows[done..]));
+                        1
+                    }
+                };
+                for (v, place) in out[..n].iter().zip(&places[done..]) {
+                    _mm512_storeu_ps(place.products.add(t * ROWS), *v);
+                    *place.tops.add(t) = _mm512_reduce_max_ps(*v);
+                }
+                done += n;
+            }
         }
     }
 
@@ -847,7 +933,9 @@ mod tests {
     }
 
     /// The kernel's products are the ones summed a value at a time, to the
-    /// bit, for every row of every sixteen.
+    /// bit, for every row of every sixteen: for one row of input, and for as
+    /// many at once as take every width of a kernel that shares the cutting
+    /// of the codes (eight, four, two and one).
     #[test]
     fn sketched_products_in_vectors_are_the_plain_ones() -> Result<()> {
         let (rows, cols) = (48, 512);
@@ -855,36 +943,79 @@ mod tests {
         let Some(sketch) = sketched(&w, rows, cols)? else {
             return Ok(());
         };
-        for seed in 0..4 {
-            let row = quantized(&normals(100 + seed, cols));
-            let mut products = vec![0f32; rows];
-            let mut tops = vec![0f32; rows / ROWS];
+        for inputs in [1usize, 2, 3, 4, 7, 8, 15] {
+            let given: Vec<Row> = (0..inputs)
+                .map(|i| quantized(&normals(100 + (inputs * 31 + i) as u64, cols)))
+                .collect();
+            let mut products = vec![vec![0f32; rows]; inputs];
+            let mut tops = vec![vec![0f32; rows / ROWS]; inputs];
+            let places: Vec<Places> = products
+                .iter_mut()
+                .zip(tops.iter_mut())
+                .map(|(products, tops)| Places {
+                    products: products.as_mut_ptr(),
+                    tops: tops.as_mut_ptr(),
+                })
+                .collect();
             // SAFETY: a sketch was made, so the CPU has the kernel's
-            // features; the row holds the sketch's columns and the room is
-            // sized for it.
-            unsafe {
-                kernels::sixteens(
-                    &sketch,
-                    0,
-                    rows / ROWS,
-                    &row,
-                    products.as_mut_ptr(),
-                    tops.as_mut_ptr(),
-                )
-            };
-            for t in 0..rows / ROWS {
-                let plain = sketch.plainly(t, &row);
-                let got = &products[t * ROWS..(t + 1) * ROWS];
-                assert!(
-                    plain
-                        .iter()
-                        .zip(got)
-                        .all(|(a, b)| a.to_bits() == b.to_bits()),
-                    "sixteen {t}: {got:?} against {plain:?}"
-                );
-                let most = got.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-                assert_eq!(tops[t].to_bits(), most.to_bits());
+            // features; every row holds the sketch's columns and each has
+            // room of its own, sized for it.
+            unsafe { sixteens_of_each(&sketch, 0, rows / ROWS, &given, &places) };
+            for (i, row) in given.iter().enumerate() {
+                for t in 0..rows / ROWS {
+                    let plain = sketch.plainly(t, row);
+                    let got = &products[i][t * ROWS..(t + 1) * ROWS];
+                    assert!(
+                        plain
+                            .iter()
+                            .zip(got)
+                            .all(|(a, b)| a.to_bits() == b.to_bits()),
+                        "{inputs} rows, row {i}, sixteen {t}: {got:?} against {plain:?}"
+                    );
+                    let most = got.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                    assert_eq!(tops[i][t].to_bits(), most.to_bits());
+                }
             }
+        }
+        Ok(())
+    }
+
+    /// Inputs read in one pass each get the token they get alone, and each
+    /// has as many rows read whole for it as it has alone.
+    #[test]
+    fn inputs_read_together_get_the_tokens_they_get_alone() -> Result<()> {
+        let (rows, cols) = (4096, 256);
+        let w = normals(5, rows * cols);
+        let Some(sketch) = sketched(&w, rows, cols)? else {
+            return Ok(());
+        };
+        for inputs in [2usize, 3, 5, 8, 13] {
+            let mut xs = normals(300 + inputs as u64, inputs * cols);
+            // Every other input along a row of the head, as a hidden row is.
+            for (i, x) in xs
+                .chunks_exact_mut(cols)
+                .enumerate()
+                .filter(|(i, _)| i % 2 == 0)
+            {
+                let token = (i * 977 + 31 * inputs) % rows;
+                for (x, row) in x.iter_mut().zip(&w[token * cols..(token + 1) * cols]) {
+                    *x = 0.3 * *x + row;
+                }
+            }
+            let given: Vec<Row> = xs.chunks_exact(cols).map(quantized).collect();
+            let (mut alone, mut read_alone) = (Vec::new(), Vec::new());
+            let mut room = Room::default();
+            for (row, x) in given.iter().zip(xs.chunks_exact(cols)) {
+                alone.push(sketch.first(row, x, &w, &mut room)?);
+                read_alone.push(room.read());
+                assert_eq!(alone.last().copied(), Some(dense_first(&w, cols, x)));
+            }
+            let mut rooms: Vec<Room> = (0..inputs).map(|_| Room::default()).collect();
+            let mut together = vec![0u32; inputs];
+            sketch.first_of_each(&given, &xs, &w, &mut rooms, &mut together)?;
+            assert_eq!(together, alone, "{inputs} inputs");
+            let read: Vec<usize> = rooms.iter().map(Room::read).collect();
+            assert_eq!(read, read_alone, "{inputs} inputs: rows read whole");
         }
         Ok(())
     }

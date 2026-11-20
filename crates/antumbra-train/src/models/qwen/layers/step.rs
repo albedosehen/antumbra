@@ -49,10 +49,6 @@ use phases::{dispatch, Phase, Shared};
 /// stay in the nearest cache until the way down's `A` has read them.
 const GATED_TOGETHER: usize = 8;
 
-/// Sequences decoded together from which each one's attention is a core's
-/// work, where fewer take the cores in turn, a row's heads spread over them.
-const EACH_A_CORE: usize = 4;
-
 /// Rows read at once at most: a prompt longer than this is read in runs of
 /// it, each run through every layer before the next. Its rows share one
 /// reading of the weights; what they are computed in stays within the
@@ -560,7 +556,7 @@ impl Attention {
         s.attended.resize(rows * queries, 0.0);
         match rows {
             1 => attend::attend(q, store, &mut s.attended, &mut s.attention)?,
-            _ => attend::attend_rows(q, rows, store, &mut s.attended)?,
+            _ => attend::attend_rows(q, rows, store, &mut s.attended, &mut s.attention)?,
         }
         s.out.resize(rows * self.hidden_size, 0.0);
         products(
@@ -611,12 +607,14 @@ impl Attention {
         Ok(())
     }
 
-    /// Attention for one row from each of several sequences: `s.normed` is
-    /// their normed rows, row `i` the next of sequence `at[i].0` at position
-    /// `at[i].1`. Each row's keys and values join its own sequence's cache,
-    /// and it attends to that cache alone, so each is the row
-    /// [`Attention::step`] computes for its sequence by itself. No sequence
-    /// is named twice.
+    /// Attention for rows of several sequences read in one pass: `s.normed`
+    /// is their normed rows, row `i` the row of sequence `at[i].0` at
+    /// position `at[i].1`. Each row's keys and values join its own
+    /// sequence's cache, and it attends to that cache up to its own position
+    /// and no other, so each is the row [`Attention::step`] computes for
+    /// its sequence by itself. A sequence may have several rows in the pass,
+    /// at positions one after another in the order they are given: a later
+    /// one attends to the earlier ones as to the rest of the cache.
     fn step_each(&mut self, at: &[(usize, usize)], s: &mut Scratch) -> CResult<()> {
         let rows = at.len();
         let (queries, cached) = (
@@ -649,30 +647,26 @@ impl Attention {
         for ((k, v), (slot, _)) in k.chunks_exact(cached).zip(v.chunks_exact(cached)).zip(at) {
             self.cache_of(*slot)?.append(k, v)?;
         }
-        if rows < EACH_A_CORE {
-            // A few rows: each in turn, its heads spread over the cores.
-            for ((q, out), (slot, _)) in q
-                .chunks_exact(queries)
-                .zip(s.attended.chunks_exact_mut(queries))
-                .zip(at)
-            {
-                attend::attend(q, self.cache_of(*slot)?, out, &mut s.attention)?;
-            }
-        } else {
-            // Many: one dispatch, a row to a core.
-            let mut stores = Vec::with_capacity(rows);
-            for (slot, _) in at {
-                let store = match slot {
-                    0 => self.kv_store.as_ref(),
-                    n => self.others.get(n - 1),
-                };
-                let Some(store) = store else {
-                    bail!("no cache of plain rows was made for sequence {slot}")
-                };
-                stores.push(store);
-            }
-            attend::attend_each(q, &stores, &mut s.attended)?;
+        // Each row against its own sequence's cache, less the rows of this
+        // pass that come after it in the sequence: one dispatch, a few rows'
+        // runs of positions shared out among the cores and many rows a core
+        // each.
+        let mut each = Vec::with_capacity(rows);
+        for (i, (slot, _)) in at.iter().enumerate() {
+            let store = match slot {
+                0 => self.kv_store.as_ref(),
+                n => self.others.get(n - 1),
+            };
+            let Some(store) = store else {
+                bail!("no cache of plain rows was made for sequence {slot}")
+            };
+            let after = at[i + 1..]
+                .iter()
+                .take_while(|(next, _)| next == slot)
+                .count();
+            each.push((store, store.len() - after));
         }
+        attend::attend_each(q, &each, &mut s.attended, &mut s.attention)?;
         s.out.resize(rows * self.hidden_size, 0.0);
         products(
             [&self.o_proj],
@@ -957,7 +951,7 @@ impl DecoderLayer {
 }
 
 impl DecoderLayer {
-    /// One row from each of several sequences through this layer
+    /// Rows of several sequences through this layer
     /// ([`Attention::step_each`]): `x` is their hidden rows, before and
     /// after.
     fn step_each(&mut self, x: &mut [f32], at: &[(usize, usize)], s: &mut Scratch) -> CResult<()> {
@@ -971,8 +965,8 @@ impl DecoderLayer {
     }
 }
 
-/// One sequence's next token for [`QwenLora::step_each`]: the sequence, the
-/// token it was last given, and that token's position in it.
+/// One row for [`QwenLora::step_each`]: the sequence it is of, the token,
+/// and that token's position in the sequence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::models::qwen) struct Next {
     pub(in crate::models::qwen) sequence: usize,
@@ -1076,13 +1070,21 @@ impl QwenLora {
         stepped
     }
 
-    /// One decoded token for each of several sequences, in one pass over the
+    /// A decoded token after each of several rows, in one pass over the
     /// weights: for each of `each`, what [`QwenLora::step`] gives that
-    /// sequence's token alone, to the bit. A weight is read from memory once
-    /// for all of them, which is what bounds a decoded token on a CPU; each
-    /// row is computed as it would be alone, and attends to its own
-    /// sequence's cache. `None`, with nothing read or written, when this
-    /// model does not read rows as plain values. No sequence is named twice.
+    /// row's token read alone after the rows of its sequence before it, to
+    /// the bit. A weight is read from memory once for all of them, which is
+    /// what bounds a decoded token on a CPU; each row is computed as it would
+    /// be alone, and attends to its own sequence's cache up to its own
+    /// position. `None`, with nothing read or written, when this model does
+    /// not read rows as plain values.
+    ///
+    /// A sequence may be given several rows, one after another in `each` at
+    /// positions one after another: the token in hand and tokens guessed to
+    /// follow it ([`ahead`]). The rows after a guess that was not the
+    /// model's own token were read on text that was never written, and their
+    /// places in the sequence's cache are the caller's to cut back
+    /// ([`QwenLora::truncate_sequence`]).
     pub(in crate::models::qwen) fn step_each(
         &mut self,
         each: &[Next],
@@ -1098,8 +1100,25 @@ impl QwenLora {
             )
         }
         for (i, next) in each.iter().enumerate() {
-            if each[..i].iter().any(|n| n.sequence == next.sequence) {
-                bail!("sequence {} is given two tokens at once", next.sequence)
+            // A sequence's rows come together, each at the position after
+            // the one before it, and with the one blend.
+            match each[..i].iter().rposition(|n| n.sequence == next.sequence) {
+                None => {}
+                Some(before) if before + 1 == i => {
+                    let last = &each[before];
+                    if (last.position + 1, last.blend) != (next.position, next.blend) {
+                        bail!(
+                            "sequence {} is given rows at {} and {} at once",
+                            next.sequence,
+                            last.position,
+                            next.position
+                        )
+                    }
+                }
+                Some(_) => bail!(
+                    "sequence {} is given rows in two places at once",
+                    next.sequence
+                ),
             }
         }
         if !self.steps_plainly()? {
@@ -1194,6 +1213,119 @@ impl QwenLora {
         position: usize,
         first: bool,
     ) -> CResult<Option<Stepped>> {
+        let Some(width) = self.read(tokens, position)? else {
+            return Ok(None);
+        };
+        let s = &mut self.scratch;
+        // The head reads the last row alone.
+        self.norm
+            .step(&s.x[s.x.len() - width..], 1, &mut s.normed)?;
+        // Through its tiles, or through candle's kernels where this CPU has
+        // no tiles for the form it is in.
+        let Some(head) = &self.lm_head_t else {
+            let row = Tensor::from_slice(&s.normed, (1, 1, s.normed.len()), &Device::Cpu)?;
+            let logits = self.logits(&row)?.flatten_all()?.to_vec1()?;
+            return Ok(Some(Stepped::Logits(logits)));
+        };
+        quantize(&s.normed, 1, &mut s.quantized);
+        if let (true, Some(sketch)) = (first && plain(&self.lm_head_w), &self.lm_head_s) {
+            let (storage, layout) = self.lm_head_w.storage_and_layout();
+            let dense = held(&storage, layout, "the head's dense rows")?;
+            if s.sketched.is_empty() {
+                s.sketched.push(sketch::Room::default());
+            }
+            let token = sketch.first(&s.quantized[0], &s.normed, dense, &mut s.sketched[0])?;
+            return Ok(Some(Stepped::First(token)));
+        }
+        // Every logit is written, so what the room held is nothing to it.
+        let mut logits = std::mem::take(&mut s.logits);
+        logits.resize(head.rows(), 0.0);
+        tiles::multiply(&[head], &s.quantized[0], &mut [&mut logits])?;
+        Ok(Some(Stepped::Logits(logits)))
+    }
+
+    /// Whether [`QwenLora::step_ahead`] has a head to answer with: the
+    /// sketch, and the dense rows it decides by.
+    pub(in crate::models::qwen) fn reads_ahead(&self) -> bool {
+        self.lm_head_s.is_some() && plain(&self.lm_head_w)
+    }
+
+    /// The token the head ranks first after every one of `tokens`, the
+    /// first of which is at `position`, read in one pass: what
+    /// [`QwenLora::step`] gives for each of them read one after another, with
+    /// the first asked for. Where [`QwenLora::step_each`] reads a row from
+    /// each of several sequences, this reads several rows of one, each
+    /// attending to the rows before it in the pass as to the cache. The rows
+    /// after one whose token is not the next of `tokens` were read on text
+    /// that is not the model's, and their places in the cache are the
+    /// caller's to cut back ([`QwenLora::truncate`]).
+    ///
+    /// `None`, with nothing read or written, when the model does not read
+    /// rows this way, its head is not sketched, or there are more tokens
+    /// than are read at once.
+    pub(in crate::models::qwen) fn step_ahead(
+        &mut self,
+        tokens: &[u32],
+        position: usize,
+    ) -> CResult<Option<Vec<u32>>> {
+        if !self.reads_ahead() || tokens.len() > ROWS_AT_ONCE {
+            return Ok(None);
+        }
+        let Some(width) = self.read(tokens, position)? else {
+            return Ok(None);
+        };
+        let Some(sketch) = &self.lm_head_s else {
+            bail!("a head that reads ahead has a sketch")
+        };
+        let (rows, s) = (tokens.len(), &mut self.scratch);
+        self.norm
+            .step(&s.x[s.x.len() - rows * width..], rows, &mut s.normed)?;
+        quantize(&s.normed, rows, &mut s.quantized);
+        let (storage, layout) = self.lm_head_w.storage_and_layout();
+        let dense = held(&storage, layout, "the head's dense rows")?;
+        if s.sketched.len() < rows {
+            s.sketched.resize_with(rows, Default::default);
+        }
+        // Every row's first in one reading of the sketch.
+        let mut firsts = vec![0u32; rows];
+        sketch.first_of_each(
+            &s.quantized[..rows],
+            &s.normed,
+            dense,
+            &mut s.sketched[..rows],
+            &mut firsts,
+        )?;
+        Ok(Some(firsts))
+    }
+
+    /// Forget the positions from `len` on in every layer's cache of plain
+    /// rows: the first sequence's, which is the one [`QwenLora::step`] and
+    /// [`QwenLora::step_ahead`] read and write.
+    pub(in crate::models::qwen) fn truncate(&mut self, len: usize) {
+        for layer in &mut self.layers {
+            layer.truncate(len);
+        }
+    }
+
+    /// Forget the positions from `len` on in sequence `sequence`'s cache,
+    /// in every layer.
+    pub(in crate::models::qwen) fn truncate_sequence(
+        &mut self,
+        sequence: usize,
+        len: usize,
+    ) -> CResult<()> {
+        for layer in &mut self.layers {
+            layer.self_attn.cache_of(sequence)?.truncate(len);
+        }
+        Ok(())
+    }
+
+    /// `tokens`, the first of which is at `position`, through every layer
+    /// as plain rows, their keys and values joined to the cache: the hidden
+    /// rows of the last run of them are left in the scratch, and what comes
+    /// back is a row's width. `None`, with nothing read or written, when
+    /// this model does not read rows that way.
+    fn read(&mut self, tokens: &[u32], position: usize) -> CResult<Option<usize>> {
         if tokens.is_empty() || !self.steps_plainly()? {
             return Ok(None);
         }
@@ -1227,32 +1359,8 @@ impl QwenLora {
             s.of.clear();
             read += run.len();
         }
-        // The head reads the last row alone.
-        let last = &x[x.len() - width..];
-        self.norm.step(last, 1, &mut s.normed)?;
         s.x = x;
-        // Through its tiles, or through candle's kernels where this CPU has
-        // no tiles for the form it is in.
-        let Some(head) = &self.lm_head_t else {
-            let row = Tensor::from_slice(&s.normed, (1, 1, s.normed.len()), &Device::Cpu)?;
-            let logits = self.logits(&row)?.flatten_all()?.to_vec1()?;
-            return Ok(Some(Stepped::Logits(logits)));
-        };
-        quantize(&s.normed, 1, &mut s.quantized);
-        if let (true, Some(sketch)) = (first && plain(&self.lm_head_w), &self.lm_head_s) {
-            let (storage, layout) = self.lm_head_w.storage_and_layout();
-            let dense = held(&storage, layout, "the head's dense rows")?;
-            if s.sketched.is_empty() {
-                s.sketched.push(sketch::Room::default());
-            }
-            let token = sketch.first(&s.quantized[0], &s.normed, dense, &mut s.sketched[0])?;
-            return Ok(Some(Stepped::First(token)));
-        }
-        // Every logit is written, so what the room held is nothing to it.
-        let mut logits = std::mem::take(&mut s.logits);
-        logits.resize(head.rows(), 0.0);
-        tiles::multiply(&[head], &s.quantized[0], &mut [&mut logits])?;
-        Ok(Some(Stepped::Logits(logits)))
+        Ok(Some(width))
     }
 
     /// Take back the room a token's logits were handed out in, for the next
@@ -1506,7 +1614,7 @@ mod tests {
             forms.push(GgmlDType::Q6K);
         }
         for serve in forms {
-            for length in [1usize, 5, ROWS_AT_ONCE, 2 * ROWS_AT_ONCE + 6] {
+            for length in [1usize, 2, 3, 5, 7, ROWS_AT_ONCE, 2 * ROWS_AT_ONCE + 6] {
                 let prompt: Vec<u32> = (0..length).map(token).collect();
                 let mut at_once = model(&cfg, &weights, Some(serve), true)?;
                 let mut one_by_one = model(&cfg, &weights, Some(serve), true)?;
@@ -1634,25 +1742,25 @@ mod tests {
                 bail!("{serve:?}: a sequence begun again was not stepped")
             };
             assert_eq!(got, want, "{serve:?}: a sequence begun again");
-            // And one sequence may not be given two tokens in a step.
-            let twice = [
-                Next {
-                    sequence: 1,
-                    token: token(1),
-                    position: 4,
-                    blend: 0,
-                },
-                Next {
-                    sequence: 1,
-                    token: token(2),
-                    position: 5,
-                    blend: 0,
-                },
-            ];
-            assert!(
-                together.step_each(&twice, false).is_err(),
-                "one sequence, twice"
-            );
+            // And a sequence's rows in a step come together, each at the
+            // position after the one before it and with the one blend.
+            let row = |sequence: usize, position: usize, blend: u16| Next {
+                sequence,
+                token: token(1),
+                position,
+                blend,
+            };
+            for (what, rows) in [
+                ("one position twice", vec![row(1, 4, 0), row(1, 4, 0)]),
+                ("a position skipped", vec![row(1, 4, 0), row(1, 6, 0)]),
+                (
+                    "in two places",
+                    vec![row(1, 4, 0), row(0, 9, 0), row(1, 5, 0)],
+                ),
+                ("two blends", vec![row(1, 4, 0), row(1, 5, 1)]),
+            ] {
+                assert!(together.step_each(&rows, false).is_err(), "{what}");
+            }
         }
         Ok(())
     }
@@ -1917,6 +2025,548 @@ mod tests {
                 assert_eq!(got, want.1, "{serve:?}, token {i}");
             }
         }
+        Ok(())
+    }
+
+    /// A generation a token at a time, as the generation loop writes it:
+    /// the prompt, then each token's own pass, until the end token, a loop
+    /// or the most tokens allowed.
+    fn a_token_at_a_time(
+        model: &mut QwenLora,
+        prompt: &[u32],
+        eos: u32,
+        most: usize,
+    ) -> CResult<Vec<u32>> {
+        let mut tokens = prompt.to_vec();
+        for index in 0..most {
+            let start = match index {
+                0 => 0,
+                _ => tokens.len() - 1,
+            };
+            let Some(Stepped::First(next)) = model.step(&tokens[start..], start, true)? else {
+                bail!("token {index} was not stepped to its first")
+            };
+            if next == eos {
+                break;
+            }
+            tokens.push(next);
+            if crate::decode::loops(&tokens[prompt.len()..]) {
+                break;
+            }
+        }
+        Ok(tokens)
+    }
+
+    /// Rows read ahead in one pass each give the first token a step for the
+    /// row alone gives, at every served form; and a cache cut back is the
+    /// cache as it was before the rows cut off: another token read there
+    /// gives what it gives after the rows before it were read one by one.
+    #[test]
+    fn rows_read_ahead_give_each_rows_own_first_token() -> CResult<()> {
+        if !sketch::available() {
+            eprintln!("skipped: this CPU multiplies no sketch of the head");
+            return Ok(());
+        }
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        let tokens: Vec<u32> = (0..12).map(token).collect();
+        for serve in [GgmlDType::Q4K, GgmlDType::Q6K, GgmlDType::Q8_0] {
+            let mut alone = model(&cfg, &weights, Some(serve), true)?;
+            let mut want = Vec::new();
+            for (at, token) in tokens.iter().enumerate() {
+                let Some(Stepped::First(first)) = alone.step(&[*token], at, true)? else {
+                    bail!("{serve:?}: token {at} was not stepped to its first")
+                };
+                want.push(first);
+            }
+            // Three as a prompt, then nine at once: eight and one.
+            let mut ahead = model(&cfg, &weights, Some(serve), true)?;
+            assert!(ahead.reads_ahead());
+            let Some(Stepped::First(first)) = ahead.step(&tokens[..3], 0, true)? else {
+                bail!("{serve:?}: the prompt was not stepped to its first")
+            };
+            assert_eq!(first, want[2], "{serve:?}: after the prompt");
+            let Some(firsts) = ahead.step_ahead(&tokens[3..], 3)? else {
+                bail!("{serve:?}: nine rows were not read ahead")
+            };
+            assert_eq!(firsts, &want[3..], "{serve:?}: nine rows at once");
+
+            // Cut back to five positions; a sixth token that was never there.
+            ahead.truncate(5);
+            let mut again = model(&cfg, &weights, Some(serve), true)?;
+            for (at, token) in tokens[..5].iter().enumerate() {
+                again.step(&[*token], at, true)?;
+            }
+            let other = token(40);
+            let (Some(Stepped::First(got)), Some(Stepped::First(want))) = (
+                ahead.step(&[other], 5, true)?,
+                again.step(&[other], 5, true)?,
+            ) else {
+                bail!("{serve:?}: the token after the cut was not stepped")
+            };
+            assert_eq!(got, want, "{serve:?}: after the cache was cut back");
+            assert_eq!(
+                ahead.scratch.normed, again.scratch.normed,
+                "{serve:?}: the row the head is given after the cut"
+            );
+        }
+        // More rows than are read at once are not read ahead, and a head
+        // with no sketch reads nothing ahead.
+        let mut served = model(&cfg, &weights, Some(GgmlDType::Q6K), false)?;
+        let many: Vec<u32> = (0..ROWS_AT_ONCE + 1).map(token).collect();
+        assert!(served.step_ahead(&many, 0)?.is_none());
+        let mut dense = model(&cfg, &weights, None, false)?;
+        assert!(!dense.reads_ahead() && dense.step_ahead(&[1], 0)?.is_none());
+        Ok(())
+    }
+
+    /// A generation read ahead is the generation a token at a time, token
+    /// for token, whatever is guessed: nothing, the text itself, the text
+    /// with every third token wrong, and wrong tokens throughout. It stops
+    /// where a token at a time stops: at the end token, and at the most
+    /// tokens allowed. Guessed right, it takes fewer passes than tokens.
+    #[test]
+    fn a_generation_read_ahead_is_the_generation_a_token_at_a_time() -> CResult<()> {
+        use crate::draft::Drafts;
+        if !sketch::available() {
+            eprintln!("skipped: this CPU multiplies no sketch of the head");
+            return Ok(());
+        }
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        let serve = GgmlDType::Q6K;
+        // No token is 64: a generation that only its length ends.
+        const NEVER: u32 = 64;
+        let whole = a_token_at_a_time(
+            &mut model(&cfg, &weights, Some(serve), true)?,
+            &PROMPT,
+            NEVER,
+            48,
+        )?;
+        let written = whole.len() - PROMPT.len();
+        assert!(
+            written >= 12,
+            "a generation of {written} tokens says little"
+        );
+
+        let remembering = |text: &[u32]| {
+            let mut memory = Drafts::new();
+            memory.learn(text, PROMPT.len());
+            memory
+        };
+        let mut garbled = whole.clone();
+        for token in garbled[PROMPT.len()..].iter_mut().skip(2).step_by(3) {
+            *token = (*token + 1) % 64;
+        }
+        let wrong: Vec<u32> = whole
+            .iter()
+            .enumerate()
+            .map(|(at, token)| match at < PROMPT.len() {
+                true => *token,
+                false => (*token + 1) % 64,
+            })
+            .collect();
+        let kept = |text: &[u32]| {
+            let mut memory = Drafts::new();
+            memory.keep(&PROMPT, &text[PROMPT.len()..]);
+            memory
+        };
+        // An end token the generation writes part of the way through.
+        let ending = whole[PROMPT.len() + written / 2];
+        // What a served model counts, from one generation to the next.
+        let mut odds = ahead::Odds::default();
+        for (what, far) in [
+            ("nothing remembered", Drafts::new()),
+            ("the text itself", remembering(&whole)),
+            ("every third token wrong", remembering(&garbled)),
+            ("every token wrong", remembering(&wrong)),
+            ("the answer kept whole", kept(&whole)),
+            ("an answer kept that goes wrong", kept(&garbled)),
+            ("another answer kept", kept(&wrong)),
+        ] {
+            for (eos, most) in [
+                (NEVER, 48usize),
+                (ending, 48),
+                (NEVER, 7),
+                (NEVER, 1),
+                (NEVER, 0),
+            ] {
+                let want = a_token_at_a_time(
+                    &mut model(&cfg, &weights, Some(serve), true)?,
+                    &PROMPT,
+                    eos,
+                    most,
+                )?;
+                // Under the odds a served model counts, whatever they come
+                // to on this machine today: the same tokens.
+                let mut counted = model(&cfg, &weights, Some(serve), true)?;
+                let (mut tokens, mut reading) = (PROMPT.to_vec(), ahead::Reading::default());
+                let read = ahead::decode(
+                    &mut counted,
+                    &mut tokens,
+                    PROMPT.len(),
+                    ahead::Ahead {
+                        eos,
+                        most,
+                        reading: &mut reading,
+                        far: &far,
+                        odds: &mut odds,
+                    },
+                    &mut GenTiming::default(),
+                )?;
+                assert!(read.is_some(), "{what}: the generation was not read ahead");
+                assert_eq!(tokens, want, "{what}, counted, at {eos} or {most} tokens");
+                // And with every guess offered carried, so that passes of
+                // every width are read.
+                let mut ahead = model(&cfg, &weights, Some(serve), true)?;
+                let (mut tokens, mut reading) = (PROMPT.to_vec(), ahead::Reading::default());
+                let mut timing = GenTiming::default();
+                let Some(passes) = ahead::decode(
+                    &mut ahead,
+                    &mut tokens,
+                    PROMPT.len(),
+                    ahead::Ahead {
+                        eos,
+                        most,
+                        reading: &mut reading,
+                        far: &far,
+                        odds: &mut ahead::Odds::eager(),
+                    },
+                    &mut timing,
+                )?
+                else {
+                    bail!("{what}: the generation was not read ahead")
+                };
+                assert_eq!(tokens, want, "{what}, ending at {eos} or {most} tokens");
+                assert_eq!(timing.passes, passes.passes, "{what}");
+                assert!(passes.kept <= passes.guessed, "{what}");
+                if what == "the text itself" && eos == NEVER && most == 48 {
+                    assert!(
+                        passes.passes * 2 < written && passes.kept * 2 > written,
+                        "{what}: {} passes and {} guesses kept for {written} tokens",
+                        passes.passes,
+                        passes.kept
+                    );
+                }
+                if what == "the answer kept whole" && eos == NEVER && most == 48 {
+                    // Sixteen tokens a pass from the first.
+                    assert!(
+                        passes.passes <= written.div_ceil(16) && passes.kept + 1 >= written - 1,
+                        "{what}: {} passes and {} guesses kept for {written} tokens",
+                        passes.passes,
+                        passes.kept
+                    );
+                }
+                if what == "nothing remembered" && most == 48 {
+                    // Its own prompt and tokens are all it can guess from.
+                    assert!(passes.passes <= tokens.len() - PROMPT.len(), "{what}");
+                }
+            }
+        }
+        // A model with no sketch of its head is not read ahead, and nothing
+        // of the prompt is read.
+        let mut dense = model(&cfg, &weights, None, false)?;
+        let (mut tokens, mut reading) = (PROMPT.to_vec(), ahead::Reading::default());
+        let none = ahead::decode(
+            &mut dense,
+            &mut tokens,
+            PROMPT.len(),
+            ahead::Ahead {
+                eos: NEVER,
+                most: 8,
+                reading: &mut reading,
+                far: &Drafts::new(),
+                odds: &mut ahead::Odds::default(),
+            },
+            &mut GenTiming::default(),
+        )?;
+        assert!(none.is_none() && tokens == PROMPT);
+        Ok(())
+    }
+
+    /// A pass that carries several rows of a sequence beside the rows of
+    /// others gives after each row what the row gives read alone after the
+    /// rows of its sequence before it, to the bit, whatever the others are;
+    /// and a sequence whose cache is cut back to a row reads on from there
+    /// as if the rows after it had never been read.
+    #[test]
+    fn rows_of_sequences_read_together_are_each_read_alone() -> CResult<()> {
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        for serve in [GgmlDType::Q4K, GgmlDType::Q6K, GgmlDType::Q8_0] {
+            let mut together = model(&cfg, &weights, Some(serve), true)?;
+            if together.step(&[token(0)], 0, false)?.is_none() {
+                eprintln!("skipped: this CPU reads no rows of {serve:?} as plain values");
+                continue;
+            }
+            together.clear_cache();
+            together.sequences(3);
+            let prompts: [Vec<u32>; 3] = [
+                (0..5).map(token).collect(),
+                (10..13).map(token).collect(),
+                (20..27).map(token).collect(),
+            ];
+            for (sequence, prompt) in prompts.iter().enumerate() {
+                together.clear_sequence(sequence)?;
+                if together.step_in(sequence, 0, prompt, 0, false)?.is_none() {
+                    bail!("{serve:?}: sequence {sequence}'s prompt was not read")
+                }
+            }
+            // What is read after each prompt in the pass: three rows of the
+            // first sequence, one of the second, two of the third.
+            let more: [Vec<u32>; 3] = [
+                vec![token(31), token(32), token(33)],
+                vec![token(41)],
+                vec![token(51), token(52)],
+            ];
+            let mut each = Vec::new();
+            for (sequence, (prompt, rows)) in prompts.iter().zip(&more).enumerate() {
+                for (i, row) in rows.iter().enumerate() {
+                    each.push(Next {
+                        sequence,
+                        token: *row,
+                        position: prompt.len() + i,
+                        blend: 0,
+                    });
+                }
+            }
+            let Some(got) = together.step_each(&each, false)? else {
+                bail!("{serve:?}: the rows were not read together")
+            };
+            // Each row alone: its sequence up to it, on a model of its own.
+            let alone = |tokens: &[u32]| -> CResult<Vec<f32>> {
+                let mut own = model(&cfg, &weights, Some(serve), true)?;
+                match stepped(&mut own, tokens, 0)? {
+                    Some(logits) => Ok(logits),
+                    None => bail!("{serve:?}: a sequence alone was not stepped"),
+                }
+            };
+            let mut at = 0;
+            for (sequence, (prompt, rows)) in prompts.iter().zip(&more).enumerate() {
+                for i in 0..rows.len() {
+                    let mut tokens = prompt.clone();
+                    tokens.extend_from_slice(&rows[..=i]);
+                    let Stepped::Logits(got) = &got[at] else {
+                        bail!("{serve:?}: logits were asked for")
+                    };
+                    assert_eq!(
+                        got,
+                        &alone(&tokens)?,
+                        "{serve:?}: sequence {sequence}, row {i}"
+                    );
+                    at += 1;
+                }
+            }
+            // The first sequence keeps its first row of the pass and loses
+            // the two after it; the third keeps both of its own.
+            together.truncate_sequence(0, prompts[0].len() + 1)?;
+            let on = [
+                Next {
+                    sequence: 0,
+                    token: token(61),
+                    position: prompts[0].len() + 1,
+                    blend: 0,
+                },
+                Next {
+                    sequence: 2,
+                    token: token(62),
+                    position: prompts[2].len() + 2,
+                    blend: 0,
+                },
+            ];
+            let Some(got) = together.step_each(&on, false)? else {
+                bail!("{serve:?}: the rows after the cut were not read")
+            };
+            let mut first = prompts[0].clone();
+            first.extend_from_slice(&[more[0][0], token(61)]);
+            let mut third = prompts[2].clone();
+            third.extend_from_slice(&[more[2][0], more[2][1], token(62)]);
+            for (got, tokens, what) in [
+                (&got[0], &first, "cut back"),
+                (&got[1], &third, "left whole"),
+            ] {
+                let Stepped::Logits(got) = got else {
+                    bail!("{serve:?}: logits were asked for")
+                };
+                assert_eq!(got, &alone(tokens)?, "{serve:?}: the sequence {what}");
+            }
+            assert!(
+                together.truncate_sequence(40, 0).is_err(),
+                "no such sequence"
+            );
+        }
+        Ok(())
+    }
+
+    /// Requests answered together, each carrying its own guesses in the
+    /// passes they share, write what each writes a token at a time by
+    /// itself: whatever each guesses from, wherever each ends, with every
+    /// guess offered carried and under the counted odds, and where the pass
+    /// has room for one guess in all.
+    #[test]
+    fn sequences_read_ahead_together_are_each_a_token_at_a_time() -> CResult<()> {
+        use crate::draft::Drafts;
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        let serve = GgmlDType::Q6K;
+        if !model(&cfg, &weights, Some(serve), true)?.reads_ahead() {
+            eprintln!("skipped: this CPU multiplies no sketch of the head");
+            return Ok(());
+        }
+        // No token is 64: a generation that only its length ends.
+        const NEVER: u32 = 64;
+        let prompts: [Vec<u32>; 3] = [PROMPT.to_vec(), vec![9, 33, 2], (0..7).map(token).collect()];
+        let alone = |prompt: &[u32], eos: u32, most: usize| {
+            a_token_at_a_time(
+                &mut model(&cfg, &weights, Some(serve), true)?,
+                prompt,
+                eos,
+                most,
+            )
+        };
+        let wholes = [
+            alone(&prompts[0], NEVER, 40)?,
+            alone(&prompts[1], NEVER, 40)?,
+            alone(&prompts[2], NEVER, 40)?,
+        ];
+        let remembering = |text: &[u32], prompt: usize| {
+            let mut memory = Drafts::new();
+            memory.learn(text, prompt);
+            memory
+        };
+        let kept = |text: &[u32], prompt: usize| {
+            let mut memory = Drafts::new();
+            memory.keep(&text[..prompt], &text[prompt..]);
+            memory
+        };
+        let garbled = |text: &[u32], prompt: usize| {
+            let mut text = text.to_vec();
+            for token in text[prompt..].iter_mut().skip(2).step_by(3) {
+                *token = (*token + 1) % 64;
+            }
+            text
+        };
+        // What each request's blend wrote before: the first its own text,
+        // the second nothing, the third its answer kept whole; then the
+        // first its text with every third token wrong, the second the
+        // third's text, the third an answer that goes wrong.
+        let helped = [
+            Some(remembering(&wholes[0], prompts[0].len())),
+            None,
+            Some(kept(&wholes[2], prompts[2].len())),
+        ];
+        let misled = [
+            Some(remembering(
+                &garbled(&wholes[0], prompts[0].len()),
+                prompts[0].len(),
+            )),
+            Some(remembering(&wholes[2], prompts[2].len())),
+            Some(kept(
+                &garbled(&wholes[2], prompts[2].len()),
+                prompts[2].len(),
+            )),
+        ];
+        // An end token the first request writes part of the way through.
+        let ending = wholes[0][prompts[0].len() + (wholes[0].len() - prompts[0].len()) / 2];
+        let mut fewer = false;
+        for (what, fars) in [("helped", &helped), ("misled", &misled)] {
+            for (eos, most, rows_most) in [
+                (NEVER, 40usize, 32usize),
+                (ending, 40, 32),
+                (NEVER, 6, 32),
+                (NEVER, 2, 32),
+                (NEVER, 40, 4),
+            ] {
+                let want = [
+                    alone(&prompts[0], eos, most)?,
+                    alone(&prompts[1], eos, most)?,
+                    alone(&prompts[2], eos, most)?,
+                ];
+                for eager in [true, false] {
+                    let mut odds = match eager {
+                        true => ahead::Odds::eager(),
+                        false => ahead::Odds::default(),
+                    };
+                    let mut together = model(&cfg, &weights, Some(serve), true)?;
+                    together.sequences(3);
+                    let mut tokens = prompts.clone();
+                    let mut readings: [ahead::Reading; 3] = Default::default();
+                    let mut ended = [false; 3];
+                    // The pass each request ended in.
+                    let mut ended_in = [0usize; 3];
+                    // Each request is taken in: its prompt, and the first
+                    // token after it.
+                    for sequence in 0..3 {
+                        together.clear_sequence(sequence)?;
+                        let first = together.step_in(sequence, 0, &tokens[sequence], 0, true)?;
+                        let Some(Stepped::First(next)) = first else {
+                            bail!("{what}: sequence {sequence}'s prompt gave no first token")
+                        };
+                        let said = fars[sequence]
+                            .as_ref()
+                            .and_then(|far| far.said(&prompts[sequence]));
+                        readings[sequence].begin(said);
+                        match next == eos {
+                            true => ended[sequence] = true,
+                            false => tokens[sequence].push(next),
+                        }
+                    }
+                    let mut passes = 0;
+                    while ended.iter().any(|ended| !ended) {
+                        let mut who = Vec::new();
+                        let mut seats: Vec<ahead::Seat> = tokens
+                            .iter_mut()
+                            .zip(readings.iter_mut())
+                            .zip(fars.iter())
+                            .enumerate()
+                            .filter(|(sequence, _)| !ended[*sequence])
+                            .map(|(sequence, ((tokens, reading), far))| {
+                                who.push(sequence);
+                                ahead::Seat {
+                                    sequence,
+                                    blend: 0,
+                                    tokens,
+                                    prompt_len: prompts[sequence].len(),
+                                    reading,
+                                    far: far.as_ref(),
+                                }
+                            })
+                            .collect();
+                        let passed = ahead::pass(
+                            &mut together,
+                            &mut seats,
+                            eos,
+                            most,
+                            rows_most,
+                            &mut odds,
+                        )?;
+                        drop(seats);
+                        passes += 1;
+                        for (sequence, done) in who.into_iter().zip(passed.ended) {
+                            if done {
+                                (ended[sequence], ended_in[sequence]) = (true, passes);
+                            }
+                        }
+                        assert!(passes < 200, "{what}: the requests did not end");
+                    }
+                    for sequence in 0..3 {
+                        assert_eq!(
+                            tokens[sequence], want[sequence],
+                            "{what}, request {sequence}, ending at {eos} or {most} tokens, {rows_most} rows a pass, every guess carried: {eager}"
+                        );
+                    }
+                    // Guessed right, a request ends in far fewer passes
+                    // than it has tokens: the one whose answer was kept
+                    // whole in a handful, the one whose text was written
+                    // before in under half.
+                    if what == "helped" && eager && eos == NEVER && most == 40 && rows_most == 32 {
+                        fewer = ended_in[2] <= 5 && ended_in[0] * 2 < 40;
+                        assert!(fewer, "the requests ended in passes {ended_in:?}");
+                    }
+                }
+            }
+        }
+        assert!(fewer, "the helped requests were never read");
         Ok(())
     }
 
