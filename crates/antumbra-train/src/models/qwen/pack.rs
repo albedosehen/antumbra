@@ -330,6 +330,22 @@ fn sixteen_through(
             )
         };
         return;
+    } else if super::tiles::available() {
+        // SAFETY: a CPU that tiles without AVX-512 has AVX2 and FMA, and the
+        // three slices were cut just above to what the kernel reads and
+        // writes.
+        unsafe {
+            super::wide::avx2::through_cols(
+                a.as_ptr(),
+                n,
+                x.as_ptr(),
+                stride,
+                rows,
+                out.as_mut_ptr(),
+                out_stride,
+            )
+        };
+        return;
     }
     for i in 0..rows {
         let sums = &mut out[i * out_stride..i * out_stride + SIXTEEN];
@@ -363,6 +379,11 @@ unsafe fn sixteens_added(
         // `available` found AVX-512F among the features it names, and the
         // two slices were cut just above to what the kernel reads.
         super::wide::add_sixteens(b.as_ptr(), rank, sixteens, t.as_ptr(), rows, out, stride);
+        return;
+    } else if super::tiles::available() {
+        // A CPU that tiles without AVX-512 has AVX2 and FMA, and the two
+        // slices were cut just above to what the kernel reads.
+        super::wide::avx2::add_sixteens(b.as_ptr(), rank, sixteens, t.as_ptr(), rows, out, stride);
         return;
     }
     for (i, t) in t.chunks_exact(rank).enumerate() {

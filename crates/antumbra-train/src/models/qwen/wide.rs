@@ -8,8 +8,16 @@
 //! thread does while the others wait for it. An adapter's factors, held at
 //! eight bits, are multiplied here as well. Each kernel here has a plain
 //! twin it is held to.
+//!
+//! A CPU that multiplies through tiles with AVX2 alone takes the same steps
+//! in 256-bit vectors (`wide_avx2.rs`): each kernel there is its twin here
+//! with every vector of sixteen as two of eight, and gives its values to the
+//! bit.
 
 use std::arch::x86_64::*;
+
+#[path = "wide_avx2.rs"]
+pub(super) mod avx2;
 
 const LOG2_E: f32 = std::f32::consts::LOG2_E;
 /// ln 2 in two parts, the first exact in few bits, so `x - n · ln 2` loses

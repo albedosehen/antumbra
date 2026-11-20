@@ -113,11 +113,20 @@ const PLAIN: Kernels = Kernels {
 /// The widest kernels this CPU has for heads of `dim` values.
 fn kernels(dim: usize) -> Kernels {
     #[cfg(target_arch = "x86_64")]
-    if super::tiles::wide() && super::wide::attends(dim) {
-        return Kernels {
-            scores: super::wide::scores,
-            weigh: super::wide::weigh,
-        };
+    if super::wide::attends(dim) {
+        if super::tiles::wide() {
+            return Kernels {
+                scores: super::wide::scores,
+                weigh: super::wide::weigh,
+            };
+        }
+        // A CPU that tiles without AVX-512 has AVX2 and FMA.
+        if super::tiles::available() {
+            return Kernels {
+                scores: super::wide::avx2::scores,
+                weigh: super::wide::avx2::weigh,
+            };
+        }
     }
     let _ = dim;
     PLAIN
