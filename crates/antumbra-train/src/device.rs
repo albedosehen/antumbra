@@ -18,7 +18,14 @@ pub fn tiles() -> bool {
             && is_x86_feature_detected!("avx512vnni")
             && is_x86_feature_detected!("f16c")
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(target_arch = "aarch64")]
+    {
+        // The dot-product instructions: every Apple silicon CPU, and ARM's
+        // server cores from Neoverse N1.
+        std::arch::is_aarch64_feature_detected!("neon")
+            && std::arch::is_aarch64_feature_detected!("dotprod")
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         false
     }
@@ -32,7 +39,12 @@ pub fn six_bit_tiles() -> bool {
     {
         tiles() && is_x86_feature_detected!("avx512vbmi")
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(target_arch = "aarch64")]
+    {
+        // NEON cuts six-bit values out with a table and a shift.
+        tiles()
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         false
     }
