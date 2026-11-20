@@ -1201,7 +1201,7 @@ mod tests {
     /// served form, and leaves what a step that gives the logits leaves.
     #[test]
     fn the_first_asked_for_is_the_dense_rows_first() -> CResult<()> {
-        if !tiles::six_bit() {
+        if !sketch::available() {
             eprintln!("skipped: this CPU multiplies no sketch of the head");
             return Ok(());
         }

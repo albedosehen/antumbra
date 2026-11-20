@@ -262,6 +262,12 @@ fn of_word(word: u64) -> (f32, u32) {
     (f32::from_bits((word >> 32) as u32), word as u32)
 }
 
+/// Whether this CPU multiplies a sketch of the head: its kernels are
+/// AVX-512's alone so far, on the CPUs that multiply six-bit tiles.
+pub(super) fn available() -> bool {
+    cfg!(target_arch = "x86_64") && tiles::six_bit()
+}
+
 impl Sketch {
     /// The dense head `w` sketched, on every core, when its sketch can be
     /// multiplied here: plain f32 rows in host memory, in sixteens, their
@@ -272,7 +278,7 @@ impl Sketch {
             [rows, cols] => (*rows, *cols),
             _ => return Ok(None),
         };
-        let fits = tiles::six_bit()
+        let fits = available()
             && rows != 0
             && rows.is_multiple_of(ROWS)
             && cols != 0

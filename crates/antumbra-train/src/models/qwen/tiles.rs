@@ -1,5 +1,6 @@
 //! A served base's quantized weights as Antumbra multiplies them on a CPU
-//! with AVX-512 VNNI: sixteen rows to a tile, each SIMD lane a row.
+//! with AVX-512 VNNI, or with NEON's dot product: sixteen rows to a tile,
+//! each SIMD lane a row.
 //!
 //! candle multiplies a quantized weight through tiles of its own, and on a
 //! decoded token three things about that cost more than the arithmetic. A
@@ -27,8 +28,9 @@
 //! order its kernel reads it, and the input is quantized the way candle
 //! quantizes it. A row's product is summed in whole numbers until a block's
 //! last step, so it is the product candle computes up to the order of a few
-//! float sums. Without AVX-512 VNNI nothing is tiled and candle multiplies
-//! as before.
+//! float sums. The kernels below are AVX-512's; `tiles_neon.rs` holds
+//! aarch64's, four rows to a vector over the same tiles. On a CPU with
+//! neither nothing is tiled and candle multiplies as before.
 
 use candle_core::quantized::{GgmlDType, QTensor};
 use candle_core::{bail, DType, Device, Result, Storage, Tensor};
@@ -95,8 +97,11 @@ const _: () = assert!(std::mem::size_of::<TileQ6>() == 3360);
 const _: () = assert!(std::mem::size_of::<TileQ4K>() == 2368);
 const _: () = assert!(std::mem::size_of::<TileQ8>() == 544);
 
-// Off x86-64 nothing is tiled, so nothing there reads a tile.
-#[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+// Where nothing is tiled, nothing reads a tile.
+#[cfg_attr(
+    not(any(target_arch = "x86_64", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 enum Tiles {
     /// `[sixteen rows][block of 256]`.
     Q4K(Vec<TileQ4K>),
@@ -529,7 +534,7 @@ fn quantize(x: &[f32]) -> Row {
 /// Quantize `x` into `row`, whose room is kept from one row to the next: a
 /// decoded token quantizes four rows a layer.
 pub(super) fn quantize_into(x: &[f32], row: &mut Row) {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     if available() {
         // SAFETY: `available` found the features the kernel is built for.
         unsafe { kernels::quantize(x, row) };
@@ -666,11 +671,15 @@ pub(super) fn forward(group: &[&Tiled], x: &Tensor) -> Result<Vec<Tensor>> {
         .collect()
 }
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(target_arch = "aarch64")]
+#[path = "tiles_neon.rs"]
+mod kernels;
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod kernels {
     use super::{Row, Tiled};
 
-    /// Nothing is tiled off x86-64, so nothing reaches this.
+    /// Nothing is tiled on other CPUs, so nothing reaches this.
     pub(super) fn multiply(_: &[&Tiled], _: &[Row], _: &mut [&mut [f32]]) {}
 
     pub(super) unsafe fn sixteens(_: &Tiled, _: usize, _: usize, _: &[Row], _: *mut f32) {}
@@ -1294,13 +1303,64 @@ mod tests {
         Ok((tiled, QMatMul::from_qtensor(q)?))
     }
 
+    /// How near candle's own product a form's tiles come on this CPU. candle
+    /// quantizes the input as the tiles do, 256 values to a scale, except for
+    /// a Q8_0 weight off x86-64, where it gives every 32 values a scale of
+    /// their own: there the two products are of two roundings of the input,
+    /// a hundredth apart. [`tiles_multiply_what_they_hold`] holds the tiles
+    /// to the bit there.
+    fn as_candle(dtype: GgmlDType) -> f32 {
+        if cfg!(not(target_arch = "x86_64")) && dtype == GgmlDType::Q8_0 {
+            3e-2
+        } else {
+            1e-5
+        }
+    }
+
+    /// A weight multiplied through its tiles is the weight as quantized
+    /// times the rows as quantized, on any CPU that tiles: the product of
+    /// the values the tiles and the quantized rows stand for, to within the
+    /// order of a few float sums.
+    #[test]
+    fn tiles_multiply_what_they_hold() -> Result<()> {
+        if !available() {
+            return Ok(());
+        }
+        for dtype in forms() {
+            let w = Tensor::randn(0f32, 0.05, (48, 512), &Device::Cpu)?;
+            let q = QTensor::quantize(&w, dtype)?;
+            let held = q.dequantize(&Device::Cpu)?;
+            let Some(tiled) = Tiled::pack(&q)? else {
+                bail!("{dtype:?} was not tiled")
+            };
+            for n in [1usize, 5, 35] {
+                let x = Tensor::randn(0f32, 1.0, (n, 512), &Device::Cpu)?;
+                let mut read = Vec::with_capacity(n * 512);
+                for row in x.to_vec2::<f32>()? {
+                    let row = quantize_plainly(&row);
+                    read.extend(
+                        row.qs
+                            .iter()
+                            .enumerate()
+                            .map(|(i, q)| row.d[i / QK_K] * f32::from(*q)),
+                    );
+                }
+                let want = Tensor::from_vec(read, (n, 512), &Device::Cpu)?.matmul(&held.t()?)?;
+                let got = forward(&[&tiled], &x)?;
+                let gap = largest_gap(&got[0], &want)?;
+                assert!(gap < 1e-5, "{dtype:?}, {n} rows: off by {gap} of the peak");
+            }
+        }
+        Ok(())
+    }
+
     /// A weight multiplied through its tiles is the product candle computes,
     /// at both forms, for one row and for a prompt's, and for weights that
     /// share their rows as for one alone.
     #[test]
     fn tiles_multiply_as_candle_does() -> Result<()> {
         if !available() {
-            eprintln!("skipped: this CPU has no AVX-512 VNNI, so nothing is tiled");
+            eprintln!("skipped: nothing is tiled on this CPU");
             return Ok(());
         }
         for dtype in forms() {
@@ -1321,7 +1381,10 @@ mod tests {
                 assert_eq!(got_b.dims(), want_b.dims());
                 for (got, want) in [(got_a, &want_a), (got_b, &want_b)] {
                     let gap = largest_gap(got, want)?;
-                    assert!(gap < 1e-5, "{dtype:?} {shape:?}: off by {gap} of the peak");
+                    assert!(
+                        gap < as_candle(dtype),
+                        "{dtype:?} {shape:?}: off by {gap} of the peak"
+                    );
                 }
                 let alone = forward(&[&b], &x)?;
                 let [alone] = alone.as_slice() else {
@@ -1349,7 +1412,10 @@ mod tests {
             let x = Tensor::cat(&[&dead, &live], 2)?;
             let got = forward(&[&tiled], &x)?;
             let gap = largest_gap(&got[0], &candle.forward(&x)?)?;
-            assert!(gap < 1e-5, "{dtype:?}: off by {gap} of the peak");
+            assert!(
+                gap < as_candle(dtype),
+                "{dtype:?}: off by {gap} of the peak"
+            );
             let none = Tensor::zeros((1, 1, 512), DType::F32, &Device::Cpu)?;
             let got = forward(&[&tiled], &none)?;
             let most = got[0].abs()?.flatten_all()?.max(0)?.to_scalar::<f32>()?;
