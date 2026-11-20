@@ -370,122 +370,188 @@ impl Sketch {
         dense: &[f32],
         room: &mut Room,
     ) -> Result<u32> {
-        if x.len() != self.cols || !row.holds(self.cols) || dense.len() != self.rows * self.cols {
+        let mut token = [0u32];
+        self.first_of_each(
+            std::slice::from_ref(row),
+            x,
+            dense,
+            std::slice::from_mut(room),
+            &mut token,
+        )?;
+        Ok(token[0])
+    }
+
+    /// [`Sketch::first`] for several inputs at once: `rows` are the rows of
+    /// `xs` quantized, a room for each, and each one's token is written to
+    /// `tokens`. Each token is the one its input gets alone. The sketch is
+    /// read from memory once for all of them: a run of sixteens goes by for
+    /// every input before the next run is read, and the two stages are one
+    /// dispatch whatever the number of inputs.
+    pub(super) fn first_of_each(
+        &self,
+        rows: &[Row],
+        xs: &[f32],
+        dense: &[f32],
+        rooms: &mut [Room],
+        tokens: &mut [u32],
+    ) -> Result<()> {
+        let n = rows.len();
+        if n == 0
+            || xs.len() != n * self.cols
+            || rooms.len() != n
+            || tokens.len() != n
+            || rows.iter().any(|row| !row.holds(self.cols))
+            || dense.len() != self.rows * self.cols
+        {
             bail!(
-                "a sketch of {} by {} against a row of {} values and {} dense values",
+                "a sketch of {} by {} against {n} rows, {} values of them, {} rooms and {} dense values",
                 self.rows,
                 self.cols,
-                x.len(),
+                xs.len(),
+                rooms.len(),
                 dense.len()
             )
         }
         let sixteens = self.rows / ROWS;
-        room.products.resize(self.rows, 0.0);
-        room.tops.resize(sixteens, 0.0);
-        room.lanes.resize(sixteens, 0);
-        let products = Shared::of(&mut room.products);
-        let tops = Shared::of(&mut room.tops);
-        let lanes = Shared::of(&mut room.lanes);
-        let size = dot(x, x).sqrt();
-        let whole = |token: usize| dot(&dense[token * self.cols..(token + 1) * self.cols], x);
-        // The largest product found by reading a row whole, and its token.
-        let found = AtomicU64::new(word(f32::NEG_INFINITY, 0));
-        let reached = AtomicU32::new(f32::NEG_INFINITY.to_bits());
-        let read = AtomicUsize::new(0);
+        /// One input's two stages.
+        struct Of<'a> {
+            row: &'a Row,
+            x: &'a [f32],
+            size: f32,
+            products: Shared<f32>,
+            tops: Shared<f32>,
+            lanes: Shared<u8>,
+            /// The largest product found by reading a row whole, and its
+            /// token.
+            found: AtomicU64,
+            reached: AtomicU32,
+            read: AtomicUsize,
+        }
+        let each: Vec<Of> = rows
+            .iter()
+            .zip(xs.chunks_exact(self.cols))
+            .zip(rooms.iter_mut())
+            .map(|((row, x), room)| {
+                room.products.resize(self.rows, 0.0);
+                room.tops.resize(sixteens, 0.0);
+                room.lanes.resize(sixteens, 0);
+                Of {
+                    row,
+                    x,
+                    size: dot(x, x).sqrt(),
+                    products: Shared::of(&mut room.products),
+                    tops: Shared::of(&mut room.tops),
+                    lanes: Shared::of(&mut room.lanes),
+                    found: AtomicU64::new(word(f32::NEG_INFINITY, 0)),
+                    reached: AtomicU32::new(f32::NEG_INFINITY.to_bits()),
+                    read: AtomicUsize::new(0),
+                }
+            })
+            .collect();
+        let whole =
+            |of: &Of, token: usize| dot(&dense[token * self.cols..(token + 1) * self.cols], of.x);
 
         let sketched = |first: usize, last: usize| {
-            // SAFETY: a sketch is only made where `six_bit` found the
-            // features the kernel is built for; `row` holds this sketch's
-            // columns, checked above; the room was sized just above; and a
-            // sixteen is done by one thread.
-            unsafe { kernels::sixteens(self, first, last, row, products.at(), tops.at()) };
+            for of in &each {
+                // SAFETY: a sketch is only made where `available` found the
+                // features the kernel is built for; each row holds this
+                // sketch's columns, checked above; the rooms were sized just
+                // above; and a sixteen is done by one thread.
+                unsafe {
+                    kernels::sixteens(self, first, last, of.row, of.products.at(), of.tops.at())
+                };
+            }
         };
         let first_read = || {
-            // SAFETY: every sixteen's products and their largest were written
-            // in the phase before, and nothing writes them until this is
-            // done.
-            let (products, tops) = unsafe { (products.all(), tops.all()) };
-            // The sixteens with the largest sketched products.
-            let mut held = [(f32::NEG_INFINITY, 0usize); FIRST];
-            let n = FIRST.min(sixteens);
-            let mut least = 0;
-            for (t, top) in tops.iter().enumerate() {
-                // A largest that is not a number is no largest.
-                let top = if top.is_nan() {
-                    f32::NEG_INFINITY
-                } else {
-                    *top
-                };
-                if t < n {
-                    held[t] = (top, t);
-                } else if top > held[least].0 {
-                    held[least] = (top, t);
-                } else {
-                    continue;
-                }
-                if t + 1 >= n {
-                    least = (0..n).fold(0, |least, i| match held[i].0 < held[least].0 {
-                        true => i,
-                        false => least,
-                    });
-                }
-            }
-            let mut best = (f32::NEG_INFINITY, 0u32);
-            let mut whole_rows = 0;
-            for (top, t) in &held[..n] {
-                let sixteen = &products[t * ROWS..(t + 1) * ROWS];
-                let Some(lane) = sixteen.iter().position(|p| p == top) else {
-                    continue;
-                };
-                let token = t * ROWS + lane;
-                let product = whole(token);
-                whole_rows += 1;
-                if product > best.0 || (product == best.0 && (token as u32) < best.1) {
-                    best = (product, token as u32);
-                }
-            }
-            read.fetch_add(whole_rows, Ordering::Relaxed);
-            found.store(word(best.0, best.1), Ordering::Release);
-            reached.store(best.0.to_bits(), Ordering::Release);
-        };
-        let decided = |first: usize, last: usize| {
-            let reached = f32::from_bits(reached.load(Ordering::Acquire));
-            let mut whole_rows = 0;
-            for t in first..last {
-                // SAFETY: the sketched products were all written two steps
-                // back and nothing writes them now; this sixteen's place
-                // among the tops and the lanes is this unit's alone, and a
-                // unit is done by one thread.
-                let (products, top, lane) = unsafe {
-                    (
-                        products.at().add(t * ROWS),
-                        tops.part(t, 1),
-                        lanes.part(t, 1),
-                    )
-                };
-                // SAFETY: as above, and `reach` has a value for every row.
-                let mut could = unsafe {
-                    kernels::could_be_first(
-                        products,
-                        self.reach.as_ptr().add(t * ROWS),
-                        size,
-                        reached,
-                    )
-                };
-                let mut best = (f32::NEG_INFINITY, 0u8);
-                while could != 0 {
-                    let r = could.trailing_zeros() as usize;
-                    could &= could - 1;
-                    let product = whole(t * ROWS + r);
-                    whole_rows += 1;
-                    if product > best.0 {
-                        best = (product, r as u8);
+            for of in &each {
+                // SAFETY: every sixteen's products and their largest were
+                // written in the phase before, and nothing writes them until
+                // this is done.
+                let (products, tops) = unsafe { (of.products.all(), of.tops.all()) };
+                // The sixteens with the largest sketched products.
+                let mut held = [(f32::NEG_INFINITY, 0usize); FIRST];
+                let n = FIRST.min(sixteens);
+                let mut least = 0;
+                for (t, top) in tops.iter().enumerate() {
+                    // A largest that is not a number is no largest.
+                    let top = if top.is_nan() {
+                        f32::NEG_INFINITY
+                    } else {
+                        *top
+                    };
+                    if t < n {
+                        held[t] = (top, t);
+                    } else if top > held[least].0 {
+                        held[least] = (top, t);
+                    } else {
+                        continue;
+                    }
+                    if t + 1 >= n {
+                        least = (0..n).fold(0, |least, i| match held[i].0 < held[least].0 {
+                            true => i,
+                            false => least,
+                        });
                     }
                 }
-                top[0] = best.0;
-                lane[0] = best.1;
+                let mut best = (f32::NEG_INFINITY, 0u32);
+                let mut whole_rows = 0;
+                for (top, t) in &held[..n] {
+                    let sixteen = &products[t * ROWS..(t + 1) * ROWS];
+                    let Some(lane) = sixteen.iter().position(|p| p == top) else {
+                        continue;
+                    };
+                    let token = t * ROWS + lane;
+                    let product = whole(of, token);
+                    whole_rows += 1;
+                    if product > best.0 || (product == best.0 && (token as u32) < best.1) {
+                        best = (product, token as u32);
+                    }
+                }
+                of.read.fetch_add(whole_rows, Ordering::Relaxed);
+                of.found.store(word(best.0, best.1), Ordering::Release);
+                of.reached.store(best.0.to_bits(), Ordering::Release);
             }
-            read.fetch_add(whole_rows, Ordering::Relaxed);
+        };
+        let decided = |first: usize, last: usize| {
+            for of in &each {
+                let reached = f32::from_bits(of.reached.load(Ordering::Acquire));
+                let mut whole_rows = 0;
+                for t in first..last {
+                    // SAFETY: the sketched products were all written two
+                    // steps back and nothing writes them now; this sixteen's
+                    // place among this input's tops and lanes is this unit's
+                    // alone, and a unit is done by one thread.
+                    let (products, top, lane) = unsafe {
+                        (
+                            of.products.at().add(t * ROWS),
+                            of.tops.part(t, 1),
+                            of.lanes.part(t, 1),
+                        )
+                    };
+                    // SAFETY: as above, and `reach` has a value for every row.
+                    let mut could = unsafe {
+                        kernels::could_be_first(
+                            products,
+                            self.reach.as_ptr().add(t * ROWS),
+                            of.size,
+                            reached,
+                        )
+                    };
+                    let mut best = (f32::NEG_INFINITY, 0u8);
+                    while could != 0 {
+                        let r = could.trailing_zeros() as usize;
+                        could &= could - 1;
+                        let product = whole(of, t * ROWS + r);
+                        whole_rows += 1;
+                        if product > best.0 {
+                            best = (product, r as u8);
+                        }
+                    }
+                    top[0] = best.0;
+                    lane[0] = best.1;
+                }
+                of.read.fetch_add(whole_rows, Ordering::Relaxed);
+            }
         };
         let per_sixteen = self.cols / 4 * GROUP;
         dispatch(
@@ -505,15 +571,28 @@ impl Sketch {
             ],
             false,
         );
-        room.read = read.load(Ordering::Relaxed);
-        let (mut product, mut token) = of_word(found.load(Ordering::Acquire));
-        for (t, (top, lane)) in room.tops.iter().zip(&room.lanes).enumerate() {
-            let at = (t * ROWS + usize::from(*lane)) as u32;
-            if *top > product || (*top == product && at < token) {
-                (product, token) = (*top, at);
+        let found: Vec<(u64, usize)> = each
+            .iter()
+            .map(|of| {
+                (
+                    of.found.load(Ordering::Acquire),
+                    of.read.load(Ordering::Relaxed),
+                )
+            })
+            .collect();
+        drop(each);
+        for ((room, token), (found, read)) in rooms.iter_mut().zip(tokens).zip(found) {
+            room.read = read;
+            let (mut product, mut first) = of_word(found);
+            for (t, (top, lane)) in room.tops.iter().zip(&room.lanes).enumerate() {
+                let at = (t * ROWS + usize::from(*lane)) as u32;
+                if *top > product || (*top == product && at < first) {
+                    (product, first) = (*top, at);
+                }
             }
+            *token = first;
         }
-        Ok(token)
+        Ok(())
     }
 }
 

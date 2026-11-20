@@ -65,7 +65,15 @@ async fn requests_decoded_together_answer_as_alone() -> Outcome<()> {
     }
 
     let mut report = format!("RESULT cpu batch {form}:");
-    for together in [1usize, 2, 4, 8, 16] {
+    // `ANTUMBRA_CPU_BATCH_SIZES=1,2,3` answers those many at once instead.
+    let sizes: Vec<usize> = match std::env::var("ANTUMBRA_CPU_BATCH_SIZES") {
+        Ok(sizes) => sizes
+            .split(',')
+            .map(|n| n.trim().parse())
+            .collect::<Result<_, _>>()?,
+        Err(_) => vec![1, 2, 4, 8, 16],
+    };
+    for together in sizes {
         let prompts: Vec<&str> = (0..together).map(|i| PROMPTS[i % PROMPTS.len()]).collect();
         let answers = model.generate_each(&prompts, 0)?;
         for (i, answer) in answers.iter().enumerate() {

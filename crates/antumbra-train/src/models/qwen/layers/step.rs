@@ -86,8 +86,8 @@ pub(in crate::models::qwen) struct Scratch {
     /// Room for a token's logits, when the last token's was handed back.
     logits: Vec<f32>,
     /// What the head's two stages are worked out in, where a token is
-    /// chosen through its sketch.
-    sketched: sketch::Room,
+    /// chosen through its sketch: a room for each row chosen at once.
+    sketched: Vec<sketch::Room>,
 }
 
 /// What a step leaves its caller with.
@@ -1009,17 +1009,28 @@ impl QwenLora {
             (true, Some(sketch)) => Some(sketch),
             _ => None,
         };
-        let (storage, layout) = self.lm_head_w.storage_and_layout();
-        for (quantized, normed) in s.quantized.iter().zip(s.normed.chunks_exact(width)) {
-            if let Some(sketch) = sketch {
-                let dense = held(&storage, layout, "the head's dense rows")?;
-                let token = sketch.first(quantized, normed, dense, &mut s.sketched)?;
-                stepped.push(Stepped::First(token));
-            } else {
-                let mut logits = vec![0f32; head.rows()];
-                tiles::multiply(&[head], quantized, &mut [&mut logits])?;
-                stepped.push(Stepped::Logits(logits));
+        if let Some(sketch) = sketch {
+            // Every row's first in one reading of the sketch.
+            let (storage, layout) = self.lm_head_w.storage_and_layout();
+            let dense = held(&storage, layout, "the head's dense rows")?;
+            if s.sketched.len() < rows {
+                s.sketched.resize_with(rows, Default::default);
             }
+            let mut tokens = vec![0u32; rows];
+            sketch.first_of_each(
+                &s.quantized[..rows],
+                &s.normed,
+                dense,
+                &mut s.sketched[..rows],
+                &mut tokens,
+            )?;
+            stepped.extend(tokens.into_iter().map(Stepped::First));
+            return Ok(Some(stepped));
+        }
+        for quantized in &s.quantized[..rows] {
+            let mut logits = vec![0f32; head.rows()];
+            tiles::multiply(&[head], quantized, &mut [&mut logits])?;
+            stepped.push(Stepped::Logits(logits));
         }
         Ok(Some(stepped))
     }
@@ -1085,7 +1096,10 @@ impl QwenLora {
         if let (true, Some(sketch)) = (first && plain(&self.lm_head_w), &self.lm_head_s) {
             let (storage, layout) = self.lm_head_w.storage_and_layout();
             let dense = held(&storage, layout, "the head's dense rows")?;
-            let token = sketch.first(&s.quantized[0], &s.normed, dense, &mut s.sketched)?;
+            if s.sketched.is_empty() {
+                s.sketched.push(sketch::Room::default());
+            }
+            let token = sketch.first(&s.quantized[0], &s.normed, dense, &mut s.sketched[0])?;
             return Ok(Some(Stepped::First(token)));
         }
         // Every logit is written, so what the room held is nothing to it.
