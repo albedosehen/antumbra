@@ -427,6 +427,53 @@ unsafe fn q6k_block4(tile: &TileQ6, rows: [&Row; 4], block: usize, acc: [F16; 4]
     out
 }
 
+/// [`q6k_block4`] for the two rows or the three left over after the fours,
+/// which is also two or three rows read on their own: each row's products
+/// added to its own of `acc`, to the bit what the block gives the row alone,
+/// with one cutting of the tile for them, where a row at a time cut it again
+/// for each. Cutting is six steps to the one that multiplies, so a second
+/// row costs about a quarter of what the first did, where it cost as much.
+///
+/// It is a function of its own, called and not folded into its caller.
+/// Folded in, the loop the fours go through ran a per cent or two slower
+/// where the two were timed side by side, and a prompt's rows go through
+/// that loop.
+#[inline(never)]
+#[target_feature(enable = "neon,dotprod")]
+unsafe fn q6k_few<const N: usize>(tile: &TileQ6, rows: [&Row; N], block: usize, acc: &mut [F16]) {
+    let cut = Cut::new();
+    let qs = tile.qs.as_ptr();
+    let act = rows.map(|row| row.qs.as_ptr().add(block * QK_K));
+    let sums = rows.map(|row| row.sums.as_ptr().add(block * 16));
+    let mut total = [[vdupq_n_s32(0); 4]; N];
+    for run in 0..16 {
+        let mut isum = [[vdupq_n_s32(0); 4]; N];
+        for g in 0..4 {
+            let group = qs.add((run * 4 + g) * ROWS * 3);
+            let x = act.map(|act| four(act, run * 16 + g * 4));
+            for k in 0..4 {
+                let q = cut.sixes(group, k);
+                for (isum, x) in isum.iter_mut().zip(x) {
+                    isum[k] = dot(isum[k], q, x);
+                }
+            }
+        }
+        let scale = widened16_signed(tile.scales[run].as_ptr());
+        for n in 0..N {
+            let off = vdupq_n_s32(32 * *sums[n].add(run));
+            for k in 0..4 {
+                total[n][k] = vmlaq_s32(total[n][k], vsubq_s32(isum[n][k], off), scale[k]);
+            }
+        }
+    }
+    for (n, out) in acc[..N].iter_mut().enumerate() {
+        let d = scales_by(&tile.d, *rows[n].d.get_unchecked(block));
+        for k in 0..4 {
+            out[k] = vfmaq_f32(out[k], vcvtq_f32_s32(total[n][k]), d[k]);
+        }
+    }
+}
+
 /// Sixteen rows' products with one block of 32 input values, added to
 /// `acc`. The weights are stored 128 up; taking it back off each byte makes
 /// them the signed values they are, so the product needs no correction by
@@ -543,6 +590,26 @@ unsafe fn sixteens_of(w: &Tiled, first: usize, last: usize, rows: &[Row], out: &
                             );
                             acc[i..i + 4].copy_from_slice(&four);
                             i += 4;
+                        }
+                        // Two or three left over, which is also two or
+                        // three rows read on their own, share a cutting
+                        // as the fours do. One has nothing to share it
+                        // with.
+                        match some.len() - i {
+                            3 => {
+                                q6k_few(
+                                    tile,
+                                    [&some[i], &some[i + 1], &some[i + 2]],
+                                    b,
+                                    &mut acc[i..i + 3],
+                                );
+                                i += 3;
+                            }
+                            2 => {
+                                q6k_few(tile, [&some[i], &some[i + 1]], b, &mut acc[i..i + 2]);
+                                i += 2;
+                            }
+                            _ => {}
                         }
                     }
                     Tiles::Q8_0(_) => {}
