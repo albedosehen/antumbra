@@ -78,9 +78,11 @@ impl ServeQuant {
     /// How this build serves on this machine when nothing says otherwise. A
     /// build with no GPU backend serves on the CPU, where the dense f32 base
     /// reads about 6 GB a token, so it serves quantized: from Q6_K where the
-    /// CPU multiplies six-bit tiles ([`crate::device::six_bit_by_default`]), and
-    /// from Q8_0 on any other, where Q6_K would go through slower kernels
-    /// than Q8_0 does. A CUDA build keeps the dense base it trained on. A
+    /// CPU multiplies six-bit tiles ([`crate::device::six_bit_by_default`]:
+    /// an x86-64 CPU with AVX2, FMA and F16C, which the release builds need
+    /// anyway, and an aarch64 one with NEON's dot product), and from Q8_0 on
+    /// any other, where Q6_K would go through slower kernels than Q8_0
+    /// does. A CUDA build keeps the dense base it trained on. A
     /// Metal build serves as a build with no GPU does, from the CPU
     /// ([`crate::device::serves_from_cpu`]), where a token is decoded at more
     /// than twice the rate Metal decodes it from the dense base; `off` keeps
