@@ -9,7 +9,7 @@
 use super::*;
 
 mod step;
-pub(super) use step::{Scratch, Stepped};
+pub(super) use step::{Next, Scratch, Stepped};
 
 // --- linear-algebra helpers ------------------------------------------------
 
@@ -526,6 +526,9 @@ pub(super) struct Attention {
     /// joining them to the cache copied every position so far in every layer
     /// for every token, and attention reads it where it lies.
     kv_store: Option<kv::KvStore>,
+    /// The caches of the other sequences decoded beside that one
+    /// ([`Attention::step_each`]): sequence `n`'s is `others[n - 1]`.
+    others: Vec<kv::KvStore>,
 }
 
 impl Attention {
@@ -587,6 +590,7 @@ impl Attention {
             kv_cache: None,
             kv_store: (base.device().is_cpu() && base.dtype() == DType::F32)
                 .then(|| kv::KvStore::new(num_kv_heads, head_dim)),
+            others: Vec::new(),
         })
     }
 

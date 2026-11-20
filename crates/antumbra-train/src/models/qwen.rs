@@ -733,6 +733,153 @@ impl QwenCausalLm {
         Ok(self.trim(&text))
     }
 
+    /// An answer to each of `prompts`, decoded side by side: for each prompt
+    /// what [`CausalLm::generate`] gives it alone under a greedy policy, token
+    /// for token, and under a sampling one with `seed` plus its place among
+    /// the prompts. Each prompt is read into a cache of its own; after that
+    /// every sequence still answering takes its next token from one pass
+    /// over the weights, which on a CPU is read from memory once for all of
+    /// them, and a sequence that ends leaves the rest to go on. Where the
+    /// model does not read rows as plain values (a GPU, a dense base, a CPU
+    /// with no tiles) the prompts are answered one after another.
+    ///
+    /// The timing kept is the whole run's: the prompts' tokens and the time
+    /// they took to read, and the tokens decoded after each sequence's first
+    /// over the time the shared passes took.
+    pub fn generate_each(&mut self, prompts: &[&str], seed: u64) -> Result<Vec<String>> {
+        // Sequences one pass takes at most; more are answered a run at a time.
+        const AT_ONCE: usize = 32;
+        if prompts.len() > AT_ONCE {
+            let mut answers = Vec::with_capacity(prompts.len());
+            let mut timing = GenTiming::default();
+            for (run, some) in prompts.chunks(AT_ONCE).enumerate() {
+                answers
+                    .extend(self.generate_each(some, seed.wrapping_add((run * AT_ONCE) as u64))?);
+                if let Some(t) = self.timing {
+                    timing.prompt_tokens += t.prompt_tokens;
+                    timing.prompt_secs += t.prompt_secs;
+                    timing.decoded += t.decoded;
+                    timing.decode_secs += t.decode_secs;
+                }
+            }
+            self.timing = Some(timing);
+            return Ok(answers);
+        }
+        self.model.set_grad(false);
+        self.model.sequences(prompts.len());
+        let policy = crate::decode::DecodePolicy {
+            temperature: self.temperature,
+            top_p: self.top_p,
+            repetition_penalty: self.repetition_penalty,
+            no_repeat_ngram_size: self.no_repeat_ngram_size,
+        };
+        let first = policy.takes_the_first();
+        struct Sequence {
+            tokens: Vec<u32>,
+            prompt_len: usize,
+            rng: StdRng,
+            done: bool,
+        }
+        let mut timing = GenTiming::default();
+        let mut all = Vec::with_capacity(prompts.len());
+        for (i, prompt) in prompts.iter().enumerate() {
+            let tokens = self.encode(&self.wrap_prompt(prompt))?;
+            let mut sequence = Sequence {
+                prompt_len: tokens.len(),
+                tokens,
+                rng: StdRng::seed_from_u64(seed.wrapping_add(i as u64)),
+                done: self.max_new_tokens == 0,
+            };
+            self.model.clear_sequence(i).map_err(ce)?;
+            let began = std::time::Instant::now();
+            let stepped = self
+                .model
+                .step_in(i, &sequence.tokens, 0, first)
+                .map_err(ce)?;
+            let next = match stepped {
+                Some(Stepped::First(next)) => next,
+                Some(Stepped::Logits(mut logits)) => {
+                    let next =
+                        crate::decode::pick_token_in(&mut logits, &[], &policy, &mut sequence.rng);
+                    self.model.keep(logits);
+                    next
+                }
+                None => {
+                    // This model reads no rows this way: one prompt after
+                    // another, as it always has.
+                    let mut answers = Vec::with_capacity(prompts.len());
+                    for (i, prompt) in prompts.iter().enumerate() {
+                        answers.push(self.sample_one(prompt, seed.wrapping_add(i as u64))?);
+                    }
+                    return Ok(answers);
+                }
+            };
+            timing.prompt_tokens += sequence.prompt_len;
+            timing.prompt_secs += began.elapsed().as_secs_f64();
+            if sequence.done || next == self.eos {
+                sequence.done = true;
+            } else {
+                sequence.tokens.push(next);
+            }
+            all.push(sequence);
+        }
+        loop {
+            let each: Vec<Next> = all
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| !s.done)
+                .filter_map(|(i, s)| {
+                    s.tokens.last().map(|token| Next {
+                        sequence: i,
+                        token: *token,
+                        position: s.tokens.len() - 1,
+                    })
+                })
+                .collect();
+            if each.is_empty() {
+                break;
+            }
+            let began = std::time::Instant::now();
+            let Some(stepped) = self.model.step_each(&each, first).map_err(ce)? else {
+                return Err(AntumbraError::other(
+                    "a model that read its prompts as plain rows stopped reading rows that way",
+                ));
+            };
+            timing.decoded += each.len();
+            timing.decode_secs += began.elapsed().as_secs_f64();
+            for (next, stepped) in each.iter().zip(stepped) {
+                let sequence = &mut all[next.sequence];
+                let token = match stepped {
+                    Stepped::First(token) => token,
+                    Stepped::Logits(mut logits) => crate::decode::pick_token_in(
+                        &mut logits,
+                        &sequence.tokens[sequence.prompt_len..],
+                        &policy,
+                        &mut sequence.rng,
+                    ),
+                };
+                if token == self.eos {
+                    sequence.done = true;
+                    continue;
+                }
+                sequence.tokens.push(token);
+                let answered = &sequence.tokens[sequence.prompt_len..];
+                sequence.done =
+                    answered.len() >= self.max_new_tokens || crate::decode::loops(answered);
+            }
+        }
+        self.timing = Some(timing);
+        all.iter()
+            .map(|sequence| {
+                let text = self
+                    .tokenizer
+                    .decode(&sequence.tokens[sequence.prompt_len..], true)
+                    .map_err(|e| AntumbraError::other(format!("decode: {e}")))?;
+                Ok(self.trim(&text))
+            })
+            .collect()
+    }
+
     /// Full-sequence logits `(1, seq, vocab)` in f32, LoRA on (the policy) or
     /// off (the GRPO reference). No KV cache: we score the whole sequence. The
     /// LoRA gate is restored to on afterwards.

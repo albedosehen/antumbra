@@ -493,6 +493,99 @@ impl Attention {
     }
 }
 
+impl Attention {
+    /// Room for the caches of `n` sequences decoded side by side. The first
+    /// is the cache every other path reads and writes.
+    fn sequences(&mut self, n: usize) {
+        while self.others.len() + 1 < n {
+            self.others
+                .push(kv::KvStore::new(self.num_kv_heads, self.head_dim));
+        }
+    }
+
+    /// Sequence `slot`'s cache.
+    fn cache_of(&mut self, slot: usize) -> CResult<&mut kv::KvStore> {
+        let store = match slot {
+            0 => self.kv_store.as_mut(),
+            n => self.others.get_mut(n - 1),
+        };
+        match store {
+            Some(store) => Ok(store),
+            None => bail!("no cache of plain rows was made for sequence {slot}"),
+        }
+    }
+
+    /// Put sequence `slot`'s cache where the first's is, and the first's
+    /// where that one's was: what reads one sequence then reads that one.
+    fn exchange(&mut self, slot: usize) -> CResult<()> {
+        if slot == 0 {
+            return Ok(());
+        }
+        let (Some(first), Some(other)) = (self.kv_store.as_mut(), self.others.get_mut(slot - 1))
+        else {
+            bail!("no cache of plain rows was made for sequence {slot}")
+        };
+        std::mem::swap(first, other);
+        Ok(())
+    }
+
+    /// Attention for one row from each of several sequences: `s.normed` is
+    /// their normed rows, row `i` the next of sequence `at[i].0` at position
+    /// `at[i].1`. Each row's keys and values join its own sequence's cache,
+    /// and it attends to that cache alone, so each is the row
+    /// [`Attention::step`] computes for its sequence by itself. No sequence
+    /// is named twice.
+    fn step_each(&mut self, at: &[(usize, usize)], s: &mut Scratch) -> CResult<()> {
+        let rows = at.len();
+        let (queries, cached) = (
+            self.num_heads * self.head_dim,
+            self.num_kv_heads * self.head_dim,
+        );
+        s.qkv.resize(rows * (queries + 2 * cached), 0.0);
+        let (q, rest) = s.qkv.split_at_mut(rows * queries);
+        let (k, v) = rest.split_at_mut(rows * cached);
+        products(
+            [&self.q_proj, &self.k_proj, &self.v_proj],
+            &s.normed,
+            rows,
+            [&mut *q, &mut *k, &mut *v],
+            &mut s.quantized,
+            &mut s.through,
+        )?;
+        // Every row is turned before any is cached, so a position past the
+        // table leaves every cache as it was.
+        for ((q, k), (_, position)) in q
+            .chunks_exact_mut(queries)
+            .zip(k.chunks_exact_mut(cached))
+            .zip(at)
+        {
+            self.rotary.turn(q, self.head_dim, *position)?;
+            self.rotary.turn(k, self.head_dim, *position)?;
+        }
+        s.attended.resize(rows * queries, 0.0);
+        for ((((q, k), v), out), (slot, _)) in q
+            .chunks_exact(queries)
+            .zip(k.chunks_exact(cached))
+            .zip(v.chunks_exact(cached))
+            .zip(s.attended.chunks_exact_mut(queries))
+            .zip(at)
+        {
+            let store = self.cache_of(*slot)?;
+            store.append(k, v)?;
+            attend::attend(q, store, out, &mut s.attention)?;
+        }
+        s.out.resize(rows * self.hidden_size, 0.0);
+        products(
+            [&self.o_proj],
+            &s.attended,
+            rows,
+            [&mut s.out],
+            &mut s.quantized,
+            &mut s.through,
+        )
+    }
+}
+
 /// `silu(gate) · up` into `out`.
 fn gate_times(gate: &[f32], up: &[f32], out: &mut [f32]) {
     #[cfg(target_arch = "x86_64")]
@@ -751,28 +844,35 @@ impl DecoderLayer {
     }
 }
 
+impl DecoderLayer {
+    /// One row from each of several sequences through this layer
+    /// ([`Attention::step_each`]): `x` is their hidden rows, before and
+    /// after.
+    fn step_each(&mut self, x: &mut [f32], at: &[(usize, usize)], s: &mut Scratch) -> CResult<()> {
+        let rows = at.len();
+        self.input_ln.step(x, rows, &mut s.normed)?;
+        self.self_attn.step_each(at, s)?;
+        add(x, &s.out)?;
+        self.post_attn_ln.step(x, rows, &mut s.normed)?;
+        self.mlp.step(rows, s)?;
+        add(x, &s.out)
+    }
+}
+
+/// One sequence's next token for [`QwenLora::step_each`]: the sequence, the
+/// token it was last given, and that token's position in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::models::qwen) struct Next {
+    pub(in crate::models::qwen) sequence: usize,
+    pub(in crate::models::qwen) token: u32,
+    pub(in crate::models::qwen) position: usize,
+}
+
 impl QwenLora {
-    /// The logits after the last of `tokens`, the first of which is at
-    /// `position`, as [`QwenLora::hidden`] and [`QwenLora::logits`] give
-    /// them with the cache on, through plain rows: one decoded token, or a
-    /// prompt. `None`, with nothing read or written, when this model does
-    /// not read rows that way: the caller takes the tensor path, which
-    /// reads and writes the same cache.
-    ///
-    /// With `first` the caller wants the token with the largest logit and
-    /// nothing else of the logits. Where the head is sketched that token is
-    /// what comes back, chosen in two stages ([`sketch`]) from under half the
-    /// bytes the whole head is; where it is not, the logits come back as
-    /// they would have.
-    pub(in crate::models::qwen) fn step(
-        &mut self,
-        tokens: &[u32],
-        position: usize,
-        first: bool,
-    ) -> CResult<Option<Stepped>> {
-        if tokens.is_empty() {
-            return Ok(None);
-        }
+    /// Whether this model reads rows as plain values, with the adapters'
+    /// factors packed for it when it does: what [`QwenLora::step`] and
+    /// [`QwenLora::step_each`] ask before they read or write anything.
+    fn steps_plainly(&mut self) -> CResult<bool> {
         if self.serves && self.layers.iter().any(DecoderLayer::packs) {
             // The adapters' factors as these rows read them, made once
             // after they are set: by every core, a run of layers each. One
@@ -797,16 +897,155 @@ impl QwenLora {
                 Ok(())
             })?;
         }
-        let table = self.embed_tokens.embeddings();
-        let steps = (self.lm_head_t.is_some() || self.lm_head_q.is_some())
+        Ok((self.lm_head_t.is_some() || self.lm_head_q.is_some())
             && self.device.is_cpu()
             && self.dtype == DType::F32
-            && plain(table)
+            && plain(self.embed_tokens.embeddings())
             && self.norm.steps()
-            && self.layers.iter().all(DecoderLayer::steps);
-        if !steps {
+            && self.layers.iter().all(DecoderLayer::steps))
+    }
+
+    /// Room for `n` sequences decoded side by side ([`QwenLora::step_each`]),
+    /// each with a cache of its own in every layer.
+    pub(in crate::models::qwen) fn sequences(&mut self, n: usize) {
+        for layer in &mut self.layers {
+            layer.self_attn.sequences(n);
+        }
+    }
+
+    /// Forget what sequence `sequence` has read.
+    pub(in crate::models::qwen) fn clear_sequence(&mut self, sequence: usize) -> CResult<()> {
+        for layer in &mut self.layers {
+            layer.self_attn.cache_of(sequence)?.reset();
+        }
+        Ok(())
+    }
+
+    /// [`QwenLora::step`] for sequence `sequence`: its prompt, read into its
+    /// own cache. `None` as that gives it, with nothing read or written.
+    pub(in crate::models::qwen) fn step_in(
+        &mut self,
+        sequence: usize,
+        tokens: &[u32],
+        position: usize,
+        first: bool,
+    ) -> CResult<Option<Stepped>> {
+        for layer in &mut self.layers {
+            layer.self_attn.exchange(sequence)?;
+        }
+        let stepped = self.step(tokens, position, first);
+        for layer in &mut self.layers {
+            layer.self_attn.exchange(sequence)?;
+        }
+        stepped
+    }
+
+    /// One decoded token for each of several sequences, in one pass over the
+    /// weights: for each of `each`, what [`QwenLora::step`] gives that
+    /// sequence's token alone, to the bit. A weight is read from memory once
+    /// for all of them, which is what bounds a decoded token on a CPU; each
+    /// row is computed as it would be alone, and attends to its own
+    /// sequence's cache. `None`, with nothing read or written, when this
+    /// model does not read rows as plain values. No sequence is named twice.
+    pub(in crate::models::qwen) fn step_each(
+        &mut self,
+        each: &[Next],
+        first: bool,
+    ) -> CResult<Option<Vec<Stepped>>> {
+        if each.is_empty() {
+            return Ok(Some(Vec::new()));
+        }
+        if each.len() > ROWS_AT_ONCE {
+            bail!(
+                "{} sequences at once, where {ROWS_AT_ONCE} rows are read together",
+                each.len()
+            )
+        }
+        for (i, next) in each.iter().enumerate() {
+            if each[..i].iter().any(|n| n.sequence == next.sequence) {
+                bail!("sequence {} is given two tokens at once", next.sequence)
+            }
+        }
+        if !self.steps_plainly()? {
             return Ok(None);
         }
+        let table = self.embed_tokens.embeddings();
+        let (vocabulary, width) = table.dims2()?;
+        if let Some(next) = each.iter().find(|n| n.token as usize >= vocabulary) {
+            bail!("token {} is past a vocabulary of {vocabulary}", next.token)
+        }
+        let rows = each.len();
+        let at: Vec<(usize, usize)> = each.iter().map(|n| (n.sequence, n.position)).collect();
+        let s = &mut self.scratch;
+        let mut x = std::mem::take(&mut s.x);
+        x.clear();
+        {
+            let (storage, layout) = table.storage_and_layout();
+            let all = held(&storage, layout, "the embeddings")?;
+            for next in each {
+                let from = next.token as usize * width;
+                x.extend_from_slice(&all[from..from + width]);
+            }
+        }
+        for layer in &mut self.layers {
+            layer.step_each(&mut x, &at, s)?;
+        }
+        self.norm.step(&x, rows, &mut s.normed)?;
+        s.x = x;
+        let mut stepped = Vec::with_capacity(rows);
+        let Some(head) = &self.lm_head_t else {
+            // Through candle's kernels, where this CPU has no tiles for the
+            // form the head is in.
+            let normed = s.normed.clone();
+            for normed in normed.chunks_exact(width) {
+                let row = Tensor::from_slice(normed, (1, 1, width), &Device::Cpu)?;
+                let logits = self.logits(&row)?.flatten_all()?.to_vec1()?;
+                stepped.push(Stepped::Logits(logits));
+            }
+            return Ok(Some(stepped));
+        };
+        quantize(&s.normed, rows, &mut s.quantized);
+        let sketch = match (first && plain(&self.lm_head_w), &self.lm_head_s) {
+            (true, Some(sketch)) => Some(sketch),
+            _ => None,
+        };
+        let (storage, layout) = self.lm_head_w.storage_and_layout();
+        for (quantized, normed) in s.quantized.iter().zip(s.normed.chunks_exact(width)) {
+            if let Some(sketch) = sketch {
+                let dense = held(&storage, layout, "the head's dense rows")?;
+                let token = sketch.first(quantized, normed, dense, &mut s.sketched)?;
+                stepped.push(Stepped::First(token));
+            } else {
+                let mut logits = vec![0f32; head.rows()];
+                tiles::multiply(&[head], quantized, &mut [&mut logits])?;
+                stepped.push(Stepped::Logits(logits));
+            }
+        }
+        Ok(Some(stepped))
+    }
+
+    /// The logits after the last of `tokens`, the first of which is at
+    /// `position`, as [`QwenLora::hidden`] and [`QwenLora::logits`] give
+    /// them with the cache on, through plain rows: one decoded token, or a
+    /// prompt. `None`, with nothing read or written, when this model does
+    /// not read rows that way: the caller takes the tensor path, which
+    /// reads and writes the same cache.
+    ///
+    /// With `first` the caller wants the token with the largest logit and
+    /// nothing else of the logits. Where the head is sketched that token is
+    /// what comes back, chosen in two stages ([`sketch`]) from under half the
+    /// bytes the whole head is; where it is not, the logits come back as
+    /// they would have.
+    pub(in crate::models::qwen) fn step(
+        &mut self,
+        tokens: &[u32],
+        position: usize,
+        first: bool,
+    ) -> CResult<Option<Stepped>> {
+        if tokens.is_empty() || !self.steps_plainly()? {
+            return Ok(None);
+        }
+        let table = self.embed_tokens.embeddings();
         let (vocabulary, width) = table.dims2()?;
         if let Some(token) = tokens.iter().find(|t| **t as usize >= vocabulary) {
             bail!("token {token} is past a vocabulary of {vocabulary}")
@@ -1140,6 +1379,155 @@ mod tests {
                     off < CLOSE,
                     "{serve:?}, a prompt of {length}: off the tensor path by {off} of the peak"
                 );
+            }
+        }
+        Ok(())
+    }
+
+    /// Several sequences decoded in one pass give, token for token, the
+    /// logits each gives decoded alone, at every served form: with prompts
+    /// of different lengths, a sequence that joins after the others have
+    /// begun, and one that ends before them.
+    #[test]
+    fn sequences_decoded_together_are_each_decoded_alone() -> CResult<()> {
+        if !tiles::available() {
+            return Ok(());
+        }
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        let mut forms = vec![GgmlDType::Q4K, GgmlDType::Q8_0];
+        if tiles::six_bit() {
+            forms.push(GgmlDType::Q6K);
+        }
+        // Each sequence's prompt length, the step it joins at, and the
+        // number of tokens it decodes.
+        let plan = [(3usize, 0usize, 7usize), (1, 0, 3), (9, 2, 6), (4, 0, 9)];
+        for serve in forms {
+            let mut together = model(&cfg, &weights, Some(serve), true)?;
+            together.sequences(plan.len());
+            let mut alone = Vec::new();
+            for _ in &plan {
+                alone.push(model(&cfg, &weights, Some(serve), true)?);
+            }
+            // Where each sequence stands: the tokens it has read.
+            let mut read: Vec<Vec<u32>> = vec![Vec::new(); plan.len()];
+            for step in 0..12 {
+                let mut each = Vec::new();
+                for (i, (prompt, joins, decodes)) in plan.iter().enumerate() {
+                    if step < *joins || step >= joins + decodes {
+                        continue;
+                    }
+                    if step == *joins {
+                        // The prompt, read into the sequence's own cache.
+                        let tokens: Vec<u32> = (0..*prompt).map(|t| token(7 * i + t)).collect();
+                        let (Some(Stepped::Logits(got)), Some(want)) = (
+                            together.step_in(i, &tokens, 0, false)?,
+                            stepped(&mut alone[i], &tokens, 0)?,
+                        ) else {
+                            bail!("{serve:?}: sequence {i}'s prompt was not stepped")
+                        };
+                        assert_eq!(got, want, "{serve:?}: sequence {i}'s prompt");
+                        read[i] = tokens;
+                    }
+                    let next = token(31 * i + step);
+                    each.push(Next {
+                        sequence: i,
+                        token: next,
+                        position: read[i].len(),
+                    });
+                    read[i].push(next);
+                }
+                let Some(got) = together.step_each(&each, false)? else {
+                    bail!("{serve:?}: step {step} was not stepped")
+                };
+                assert_eq!(got.len(), each.len());
+                for (next, got) in each.iter().zip(got) {
+                    let Stepped::Logits(got) = got else {
+                        bail!("{serve:?}: logits were asked for")
+                    };
+                    let Some(want) =
+                        stepped(&mut alone[next.sequence], &[next.token], next.position)?
+                    else {
+                        bail!(
+                            "{serve:?}: sequence {} was not stepped alone",
+                            next.sequence
+                        )
+                    };
+                    assert_eq!(
+                        got,
+                        want,
+                        "{serve:?}, step {step}: sequence {} beside {} others",
+                        next.sequence,
+                        each.len() - 1
+                    );
+                }
+            }
+            // A sequence let go starts again from nothing.
+            together.clear_sequence(2)?;
+            let fresh = [token(5), token(6)];
+            let mut again = model(&cfg, &weights, Some(serve), true)?;
+            let (Some(Stepped::Logits(got)), Some(want)) = (
+                together.step_in(2, &fresh, 0, false)?,
+                stepped(&mut again, &fresh, 0)?,
+            ) else {
+                bail!("{serve:?}: a sequence begun again was not stepped")
+            };
+            assert_eq!(got, want, "{serve:?}: a sequence begun again");
+            // And one sequence may not be given two tokens in a step.
+            let twice = [
+                Next {
+                    sequence: 1,
+                    token: token(1),
+                    position: 4,
+                },
+                Next {
+                    sequence: 1,
+                    token: token(2),
+                    position: 5,
+                },
+            ];
+            assert!(
+                together.step_each(&twice, false).is_err(),
+                "one sequence, twice"
+            );
+        }
+        Ok(())
+    }
+
+    /// Asked for each sequence's first alone, a step of several gives each
+    /// the token it gets alone.
+    #[test]
+    fn the_first_of_each_sequence_is_its_first_alone() -> CResult<()> {
+        if !sketch::available() {
+            return Ok(());
+        }
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        let mut together = model(&cfg, &weights, Some(GgmlDType::Q6K), true)?;
+        together.sequences(3);
+        let mut alone = Vec::new();
+        for _ in 0..3 {
+            alone.push(model(&cfg, &weights, Some(GgmlDType::Q6K), true)?);
+        }
+        for step in 0..10 {
+            let each: Vec<Next> = (0..3)
+                .map(|i| Next {
+                    sequence: i,
+                    token: token(11 * i + step),
+                    position: step,
+                })
+                .collect();
+            let Some(got) = together.step_each(&each, true)? else {
+                bail!("step {step} was not stepped")
+            };
+            for (next, got) in each.iter().zip(got) {
+                let (Stepped::First(got), Some(Stepped::First(want))) = (
+                    got,
+                    alone[next.sequence].step(&[next.token], next.position, true)?,
+                ) else {
+                    bail!("step {step}: a token did not come back chosen")
+                };
+                assert_eq!(got, want, "step {step}, sequence {}", next.sequence);
             }
         }
         Ok(())
