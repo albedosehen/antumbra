@@ -2063,7 +2063,7 @@ mod tests {
     /// gives what it gives after the rows before it were read one by one.
     #[test]
     fn rows_read_ahead_give_each_rows_own_first_token() -> CResult<()> {
-        if !tiles::six_bit() {
+        if !sketch::available() {
             eprintln!("skipped: this CPU multiplies no sketch of the head");
             return Ok(());
         }
@@ -2128,7 +2128,7 @@ mod tests {
     #[test]
     fn a_generation_read_ahead_is_the_generation_a_token_at_a_time() -> CResult<()> {
         use crate::draft::Drafts;
-        if !tiles::six_bit() {
+        if !sketch::available() {
             eprintln!("skipped: this CPU multiplies no sketch of the head");
             return Ok(());
         }
