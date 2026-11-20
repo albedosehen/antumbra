@@ -6,12 +6,10 @@ use candle_core::Device;
 
 /// Whether this CPU multiplies a quantized base through Antumbra's own tiles
 /// (`models::qwen::tiles`), which is what puts a decoded token at the rate
-/// memory is read. On x86-64: AVX-512 F, BW and VNNI, and F16C, which
-/// Intel's Ice Lake and Tiger Lake laptop CPUs and its Xeons from Cascade
-/// Lake have, as do AMD's CPUs from Zen 4; Intel's desktop and laptop CPUs
-/// since Alder Lake do not. On aarch64: NEON with the dot-product
-/// instructions, which every Apple silicon CPU has and ARM's server cores
-/// from Neoverse N1.
+/// memory is read. On x86-64: AVX2 with FMA and F16C, which every Intel CPU
+/// has since Haswell and every AMD CPU since Excavator, or the AVX-512 of
+/// [`wide_tiles`]. On aarch64: NEON with the dot-product instructions, which
+/// every Apple silicon CPU has and ARM's server cores from Neoverse N1.
 pub fn tiles() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
@@ -34,7 +32,10 @@ pub fn tiles() -> bool {
 }
 
 /// Whether this x86-64 CPU multiplies through the AVX-512 kernels: AVX-512
-/// F, BW and VNNI, and F16C. The others that tile multiply through AVX2.
+/// F, BW and VNNI, and F16C, which Intel's Ice Lake and Tiger Lake laptop
+/// CPUs and its Xeons from Cascade Lake have, as do AMD's CPUs from Zen 4;
+/// Intel's desktop and laptop CPUs since Alder Lake do not. The others that
+/// tile multiply through AVX2.
 ///
 /// `ANTUMBRA_CPU_KERNELS=avx2` holds a CPU that has AVX-512 to the AVX2
 /// kernels, read once when first asked: for measuring one tier against the
@@ -54,41 +55,23 @@ pub fn wide_tiles() -> bool {
     })
 }
 
-/// Whether this CPU multiplies six-bit tiles as well. On x86-64 their values
-/// are unpacked with AVX-512 VBMI, which the first CPUs with VNNI (Cascade
-/// Lake) lack; on aarch64 every CPU that tiles does.
+/// Whether this CPU multiplies six-bit tiles as well: every CPU that tiles
+/// does. On x86-64 their values are cut out of their bytes with AVX-512 VBMI
+/// where the CPU has it, and with AVX2 where it does not (the first CPUs
+/// with VNNI, Cascade Lake, among them); on aarch64 with a table and a
+/// shift.
 pub fn six_bit_tiles() -> bool {
-    #[cfg(target_arch = "x86_64")]
-    {
-        // Through AVX-512 VBMI where the CPU has it, and through AVX2 where
-        // it does not.
-        tiles()
-    }
-    #[cfg(target_arch = "aarch64")]
-    {
-        // NEON cuts six-bit values out with a table and a shift.
-        tiles()
-    }
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-    {
-        false
-    }
+    tiles()
 }
 
 /// Whether six bits is the form this CPU serves from when nothing says
-/// otherwise: where it was measured to decode faster than Q8_0, which is
-/// through AVX-512 VBMI and through NEON. Through AVX2 the six-bit tiles
-/// multiply, and `--serve-quant q6_k` serves from them, but their rate
-/// beside Q8_0's is not yet measured there, so the default stays Q8_0.
+/// otherwise: wherever it multiplies six-bit tiles, since Q6_K was measured
+/// to decode faster than Q8_0 through each set of kernels. Through AVX-512
+/// VBMI and through NEON it decodes about a third more tokens a second.
+/// Through AVX2, with a 1.5B base on a laptop CPU held to those kernels, it
+/// decoded 25.7 tokens a second where Q8_0 decoded 22.6.
 pub fn six_bit_by_default() -> bool {
-    #[cfg(target_arch = "x86_64")]
-    {
-        wide_tiles() && is_x86_feature_detected!("avx512vbmi")
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        six_bit_tiles()
-    }
+    six_bit_tiles()
 }
 
 /// Whether this build serves from the CPU's tiles though it has a GPU

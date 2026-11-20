@@ -687,6 +687,10 @@ fn gate_times(gate: &[f32], up: &[f32], out: &mut [f32]) {
         // SAFETY: `available` found AVX-512F among the features it names.
         unsafe { wide::silu_times(gate, up, out) };
         return;
+    } else if tiles::available() {
+        // SAFETY: a CPU that tiles without AVX-512 has AVX2 and FMA.
+        unsafe { wide::avx2::silu_times(gate, up, out) };
+        return;
     }
     for ((o, g), u) in out.iter_mut().zip(gate).zip(up) {
         *o = g / (1.0 + (-g).exp()) * u;

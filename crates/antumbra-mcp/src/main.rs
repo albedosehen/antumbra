@@ -152,16 +152,17 @@ struct Cli {
     /// How the base model is held to serve experts: `auto`, `off`, `q8_0`,
     /// `q6_k` or `q4_k`. On a build with no GPU backend, where the dense base
     /// is too slow to answer with, `auto` serves from a Q6_K base where the
-    /// CPU has its fast kernels (AVX-512 VNNI and VBMI) and from a Q8_0 base
-    /// on any other CPU; on a GPU build it serves from the dense base. Every quantized form rewords an expert's
-    /// answers, and a smaller one decodes faster where a token is bound by
-    /// how fast its weights are read. `q8_0` moves answers least. On a CPU
-    /// with AVX-512 VNNI, `q6_k` decodes about 1.3 times as fast and shifts
-    /// an expert's log-probabilities half again as far, and `q4_k` about 1.7
-    /// times as fast and four times as far. On held-out behavior tasks 82
-    /// answers of 113 passed their checks at `q8_0` and 79 at `q4_k`,
-    /// against the dense base's 85. `off` keeps the base dense anywhere.
-    /// Experts are never quantized.
+    /// CPU has its fast kernels (AVX2 on x86-64, or an Arm CPU's NEON with
+    /// its dot product) and from a Q8_0 base on any other CPU; on a GPU
+    /// build it serves from the dense base. Every quantized form rewords an
+    /// expert's answers, and a smaller one decodes faster where a token is
+    /// bound by how fast its weights are read. `q8_0` moves answers least.
+    /// On a CPU with AVX-512 VNNI, `q6_k` decodes about 1.3 times as fast
+    /// and shifts an expert's log-probabilities half again as far, and
+    /// `q4_k` about 1.7 times as fast and four times as far. On held-out
+    /// behavior tasks 82 answers of 113 passed their checks at `q8_0` and
+    /// 79 at `q4_k`, against the dense base's 85. `off` keeps the base
+    /// dense anywhere. Experts are never quantized.
     #[arg(long, env = "ANTUMBRA_SERVE_QUANT", default_value = "auto")]
     serve_quant: String,
     /// Whether an expert's answer is decoded several tokens a pass on a CPU:
