@@ -14,7 +14,7 @@
 
 #![cfg(feature = "models")]
 
-use antumbra_train::models::QwenCausalLm;
+use antumbra_train::models::{QwenCausalLm, Together};
 use antumbra_train::{CausalLm, RaftConfig};
 use candle_core::Device;
 
@@ -92,5 +92,37 @@ async fn requests_decoded_together_answer_as_alone() -> Outcome<()> {
         ));
     }
     eprintln!("{report}");
+
+    // Requests that arrive while others are being answered join at the next
+    // pass, and every answer is still the answer alone.
+    let mut together = Together::default();
+    let mut places = Vec::new();
+    for prompt in &PROMPTS[..2] {
+        let place = model.admit(&mut together, prompt, 0, 0)?;
+        places.push(place.ok_or("a request was not taken in")?);
+    }
+    for _ in 0..10 {
+        model.advance(&mut together)?;
+    }
+    for prompt in &PROMPTS[2..] {
+        let place = model.admit(&mut together, prompt, 0, 0)?;
+        places.push(place.ok_or("a request was not taken in mid-flight")?);
+    }
+    let mut passes = 10;
+    while together.answering() > 0 {
+        model.advance(&mut together)?;
+        passes += 1;
+    }
+    for (i, place) in places.into_iter().enumerate() {
+        let answer = together
+            .take(place)
+            .ok_or("an ended request had no answer")?;
+        assert_eq!(
+            answer, alone[i],
+            "request {i}, two of four joining ten passes in"
+        );
+    }
+    assert_eq!(together.held(), 0, "every place is free again");
+    eprintln!("RESULT cpu batch {form}: two requests joined two others ten passes in; {passes} passes, every answer as alone");
     Ok(())
 }
