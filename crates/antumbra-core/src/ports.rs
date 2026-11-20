@@ -82,6 +82,15 @@ pub trait Serve: Send + Sync {
         true
     }
 
+    /// Whether [`Serve::act`] only waits, the generating being done on a
+    /// thread of the engine's own. A caller may then await it on a runtime
+    /// worker, and by dropping the call tell the engine no one waits for the
+    /// answer. `false`, the default, is an engine that computes inside the
+    /// call, which belongs on the blocking pool and runs to its end.
+    fn answers_from_its_own_thread(&self) -> bool {
+        false
+    }
+
     /// Register (or replace) an expert's adapter in the live engine, so a route
     /// to a freshly-minted expert (autonomous consolidation, training) serves
     /// without a restart. Default no-op for engines that pin a single adapter or

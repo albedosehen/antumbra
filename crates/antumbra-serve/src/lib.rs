@@ -97,6 +97,27 @@ fn blend_config(trained: &antumbra_train::RaftConfig) -> antumbra_train::RaftCon
 #[cfg(feature = "models")]
 const KEPT_BLENDS: usize = 8;
 
+/// Requests that may wait for the engine at once. One past it is refused
+/// with "busy" where it would have queued: at a few seconds an answer,
+/// thirty-two answered together, the last of this many waits about a
+/// minute, which is as long as a caller's patience is likely to be.
+#[cfg(feature = "models")]
+const WAITING_AT_MOST: usize = 256;
+
+/// Held by a call to [`MultiAdapterServe::act`] for as long as it waits:
+/// when the call ends, by an answer or by its future being dropped, the
+/// flag is set and the engine lets go of the request.
+#[cfg(feature = "models")]
+#[derive(Default)]
+struct Waiting(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+#[cfg(feature = "models")]
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// The resident model as the schedule drives it: loaded when it is first
 /// asked for, and the requests it is answering side by side.
 #[cfg(feature = "models")]
@@ -170,6 +191,10 @@ impl engine::Model for Resident {
         ended
     }
 
+    fn leave(&mut self, place: usize) {
+        self.together.leave(place);
+    }
+
     fn reset(&mut self) {
         self.together = antumbra_train::models::Together::default();
     }
@@ -222,7 +247,7 @@ fn serve_requests(
         runtime,
         seed: 0,
     };
-    let mut schedule = engine::Schedule::new(KEPT_BLENDS);
+    let mut schedule = engine::Schedule::new(KEPT_BLENDS, WAITING_AT_MOST);
     loop {
         if schedule.idle() {
             match jobs.recv() {
@@ -338,6 +363,10 @@ impl Serve for MultiAdapterServe {
             .insert(expert.clone(), adapter_uri.to_string());
     }
 
+    fn answers_from_its_own_thread(&self) -> bool {
+        true
+    }
+
     async fn act(
         &self,
         req: antumbra_core::ports::ActRequest,
@@ -368,7 +397,13 @@ impl Serve for MultiAdapterServe {
         // together, a pass over the weights for all of them. The request
         // goes to that thread and its answer comes back here.
         let (answer, answered) = tokio::sync::oneshot::channel();
+        // Set when this call ends, however it ends: a caller that hung up
+        // or timed out drops it with the future, and the engine stops
+        // decoding for a request no one waits for.
+        let waiting = Waiting::default();
+        let gone = waiting.0.clone();
         let job = engine::Job {
+            gone: Box::new(move || gone.load(std::sync::atomic::Ordering::Relaxed)),
             prompt: req.prompt,
             specs,
             reply: Box::new(move |result| {

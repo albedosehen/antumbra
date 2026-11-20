@@ -18,8 +18,29 @@ impl McpServer {
     /// (the full recall→route→serve surface). Escalates when nothing covers it
     /// or when no serving engine is configured.
     #[tool(
+        name = "answer",
         description = "Answer a task: route it across the shared population and your private experts, then generate a response through the covering expert's adapter, with your standing behaviors (for everywhere and for `repo`) composed in. Escalates if nothing covers it. With `standing_only`, skip the routing and answer through your standing experts alone, to see what your behaviors do on their own."
     )]
+    pub(super) async fn answer_until_cancelled(
+        &self,
+        params: Parameters<AnswerParams>,
+        cancelled: tokio_util::sync::CancellationToken,
+    ) -> Result<Json<AnswerOut>, ErrorData> {
+        // A client that cancels the call, or whose session closes, is not
+        // answered: dropping the answer here is what tells the engine.
+        tokio::select! {
+            answer = self.answer(params) => answer,
+            () = cancelled.cancelled() => Err(ErrorData::internal_error(
+                "the request was cancelled before it was answered",
+                None,
+            )),
+        }
+    }
+}
+
+impl McpServer {
+    /// [`Self::answer_until_cancelled`] without the cancelling: what the REST
+    /// surface calls, where a client that hangs up drops the call itself.
     pub(super) async fn answer(
         &self,
         Parameters(p): Parameters<AnswerParams>,
@@ -82,13 +103,21 @@ impl McpServer {
         };
         let mut blend: Vec<ExpertId> = top.into_iter().collect();
         blend.extend(standing.iter().cloned());
-        // Generation is synchronous compute inside an `async fn`, like a train: it
-        // runs off the runtime's workers so other sessions' calls keep moving.
         let request = ActRequest::new(next_id("answer"), p.task, blend);
-        let out = heavy::spawn_heavy(async move { serve.act(request).await })
-            .await
-            .map_err(err)?
-            .map_err(err)?;
+        let out = if serve.answers_from_its_own_thread() {
+            // The engine generates on its own thread and this only waits, so
+            // it waits here: when this call is dropped, by a client that hung
+            // up or cancelled, the engine hears of it and stops decoding.
+            serve.act(request).await.map_err(err)?
+        } else {
+            // Generation is synchronous compute inside an `async fn`, like a
+            // train: it runs off the runtime's workers so other sessions'
+            // calls keep moving.
+            heavy::spawn_heavy(async move { serve.act(request).await })
+                .await
+                .map_err(err)?
+                .map_err(err)?
+        };
         Ok(Json(AnswerOut {
             answer: out.final_output,
             expert_id: Some(served_by.as_str().to_string()),
