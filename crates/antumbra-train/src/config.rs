@@ -80,7 +80,11 @@ impl ServeQuant {
     /// reads about 6 GB a token, so it serves quantized: from Q6_K where the
     /// CPU multiplies six-bit tiles ([`crate::device::six_bit_by_default`]), and
     /// from Q8_0 on any other, where Q6_K would go through slower kernels
-    /// than Q8_0 does. A GPU build keeps the dense base it trained on.
+    /// than Q8_0 does. A CUDA build keeps the dense base it trained on. A
+    /// Metal build serves as a build with no GPU does, from the CPU
+    /// ([`crate::device::serves_from_cpu`]), where a token is decoded at more
+    /// than twice the rate Metal decodes it from the dense base; `off` keeps
+    /// the dense base on Metal.
     ///
     /// No quantized form is the dense base. Q8_0 moves an expert least: over
     /// two experts' held-out positions (2078 and 865) its log-probabilities
@@ -97,7 +101,8 @@ impl ServeQuant {
     /// about 100 and about 290 of the first expert's 2078) moves by ten or
     /// twenty with nothing but the order a sum is added in.
     pub fn for_build() -> Option<Self> {
-        if cfg!(any(feature = "cuda", feature = "metal")) {
+        let on_gpu = cfg!(any(feature = "cuda", feature = "metal"));
+        if on_gpu && !crate::device::serves_from_cpu() {
             None
         } else if crate::device::six_bit_by_default() {
             Some(ServeQuant::Q6K)
@@ -438,14 +443,16 @@ mod tests {
         Ok(())
     }
 
-    /// A build with no GPU backend serves quantized unless told otherwise, and
-    /// a GPU build serves dense; either can be told.
+    /// A build that serves from the CPU serves quantized unless told
+    /// otherwise, and one that serves from its GPU serves dense; either can
+    /// be told.
     #[test]
     fn a_setting_names_the_build_default_a_dense_base_or_a_form() -> Result<()> {
         // On a CPU, Q6_K where it multiplies six-bit tiles and Q8_0 where it
         // does not.
         let build = ServeQuant::for_build();
-        if cfg!(any(feature = "cuda", feature = "metal")) {
+        let on_gpu = cfg!(any(feature = "cuda", feature = "metal"));
+        if on_gpu && !crate::device::serves_from_cpu() {
             assert_eq!(build, None);
         } else {
             let fast = crate::device::six_bit_by_default();

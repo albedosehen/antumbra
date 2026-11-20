@@ -91,6 +91,27 @@ pub fn six_bit_by_default() -> bool {
     }
 }
 
+/// Whether this build serves from the CPU's tiles though it has a GPU
+/// backend: a Metal build on a CPU that tiles. Measured on an Apple M4 Pro
+/// with a 1.5B base and one expert, the dense base on Metal decodes at 55
+/// tokens a second and the CPU's tiles at 135 from Q6_K and 174 from Q4_K;
+/// Metal reads a prompt faster than Q6_K (523 tokens a second against 380)
+/// and about as fast as Q4_K (562). An answer is mostly decoding. A CUDA
+/// build serves from its GPU.
+pub fn serves_from_cpu() -> bool {
+    cfg!(all(feature = "metal", not(feature = "cuda"))) && tiles()
+}
+
+/// The device a model is loaded on: the CPU for one served from a quantized
+/// base where [`serves_from_cpu`], and otherwise [`best_device`], which is
+/// where every model that trains goes.
+pub fn device_for(served_quantized: bool) -> candle_core::Result<Device> {
+    if served_quantized && serves_from_cpu() {
+        return Ok(Device::Cpu);
+    }
+    best_device()
+}
+
 /// The best available device: CUDA/Metal when the feature is on, else CPU.
 pub fn best_device() -> candle_core::Result<Device> {
     #[cfg(feature = "cuda")]
