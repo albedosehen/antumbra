@@ -1,7 +1,12 @@
 //! The sketch's kernels on aarch64: NEON with the dot-product instructions,
 //! four rows to a vector over the sketch the AVX-512 kernels read.
+//!
+//! Cutting a quarter's three-bit codes out of its bytes is six steps, and
+//! multiplying them by an input is one. So inputs read together go through
+//! one cutting, up to four of them, as rows of a six-bit weight do
+//! (`tiles_neon.rs`). An input read alone keeps the kernel it had.
 
-use super::{Row, Sketch, BLOCK, GROUP, LEVELS, ROWS};
+use super::{Places, Row, Sketch, BLOCK, GROUP, LEVELS, ROWS};
 use std::arch::aarch64::*;
 
 /// Which of a quarter's six bytes each of its sixteen three-bit fields is cut
@@ -97,6 +102,112 @@ pub(super) unsafe fn sixteens(
             top = vmaxq_f32(top, v);
         }
         *tops.add(t) = vmaxvq_f32(top);
+    }
+}
+
+/// Sixteen `t` of the sketch against the first `N` of `rows` at once: each
+/// row's sixteen products before the head's own scales, to the bit what
+/// [`sixteens`] comes to for the row alone at that step. The codes are cut
+/// out of their bytes once for the `N`.
+#[target_feature(enable = "neon,dotprod")]
+unsafe fn sixteen_of<const N: usize>(
+    sketch: &Sketch,
+    t: usize,
+    rows: &[Row],
+) -> [[float32x4_t; 4]; N] {
+    let (from, and_from) = (vld1q_u8(FROM.as_ptr()), vld1q_u8(AND_FROM.as_ptr()));
+    let (down, up) = (vld1q_s8(DOWN.as_ptr()), vld1q_s8(UP.as_ptr()));
+    let code = vdupq_n_u8(LEVELS as u8 - 1);
+    let blocks = sketch.cols / BLOCK;
+    let per = sketch.cols / 4 * GROUP;
+    let mut codes = sketch.codes.as_ptr().add(t * per);
+    let mut acc = [[vdupq_n_f32(0.0); 4]; N];
+    for b in 0..blocks {
+        let of: [(&[i8], f32, i32); N] = std::array::from_fn(|n| rows[n].block(b));
+        let act = of.map(|(act, _, _)| act.as_ptr());
+        let mut sums = [[vdupq_n_s32(0); 4]; N];
+        for g in 0..BLOCK / 4 {
+            let x =
+                act.map(|act| vreinterpretq_s8_s32(vld1q_dup_s32(act.add(4 * g) as *const i32)));
+            let group = codes.add(g * GROUP);
+            for k in 0..4 {
+                // A quarter is six bytes of the sixteen loaded, as in
+                // [`sixteens`].
+                let loaded = vld1q_u8(group.add(k * 6));
+                let low = vshlq_u8(vqtbl1q_u8(loaded, from), down);
+                let high = vshlq_u8(vqtbl1q_u8(loaded, and_from), up);
+                let q = vreinterpretq_s8_u8(vandq_u8(vorrq_u8(low, high), code));
+                for (sums, x) in sums.iter_mut().zip(x) {
+                    sums[k] = dot(sums[k], q, x);
+                }
+            }
+        }
+        codes = codes.add(BLOCK / 4 * GROUP);
+        for n in 0..N {
+            let (_, d, total) = of[n];
+            let off = vdupq_n_s32((LEVELS as i32 - 1) * total);
+            let by = vdupq_n_f32(d);
+            for k in 0..4 {
+                let centered = vsubq_s32(vshlq_n_s32::<1>(sums[n][k]), off);
+                acc[n][k] = vfmaq_f32(acc[n][k], vcvtq_f32_s32(centered), by);
+            }
+        }
+    }
+    acc
+}
+
+/// The sixteens `first..last` of the sketch against every one of `rows`,
+/// two or more of them: each row's products of them and their largest to
+/// its own of `places`, value for value what [`sixteens`] writes for the row
+/// alone. A sixteen goes by once for all the rows, four of them to a cutting
+/// of its codes, and what is left of them in a three, a two or a one.
+///
+/// SAFETY (for the caller): as [`sixteens`], for every row and its places.
+#[target_feature(enable = "neon,dotprod")]
+pub(super) unsafe fn sixteens_of_each(
+    sketch: &Sketch,
+    first: usize,
+    last: usize,
+    rows: &[Row],
+    places: &[Places],
+) {
+    let all = rows.len().min(places.len());
+    for t in first..last {
+        let mut done = 0;
+        while done < all {
+            let mut out = [[vdupq_n_f32(0.0); 4]; 4];
+            let n = match all - done {
+                4.. => {
+                    out = sixteen_of::<4>(sketch, t, &rows[done..]);
+                    4
+                }
+                3 => {
+                    out[..3].copy_from_slice(&sixteen_of::<3>(sketch, t, &rows[done..]));
+                    3
+                }
+                2 => {
+                    out[..2].copy_from_slice(&sixteen_of::<2>(sketch, t, &rows[done..]));
+                    2
+                }
+                _ => {
+                    out[..1].copy_from_slice(&sixteen_of::<1>(sketch, t, &rows[done..]));
+                    1
+                }
+            };
+            for (acc, place) in out[..n].iter().zip(&places[done..]) {
+                let mut top = vdupq_n_f32(f32::NEG_INFINITY);
+                for (k, acc) in acc.iter().enumerate() {
+                    let v = vmulq_f32(
+                        *acc,
+                        vld1q_f32(sketch.scales.as_ptr().add(t * ROWS + k * 4)),
+                    );
+                    vst1q_f32(place.products.add(t * ROWS + k * 4), v);
+                    top = vmaxq_f32(top, v);
+                }
+                *place.tops.add(t) = vmaxvq_f32(top);
+            }
+            done += n;
+        }
     }
 }
 
