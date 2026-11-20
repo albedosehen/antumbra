@@ -15,10 +15,10 @@ use candle_core::Device;
 pub fn tiles() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        is_x86_feature_detected!("avx512f")
-            && is_x86_feature_detected!("avx512bw")
-            && is_x86_feature_detected!("avx512vnni")
-            && is_x86_feature_detected!("f16c")
+        wide_tiles()
+            || (is_x86_feature_detected!("avx2")
+                && is_x86_feature_detected!("fma")
+                && is_x86_feature_detected!("f16c"))
     }
     #[cfg(target_arch = "aarch64")]
     {
@@ -33,13 +33,36 @@ pub fn tiles() -> bool {
     }
 }
 
+/// Whether this x86-64 CPU multiplies through the AVX-512 kernels: AVX-512
+/// F, BW and VNNI, and F16C. The others that tile multiply through AVX2.
+///
+/// `ANTUMBRA_CPU_KERNELS=avx2` holds a CPU that has AVX-512 to the AVX2
+/// kernels, read once when first asked: for measuring one tier against the
+/// other on one machine, and for testing the AVX2 kernels on a runner that
+/// would not otherwise reach them.
+#[cfg(target_arch = "x86_64")]
+pub fn wide_tiles() -> bool {
+    static WIDE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *WIDE.get_or_init(|| {
+        let held_to_avx2 = std::env::var("ANTUMBRA_CPU_KERNELS")
+            .is_ok_and(|kernels| kernels.trim().eq_ignore_ascii_case("avx2"));
+        !held_to_avx2
+            && is_x86_feature_detected!("avx512f")
+            && is_x86_feature_detected!("avx512bw")
+            && is_x86_feature_detected!("avx512vnni")
+            && is_x86_feature_detected!("f16c")
+    })
+}
+
 /// Whether this CPU multiplies six-bit tiles as well. On x86-64 their values
 /// are unpacked with AVX-512 VBMI, which the first CPUs with VNNI (Cascade
 /// Lake) lack; on aarch64 every CPU that tiles does.
 pub fn six_bit_tiles() -> bool {
     #[cfg(target_arch = "x86_64")]
     {
-        tiles() && is_x86_feature_detected!("avx512vbmi")
+        // Through AVX-512 VBMI where the CPU has it, and through AVX2 where
+        // it does not.
+        tiles()
     }
     #[cfg(target_arch = "aarch64")]
     {
@@ -49,6 +72,22 @@ pub fn six_bit_tiles() -> bool {
     #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         false
+    }
+}
+
+/// Whether six bits is the form this CPU serves from when nothing says
+/// otherwise: where it was measured to decode faster than Q8_0, which is
+/// through AVX-512 VBMI and through NEON. Through AVX2 the six-bit tiles
+/// multiply, and `--serve-quant q6_k` serves from them, but their rate
+/// beside Q8_0's is not yet measured there, so the default stays Q8_0.
+pub fn six_bit_by_default() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        wide_tiles() && is_x86_feature_detected!("avx512vbmi")
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        six_bit_tiles()
     }
 }
 

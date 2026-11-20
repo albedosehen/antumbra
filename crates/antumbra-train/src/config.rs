@@ -78,7 +78,7 @@ impl ServeQuant {
     /// How this build serves on this machine when nothing says otherwise. A
     /// build with no GPU backend serves on the CPU, where the dense f32 base
     /// reads about 6 GB a token, so it serves quantized: from Q6_K where the
-    /// CPU multiplies six-bit tiles ([`crate::device::six_bit_tiles`]), and
+    /// CPU multiplies six-bit tiles ([`crate::device::six_bit_by_default`]), and
     /// from Q8_0 on any other, where Q6_K would go through slower kernels
     /// than Q8_0 does. A GPU build keeps the dense base it trained on.
     ///
@@ -99,7 +99,7 @@ impl ServeQuant {
     pub fn for_build() -> Option<Self> {
         if cfg!(any(feature = "cuda", feature = "metal")) {
             None
-        } else if crate::device::six_bit_tiles() {
+        } else if crate::device::six_bit_by_default() {
             Some(ServeQuant::Q6K)
         } else {
             Some(ServeQuant::Q8_0)
@@ -448,7 +448,7 @@ mod tests {
         if cfg!(any(feature = "cuda", feature = "metal")) {
             assert_eq!(build, None);
         } else {
-            let fast = crate::device::six_bit_tiles();
+            let fast = crate::device::six_bit_by_default();
             assert_eq!(
                 build,
                 Some(if fast {
