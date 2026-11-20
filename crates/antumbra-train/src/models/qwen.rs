@@ -610,6 +610,21 @@ impl QwenCausalLm {
         crate::compose::set_blend(&vars, specs)
     }
 
+    /// Keep a blend of experts beside the one that is loaded, as blend
+    /// `blend` (one or more): [`QwenCausalLm::generate_each_of`] answers a
+    /// request with it while other requests in the same pass are answered
+    /// with others. The blend is loaded as [`QwenCausalLm::load_blend`]
+    /// loads it and its factors are kept as rows read them; the blend that
+    /// was loaded before is no longer, so load it again, or keep it too.
+    /// `false`, with the blend loaded and nothing kept, where this model
+    /// does not read rows as plain values (a GPU, a dense base, a CPU with
+    /// no tiles): there one blend is served at a time.
+    pub fn keep_blend(&mut self, blend: u16, specs: &[(String, f32)]) -> Result<bool> {
+        self.load_blend(specs)?;
+        self.model.set_grad(false);
+        self.model.keep_blend(blend).map_err(ce)
+    }
+
     /// Wrap a raw prompt in the Qwen chat template for an `-Instruct` base, so
     /// the model is prompted the way it was tuned (a `user` turn, then the open
     /// `assistant` turn it completes). A plain base sees the prompt unchanged.
@@ -747,14 +762,26 @@ impl QwenCausalLm {
     /// they took to read, and the tokens decoded after each sequence's first
     /// over the time the shared passes took.
     pub fn generate_each(&mut self, prompts: &[&str], seed: u64) -> Result<Vec<String>> {
+        let of: Vec<(&str, u16)> = prompts.iter().map(|prompt| (*prompt, 0)).collect();
+        self.generate_each_of(&of, seed)
+    }
+
+    /// [`QwenCausalLm::generate_each`] with a blend of experts for each
+    /// prompt: 0 for the blend that is loaded, or one kept with
+    /// [`QwenCausalLm::keep_blend`]. Each answer is the one its prompt gets
+    /// alone from a model that has that blend loaded. The base's weights
+    /// are read once for every request in a pass whatever their blends;
+    /// each request reads its own blend's factors beside them.
+    pub fn generate_each_of(&mut self, prompts: &[(&str, u16)], seed: u64) -> Result<Vec<String>> {
         // Sequences one pass takes at most; more are answered a run at a time.
         const AT_ONCE: usize = 32;
         if prompts.len() > AT_ONCE {
             let mut answers = Vec::with_capacity(prompts.len());
             let mut timing = GenTiming::default();
             for (run, some) in prompts.chunks(AT_ONCE).enumerate() {
-                answers
-                    .extend(self.generate_each(some, seed.wrapping_add((run * AT_ONCE) as u64))?);
+                answers.extend(
+                    self.generate_each_of(some, seed.wrapping_add((run * AT_ONCE) as u64))?,
+                );
                 if let Some(t) = self.timing {
                     timing.prompt_tokens += t.prompt_tokens;
                     timing.prompt_secs += t.prompt_secs;
@@ -777,14 +804,16 @@ impl QwenCausalLm {
         struct Sequence {
             tokens: Vec<u32>,
             prompt_len: usize,
+            blend: u16,
             rng: StdRng,
             done: bool,
         }
         let mut timing = GenTiming::default();
         let mut all = Vec::with_capacity(prompts.len());
-        for (i, prompt) in prompts.iter().enumerate() {
+        for (i, (prompt, blend)) in prompts.iter().enumerate() {
             let tokens = self.encode(&self.wrap_prompt(prompt))?;
             let mut sequence = Sequence {
+                blend: *blend,
                 prompt_len: tokens.len(),
                 tokens,
                 rng: StdRng::seed_from_u64(seed.wrapping_add(i as u64)),
@@ -794,7 +823,7 @@ impl QwenCausalLm {
             let began = std::time::Instant::now();
             let stepped = self
                 .model
-                .step_in(i, &sequence.tokens, 0, first)
+                .step_in(i, *blend, &sequence.tokens, 0, first)
                 .map_err(ce)?;
             let next = match stepped {
                 Some(Stepped::First(next)) => next,
@@ -808,7 +837,12 @@ impl QwenCausalLm {
                     // This model reads no rows this way: one prompt after
                     // another, as it always has.
                     let mut answers = Vec::with_capacity(prompts.len());
-                    for (i, prompt) in prompts.iter().enumerate() {
+                    if prompts.iter().any(|(_, blend)| *blend != 0) {
+                        return Err(AntumbraError::other(
+                            "a kept blend was asked for of a model that keeps none: it reads no rows as plain values",
+                        ));
+                    }
+                    for (i, (prompt, _)) in prompts.iter().enumerate() {
                         answers.push(self.sample_one(prompt, seed.wrapping_add(i as u64))?);
                     }
                     return Ok(answers);
@@ -833,6 +867,7 @@ impl QwenCausalLm {
                         sequence: i,
                         token: *token,
                         position: s.tokens.len() - 1,
+                        blend: s.blend,
                     })
                 })
                 .collect();
