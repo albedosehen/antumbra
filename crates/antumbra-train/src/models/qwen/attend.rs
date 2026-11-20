@@ -421,18 +421,16 @@ fn attend_alone(
 }
 
 /// Rows at most whose attention is shared out a run of positions at a time,
-/// as one row's is. More rows than this are a prompt's, as many as there are
-/// cores or more, and each is a unit of work of its own.
+/// as one row's is. More rows than this are as many as there are cores or
+/// more, a prompt's or a full pass of requests', and each is a unit of work
+/// of its own.
 const ROWS_BY_RUNS: usize = 16;
 
-/// [`attend`] for `rows` query positions that were read together, the last
-/// `rows` positions in `store`: row `i` attends to the positions before it
-/// and its own. `q` and `out` hold a row's heads one after another, row
-/// after row. Each row is computed as [`attend`] computes it, to the bit:
-/// the same runs of positions, summed in the same order. A few rows, as a
-/// decode pass carries, have their runs shared out among the cores, so no
-/// core reads a row's whole cache alone; a prompt's many rows are a unit of
-/// work each.
+/// [`attend`] for `rows` query positions of one sequence that were read
+/// together, the last `rows` positions in `store`: row `i` attends to the
+/// positions before it and its own. `q` and `out` hold a row's heads one
+/// after another, row after row. Each row is computed as [`attend`] computes
+/// it, to the bit ([`attend_each`]).
 pub(super) fn attend_rows(
     q: &[f32],
     rows: usize,
@@ -448,60 +446,42 @@ pub(super) fn attend_rows(
             store.len()
         )
     }
-    let (per, before) = (q.len() / rows, store.len() - rows);
-    let kernels = kernels(store.dim());
-    if rows <= ROWS_BY_RUNS {
-        return attend_by_runs(kernels, q, rows, store, out, work);
-    }
-    // Checked once here, so a row's own check cannot fail in the dispatch.
-    Cut::of(per, per, store, before + 1)?;
-    let places = Scores(out.as_mut_ptr());
-    let failed: Mutex<Option<candle_core::Error>> = Mutex::new(None);
-    let run = |first: usize, last: usize| {
-        let places = &places;
-        let mut work = Work::default();
-        for row in first..last {
-            // SAFETY: row `row`'s attended values are its own `per` values
-            // of `out`, which no other unit writes.
-            let out = unsafe { std::slice::from_raw_parts_mut(places.0.add(row * per), per) };
-            let q = &q[row * per..(row + 1) * per];
-            if let Err(err) = attend_alone(kernels, q, store, before + row + 1, out, &mut work) {
-                *failed.lock().unwrap_or_else(PoisonError::into_inner) = Some(err);
-            }
-        }
-    };
-    dispatch(
-        &[Phase {
-            units: rows,
-            most: 1,
-            run: &run,
-            then: None,
-        }],
-        rows == 1,
-    );
-    match failed.into_inner().unwrap_or_else(PoisonError::into_inner) {
-        Some(err) => Err(err),
-        None => Ok(()),
-    }
+    let before = store.len() - rows;
+    let each: Vec<(&KvStore, usize)> = (0..rows).map(|row| (store, before + row + 1)).collect();
+    attend_each(q, &each, out, work)
 }
 
-/// [`attend`] for one query position from each of several sequences: row
-/// `i` of `q` attends to every position in `stores[i]`, its own sequence's
-/// cache, and its attended values are row `i` of `out`. Each row is one unit
-/// of work and is computed as [`attend`] computes it, to the bit.
-pub(super) fn attend_each(q: &[f32], stores: &[&KvStore], out: &mut [f32]) -> Result<()> {
-    let rows = stores.len();
-    if rows == 0 || !q.len().is_multiple_of(rows) || out.len() != q.len() {
+/// [`attend`] for several query positions read in one pass, each against a
+/// cache of its own or the beginning of one: row `i` of `q` attends to the
+/// first `rows[i].1` positions of `rows[i].0`, and its attended values are
+/// row `i` of `out`. A row from each of several sequences is that, each
+/// against the whole of its sequence's cache; several rows of one sequence
+/// are too, each against the cache up to its own position; and so is a pass
+/// that carries both. Each row is computed as [`attend`] computes it over
+/// those positions, to the bit: the same runs of positions, summed in the
+/// same order. A few rows have their runs shared out among the cores, so no
+/// core reads a row's whole cache alone; many rows are a unit of work each.
+pub(super) fn attend_each(
+    q: &[f32],
+    rows: &[(&KvStore, usize)],
+    out: &mut [f32],
+    work: &mut Work,
+) -> Result<()> {
+    let n = rows.len();
+    if n == 0 || !q.len().is_multiple_of(n) || out.len() != q.len() {
         bail!(
-            "decode attention: {rows} sequences against a query of {} values into {}",
+            "decode attention: {n} rows against a query of {} values into {}",
             q.len(),
             out.len()
         )
     }
-    let per = q.len() / rows;
+    if n <= ROWS_BY_RUNS {
+        return attend_by_runs(q, rows, out, work);
+    }
+    let per = q.len() / n;
     // Checked once here, so a row's own check cannot fail in the dispatch.
-    for store in stores {
-        Cut::of(per, per, store, store.len())?;
+    for (store, len) in rows {
+        Cut::of(per, per, store, *len)?;
     }
     let places = Scores(out.as_mut_ptr());
     let failed: Mutex<Option<candle_core::Error>> = Mutex::new(None);
@@ -509,12 +489,12 @@ pub(super) fn attend_each(q: &[f32], stores: &[&KvStore], out: &mut [f32]) -> Re
         let places = &places;
         let mut work = Work::default();
         for row in first..last {
-            let store = stores[row];
+            let (store, len) = rows[row];
             // SAFETY: row `row`'s attended values are its own `per` values
             // of `out`, which no other unit writes.
             let out = unsafe { std::slice::from_raw_parts_mut(places.0.add(row * per), per) };
             let q = &q[row * per..(row + 1) * per];
-            let alone = attend_alone(kernels(store.dim()), q, store, store.len(), out, &mut work);
+            let alone = attend_alone(kernels(store.dim()), q, store, len, out, &mut work);
             if let Err(err) = alone {
                 *failed.lock().unwrap_or_else(PoisonError::into_inner) = Some(err);
             }
@@ -522,7 +502,7 @@ pub(super) fn attend_each(q: &[f32], stores: &[&KvStore], out: &mut [f32]) -> Re
     };
     dispatch(
         &[Phase {
-            units: rows,
+            units: n,
             most: 1,
             run: &run,
             then: None,
@@ -535,38 +515,39 @@ pub(super) fn attend_each(q: &[f32], stores: &[&KvStore], out: &mut [f32]) -> Re
     }
 }
 
-/// [`attend_rows`] with every row's runs of positions as units of work: two
+/// [`attend_each`] with every row's runs of positions as units of work: two
 /// phases of one dispatch, every run's scores and then, each head's largest
 /// score for each row being known, every run's weighted values.
 fn attend_by_runs(
-    kernels: Kernels,
     q: &[f32],
-    rows: usize,
-    store: &KvStore,
+    rows: &[(&KvStore, usize)],
     out: &mut [f32],
     work: &mut Work,
 ) -> Result<()> {
-    let (per, before) = (q.len() / rows, store.len() - rows);
+    let per = q.len() / rows.len();
     // Each row's cut, and where its units, its scores and its sums start
     // among all the rows'.
-    let mut cuts = Vec::with_capacity(rows);
-    let mut starts = Vec::with_capacity(rows);
+    let mut cuts = Vec::with_capacity(rows.len());
+    let mut starts = Vec::with_capacity(rows.len());
     let (mut units, mut scored, mut summed) = (0, 0, 0);
-    for row in 0..rows {
-        let cut = Cut::of(per, per, store, before + row + 1)?;
+    for (store, len) in rows {
+        let cut = Cut::of(per, per, store, *len)?;
         starts.push((units, scored, summed));
         units += cut.units();
         scored += cut.heads * cut.len;
         summed += cut.units() * cut.room();
         cuts.push(cut);
     }
+    let (heads, rep) = (cuts[0].heads, cuts[0].rep);
+    if cuts.iter().any(|cut| (cut.heads, cut.rep) != (heads, rep)) {
+        bail!("decode attention: rows read together against caches of different heads")
+    }
     let Work { scores, sums } = work;
     scores.clear();
     scores.resize(scored, 0.0);
     sums.clear();
     sums.resize(summed, 0.0);
-    let (heads, rep) = (cuts[0].heads, cuts[0].rep);
-    let most: Vec<AtomicU32> = (0..rows * heads)
+    let most: Vec<AtomicU32> = (0..rows.len() * heads)
         .map(|_| AtomicU32::new(f32::NEG_INFINITY.to_bits()))
         .collect();
     let at = Scores(scores.as_mut_ptr());
@@ -581,13 +562,13 @@ fn attend_by_runs(
         let mut top = vec![0f32; rep];
         for unit in first..last {
             let (row, u) = of(unit);
-            let cut = &cuts[row];
+            let (cut, store) = (&cuts[row], rows[row].0);
             // SAFETY: the kernels were chosen for this CPU and this `dim`;
             // the row's scores were given room for every head and position
             // just above; and a unit is taken by one thread.
             unsafe {
                 cut.score(
-                    kernels,
+                    kernels(store.dim()),
                     &q[row * per..(row + 1) * per],
                     store,
                     u,
@@ -605,7 +586,7 @@ fn attend_by_runs(
         let mut top = vec![0f32; heads];
         for unit in first..last {
             let (row, u) = of(unit);
-            let cut = &cuts[row];
+            let (cut, store) = (&cuts[row], rows[row].0);
             for (top, slot) in top.iter_mut().zip(&most[row * heads..(row + 1) * heads]) {
                 *top = f32::from_bits(slot.load(Ordering::Acquire));
             }
@@ -614,7 +595,7 @@ fn attend_by_runs(
             unsafe {
                 let room = rooms.part(starts[row].2 + u * cut.room(), cut.room());
                 cut.weigh(
-                    kernels,
+                    kernels(store.dim()),
                     store,
                     u,
                     at.0.add(starts[row].1).cast_const(),
@@ -819,6 +800,69 @@ mod tests {
             attend_rows(&[0f32; 32], 0, &store, &mut out[..32], &mut Work::default()).is_err(),
             "no rows"
         );
+        Ok(())
+    }
+
+    /// Rows read in one pass against caches of their own, and against the
+    /// beginnings of them, each attend as they would alone over those
+    /// positions: a row from each of three sequences, two more rows of the
+    /// second after its first, and then as many rows as are a core's each.
+    #[test]
+    fn rows_of_several_caches_attend_as_each_would_alone() -> Result<()> {
+        let dev = Device::Cpu;
+        let (kv_heads, n_rep, d) = (2, 6, 128);
+        let heads = kv_heads * n_rep;
+        let made = |len: usize| -> Result<(Tensor, Tensor)> {
+            Ok((
+                Tensor::randn(0f32, 1.0, (1, kv_heads, len, d), &dev)?,
+                Tensor::randn(0f32, 1.0, (1, kv_heads, len, d), &dev)?,
+            ))
+        };
+        let caches = [made(70)?, made(5)?, made(301)?];
+        let stores = [
+            stored(&caches[0].0, &caches[0].1)?,
+            stored(&caches[1].0, &caches[1].1)?,
+            stored(&caches[2].0, &caches[2].1)?,
+        ];
+        // The cache each row reads and how much of it.
+        let few = vec![(0usize, 70usize), (1, 3), (1, 4), (1, 5), (2, 301)];
+        let many: Vec<(usize, usize)> = (0..ROWS_BY_RUNS + 3)
+            .map(|i| (i % 3, 1 + (i * 37) % [70, 5, 301][i % 3]))
+            .collect();
+        for rows in [few, many] {
+            let q = Tensor::randn(0f32, 1.0, (rows.len(), heads * d), &dev)?;
+            let q = q.flatten_all()?.to_vec1::<f32>()?;
+            let each: Vec<(&KvStore, usize)> = rows
+                .iter()
+                .map(|(cache, len)| (&stores[*cache], *len))
+                .collect();
+            let mut together = vec![0f32; q.len()];
+            attend_each(&q, &each, &mut together, &mut Work::default())?;
+            for (row, (cache, len)) in rows.iter().enumerate() {
+                let (k, v) = &caches[*cache];
+                let store = stored(&k.narrow(2, 0, *len)?, &v.narrow(2, 0, *len)?)?;
+                let mut alone = vec![0f32; heads * d];
+                let query = &q[row * heads * d..(row + 1) * heads * d];
+                attend(query, &store, &mut alone, &mut Work::default())?;
+                assert_eq!(
+                    &together[row * heads * d..(row + 1) * heads * d],
+                    alone.as_slice(),
+                    "row {row} of {}: {len} positions of cache {cache}",
+                    rows.len()
+                );
+            }
+        }
+        let mut out = vec![0f32; heads * d];
+        let q = vec![0f32; heads * d];
+        assert!(
+            attend_each(&q, &[(&stores[1], 6)], &mut out, &mut Work::default()).is_err(),
+            "more positions than the cache holds"
+        );
+        assert!(
+            attend_each(&q, &[(&stores[1], 0)], &mut out, &mut Work::default()).is_err(),
+            "no positions"
+        );
+        assert!(attend_each(&q, &[], &mut out, &mut Work::default()).is_err());
         Ok(())
     }
 
