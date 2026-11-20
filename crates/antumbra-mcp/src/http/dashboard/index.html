@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="dashboard/app.css">
 <script src="dashboard/app.js" defer></script>
 <script src="dashboard/behaviors.js" defer></script>
+<script src="dashboard/shell.js" defer></script>
 </head>
 <body>
 
@@ -31,34 +32,168 @@
   </div>
 </main>
 
-<div id="app" hidden>
-  <header class="bar">
+<div id="app" class="shell" hidden>
+  <a class="skip" href="#main">Skip to the page</a>
+  <aside class="side">
     <div class="brand">
       <svg class="mark" viewBox="84 84 344 344" aria-hidden="true">
-        <path class="mark-ring" fill-rule="evenodd" d="M420 256a164 164 0 1 1-328 0a164 164 0 1 1 328 0ZM366 244a122 122 0 1 0-244 0a122 122 0 1 0 244 0Z"/>
-        <circle class="mark-dot" cx="148.5" cy="148.5" r="24"/>
-      </svg>
+          <path class="mark-ring" fill-rule="evenodd" d="M420 256a164 164 0 1 1-328 0a164 164 0 1 1 328 0ZM366 244a122 122 0 1 0-244 0a122 122 0 1 0 244 0Z"/>
+          <circle class="mark-dot" cx="148.5" cy="148.5" r="24"/>
+        </svg>
       <h1>Antumbra</h1>
     </div>
-    <p class="who"><span id="who"></span> <span id="expires" class="muted"></span></p>
-    <div class="actions">
-      <span id="updated" class="muted small" aria-live="polite"></span>
-      <a class="nav-link" href="relics">Relics</a>
-      <button id="refresh" type="button" class="quiet">Refresh</button>
-      <button id="signout" type="button" class="quiet">Sign out</button>
-    </div>
-  </header>
+    <nav class="nav" aria-label="Pages">
+      <p class="nav-group">Workspace</p>
+        <a class="nav-item" href="#/overview" data-nav="overview"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z"/></svg><span>Overview</span></a>
+        <a class="nav-item" href="#/memory" data-nav="memory"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.2c0-1 2.5-1.7 5.5-1.7s5.5.7 5.5 1.7v7.6c0 1-2.5 1.7-5.5 1.7s-5.5-.7-5.5-1.7zM2.5 4.2c0 1 2.5 1.7 5.5 1.7s5.5-.7 5.5-1.7M2.5 8c0 1 2.5 1.7 5.5 1.7s5.5-.7 5.5-1.7"/></svg><span>Memory</span></a>
+        <a class="nav-item" href="#/behaviors" data-nav="behaviors"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3 3 7-7.5"/></svg><span>Behaviors</span><span id="nav-proposed" class="count" hidden></span></a>
+        <a class="nav-item" href="#/experts" data-nav="experts"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="5.5" r="2.5"/><path d="M3 13.5c.6-2.4 2.6-3.6 5-3.6s4.4 1.2 5 3.6"/></svg><span>Experts</span></a>
+        <a class="nav-item" href="#/dependencies" data-nav="dependencies"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.5"/><circle cx="12.5" cy="3.5" r="1.5"/><circle cx="12.5" cy="12.5" r="1.5"/><path d="M5 7.3l6-3.100M5 8.7l6 3.100"/></svg><span>Dependencies</span></a>
+        <a class="nav-item" href="#/knowledge" data-nav="knowledge"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5h5.5l2.5 2.5v8.5H4zM9.5 2.5v2.5H12M6 8h4M6 10.5h4"/></svg><span>Knowledge</span></a>
+        <a class="nav-item" href="relics"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5L8 2.5l5.5 3v5L8 13.5l-5.5-3zM2.5 5.5L8 8.5l5.5-3M8 8.5v5"/></svg><span>Relics</span></a>
+      <p class="nav-group">You</p>
+        <a class="nav-item" href="#/account" data-nav="account"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="6.5" r="1.8"/><path d="M4.6 12.2c.7-1.5 1.900-2.2 3.400-2.2s2.7.7 3.400 2.2"/></svg><span>Account</span></a>
+        <a class="nav-item" href="#/devices" data-nav="devices"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v7h-11zM6 13.5h4M8 10.5v3"/></svg><span>Devices</span><span id="nav-handoffs" class="count" hidden></span></a>
+      <p class="nav-group">Workspace settings</p>
+        <a class="nav-item" href="#/settings" data-nav="settings"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/></svg><span>Policy</span></a>
+    </nav>
+    <a class="side-user" href="#/account">
+      <span class="avatar" data-initials aria-hidden="true"></span>
+      <span class="side-user-text">
+        <span class="side-user-name" data-user-name></span>
+        <span class="side-user-org" data-workspace-name></span>
+      </span>
+    </a>
+  </aside>
 
-  <main class="page">
-    <section aria-labelledby="h-overview">
-      <h2 id="h-overview" class="visually-hidden">Overview</h2>
-      <dl id="stats" class="stats"></dl>
-    </section>
+  <div class="main">
+    <header class="bar">
+      <p class="crumbs"><span id="who" class="crumb-org"></span><span class="crumb-sep" aria-hidden="true">/</span><span id="crumb-page" class="crumb-page"></span></p>
+      <form id="jump" class="jump" role="search">
+        <input id="jump-query" type="search" placeholder="Search memory" aria-label="Search memory" aria-keyshortcuts="/">
+        <kbd aria-hidden="true">/</kbd>
+      </form>
+      <div class="actions">
+        <span id="updated" class="muted small" aria-live="polite"></span>
+        <button id="refresh" type="button" class="quiet">Refresh</button>
+        <div class="menu">
+          <button id="user-button" type="button" class="avatar-button" aria-haspopup="true" aria-expanded="false" aria-controls="user-menu" aria-label="Your account">
+            <span class="avatar" data-initials aria-hidden="true"></span>
+          </button>
+          <div id="user-menu" class="menu-list" hidden>
+            <div class="menu-who">
+              <p class="menu-name" data-user-name></p>
+              <p class="menu-org muted small" data-workspace-name></p>
+              <p id="expires" class="muted small"></p>
+            </div>
+            <a class="menu-item" href="#/account">Account</a>
+            <a class="menu-item" href="#/devices">Devices and handoffs</a>
+            <button id="signout" type="button" class="menu-item">Sign out</button>
+          </div>
+        </div>
+      </div>
+    </header>
 
-    <div class="row">
+    <main id="main" class="page" tabindex="-1">
+      <div class="view" data-view="overview" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Overview</h2>
+          <p class="view-lede">What this workspace holds, and what is waiting for you.</p>
+        </header>
+        <section aria-labelledby="h-overview">
+          <h3 id="h-overview" class="visually-hidden">Totals</h3>
+          <dl id="stats" class="stats"></dl>
+        </section>
+        <div class="row">
+          <section aria-labelledby="h-attention">
+            <div class="section-head">
+              <h3 id="h-attention">Waiting for you</h3>
+            </div>
+            <div class="panel">
+              <ul id="attention" class="list"></ul>
+            </div>
+            <div class="section-head section-next">
+              <h3 id="h-your-devices">Your devices</h3>
+              <a class="small" href="#/devices">Devices and handoffs</a>
+            </div>
+            <div class="panel">
+              <ul id="devices-brief" class="list"></ul>
+            </div>
+          </section>
+          <section aria-labelledby="h-recent">
+            <div class="section-head">
+              <h3 id="h-recent">Latest memories</h3>
+              <a class="small" href="#/memory">All memory</a>
+            </div>
+            <div class="panel">
+              <ul id="recent" class="list"></ul>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="view" data-view="memory" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Memory</h2>
+          <p class="view-lede">What your agents stored: recall by meaning, or list it all.</p>
+        </header>
+        <section aria-labelledby="h-memory">
+      <div class="section-head">
+        <h3 id="h-memory">Recall and browse</h3>
+        <p id="memory-summary" class="muted small" aria-live="polite"></p>
+      </div>
+      <form id="recall" class="recall" role="search">
+        <input id="query" name="query" type="search" placeholder="Recall by meaning" aria-label="What to recall">
+        <fieldset class="segmented">
+          <legend class="visually-hidden">Network</legend>
+          <input id="net-all" type="radio" name="network" value="" checked><label for="net-all">All</label>
+          <input id="net-world" type="radio" name="network" value="world"><label for="net-world">World</label>
+          <input id="net-bank" type="radio" name="network" value="bank"><label for="net-bank">Bank</label>
+          <input id="net-opinion" type="radio" name="network" value="opinion"><label for="net-opinion">Opinion</label>
+        </fieldset>
+        <button type="submit">Recall</button>
+        <button id="browse" type="button" class="quiet">List all</button>
+      </form>
+      <p id="memory-note" class="note small" hidden></p>
+      <ol id="memories" class="memories"></ol>
+      <button id="more" type="button" class="quiet more" hidden></button>
+        </section>
+      </div>
+
+      <div class="view" data-view="behaviors" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Behaviors</h2>
+          <p class="view-lede">How you told an agent to act. Accept one and your expert is taught it; retire one and it trains nothing.</p>
+        </header>
+        <section aria-labelledby="h-behaviors">
+      <div class="section-head">
+        <h3 id="h-behaviors">By status</h3>
+        <p id="behaviors-summary" class="muted small" aria-live="polite"></p>
+      </div>
+      <form id="behaviors-filter" class="recall" role="search">
+        <fieldset class="segmented">
+          <legend class="visually-hidden">Status</legend>
+          <input id="beh-proposed" type="radio" name="status" value="proposed" checked><label for="beh-proposed">Proposed</label>
+          <input id="beh-accepted" type="radio" name="status" value="accepted"><label for="beh-accepted">Accepted</label>
+          <input id="beh-trained" type="radio" name="status" value="trained"><label for="beh-trained">Trained</label>
+          <input id="beh-retired" type="radio" name="status" value="retired"><label for="beh-retired">Retired</label>
+          <input id="beh-all" type="radio" name="status" value=""><label for="beh-all">All</label>
+        </fieldset>
+      </form>
+      <div class="panel">
+        <ul id="behaviors" class="list behaviors"></ul>
+      </div>
+        </section>
+      </div>
+
+      <div class="view" data-view="experts" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Experts</h2>
+          <p class="view-lede">The experts that answer for this workspace, and which would take a task.</p>
+        </header>
       <section aria-labelledby="h-population">
         <div class="section-head">
-          <h2 id="h-population">Population</h2>
+          <h3 id="h-population">Population</h3>
           <p id="population-summary" class="muted small"></p>
         </div>
         <div id="population" class="panel">
@@ -84,33 +219,16 @@
         </form>
         <div id="routed" class="routed" aria-live="polite"></div>
       </section>
-
-      <div class="stack">
-        <section aria-labelledby="h-compartments">
-          <div class="section-head">
-            <h2 id="h-compartments">Compartments</h2>
-          </div>
-          <div class="panel">
-            <ul id="compartments" class="list"></ul>
-          </div>
-        </section>
-
-        <section aria-labelledby="h-documents">
-          <div class="section-head">
-            <h2 id="h-documents">Documents</h2>
-            <p id="documents-summary" class="muted small"></p>
-          </div>
-          <div class="panel">
-            <ul id="documents" class="list"></ul>
-          </div>
-          <button id="documents-more" type="button" class="link more" hidden></button>
-        </section>
       </div>
-    </div>
 
-    <section aria-labelledby="h-dependencies">
+      <div class="view" data-view="dependencies" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Dependencies</h2>
+          <p class="view-lede">Which service depends on which, and what a change to one would reach.</p>
+        </header>
+        <section aria-labelledby="h-dependencies">
       <div class="section-head">
-        <h2 id="h-dependencies">Dependencies</h2>
+        <h3 id="h-dependencies">Graph and pairs</h3>
         <p id="dependencies-summary" class="muted small" aria-live="polite"></p>
       </div>
       <form id="radius" class="recall" role="search">
@@ -144,50 +262,166 @@
       </figure>
       <div id="dependencies" class="panel"></div>
       <button id="pairs-more" type="button" class="link more" hidden></button>
-    </section>
+        </section>
+      </div>
 
-    <section aria-labelledby="h-behaviors">
-      <div class="section-head">
-        <h2 id="h-behaviors">Behaviors</h2>
-        <p id="behaviors-summary" class="muted small" aria-live="polite"></p>
+      <div class="view" data-view="knowledge" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Knowledge</h2>
+          <p class="view-lede">The documents ingested here and the compartments memory is kept in.</p>
+        </header>
+        <div class="row even">
+        <section aria-labelledby="h-documents">
+          <div class="section-head">
+            <h3 id="h-documents">Documents</h3>
+            <p id="documents-summary" class="muted small"></p>
+          </div>
+          <div class="panel">
+            <ul id="documents" class="list"></ul>
+          </div>
+          <button id="documents-more" type="button" class="link more" hidden></button>
+        </section>
+        <section aria-labelledby="h-compartments">
+          <div class="section-head">
+            <h3 id="h-compartments">Compartments</h3>
+          </div>
+          <div class="panel">
+            <ul id="compartments" class="list"></ul>
+          </div>
+        </section>
+        </div>
       </div>
-      <form id="behaviors-filter" class="recall" role="search">
-        <fieldset class="segmented">
-          <legend class="visually-hidden">Status</legend>
-          <input id="beh-proposed" type="radio" name="status" value="proposed" checked><label for="beh-proposed">Proposed</label>
-          <input id="beh-accepted" type="radio" name="status" value="accepted"><label for="beh-accepted">Accepted</label>
-          <input id="beh-trained" type="radio" name="status" value="trained"><label for="beh-trained">Trained</label>
-          <input id="beh-retired" type="radio" name="status" value="retired"><label for="beh-retired">Retired</label>
-          <input id="beh-all" type="radio" name="status" value=""><label for="beh-all">All</label>
-        </fieldset>
-      </form>
-      <div class="panel">
-        <ul id="behaviors" class="list behaviors"></ul>
-      </div>
-    </section>
 
-    <section aria-labelledby="h-memory">
-      <div class="section-head">
-        <h2 id="h-memory">Memory</h2>
-        <p id="memory-summary" class="muted small" aria-live="polite"></p>
+      <div class="view" data-view="account" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Account</h2>
+          <p class="view-lede">Who you are signed in as, and how this dashboard looks for you.</p>
+        </header>
+        <section aria-labelledby="h-identity">
+          <div class="section-head">
+            <h3 id="h-identity">Identity</h3>
+          </div>
+          <div class="panel profile">
+            <span class="avatar avatar-large" data-initials aria-hidden="true"></span>
+            <div class="profile-text">
+              <p class="profile-name" data-user-name></p>
+              <p class="muted" data-workspace-name></p>
+              <p id="role" class="tags"></p>
+            </div>
+          </div>
+          <dl id="identity" class="facts panel"></dl>
+        </section>
+        <section aria-labelledby="h-token">
+          <div class="section-head">
+            <h3 id="h-token">This sign-in</h3>
+            <p class="muted small">The token is kept in this tab only.</p>
+          </div>
+          <div class="panel token">
+            <dl id="token-facts" class="facts"></dl>
+            <div class="token-life">
+              <div id="token-bar" class="life" role="img"><span id="token-spent" class="life-spent"></span></div>
+              <p id="token-left" class="muted small"></p>
+            </div>
+            <div class="token-actions">
+              <button id="signout-here" type="button" class="quiet">Sign out</button>
+            </div>
+          </div>
+        </section>
+        <section aria-labelledby="h-preferences">
+          <div class="section-head">
+            <h3 id="h-preferences">Preferences</h3>
+            <p class="muted small">Kept in this browser.</p>
+          </div>
+          <form id="preferences" class="panel prefs">
+            <div class="pref">
+              <div>
+                <p class="pref-name" id="pref-theme">Theme</p>
+                <p class="muted small">Follow the system, or hold one.</p>
+              </div>
+              <fieldset class="segmented" aria-labelledby="pref-theme">
+                <input id="theme-system" type="radio" name="theme" value="system" checked><label for="theme-system">System</label>
+                <input id="theme-light" type="radio" name="theme" value="light"><label for="theme-light">Light</label>
+                <input id="theme-dark" type="radio" name="theme" value="dark"><label for="theme-dark">Dark</label>
+              </fieldset>
+            </div>
+            <div class="pref">
+              <div>
+                <p class="pref-name" id="pref-density">Density</p>
+                <p class="muted small">How much room rows and panels take.</p>
+              </div>
+              <fieldset class="segmented" aria-labelledby="pref-density">
+                <input id="density-comfortable" type="radio" name="density" value="comfortable" checked><label for="density-comfortable">Comfortable</label>
+                <input id="density-compact" type="radio" name="density" value="compact"><label for="density-compact">Compact</label>
+              </fieldset>
+            </div>
+            <div class="pref">
+              <div>
+                <p class="pref-name" id="pref-home">Opening page</p>
+                <p class="muted small">Where the dashboard starts.</p>
+              </div>
+              <fieldset class="segmented" aria-labelledby="pref-home">
+                <input id="home-overview" type="radio" name="home" value="overview" checked><label for="home-overview">Overview</label>
+                <input id="home-memory" type="radio" name="home" value="memory"><label for="home-memory">Memory</label>
+                <input id="home-behaviors" type="radio" name="home" value="behaviors"><label for="home-behaviors">Behaviors</label>
+              </fieldset>
+            </div>
+          </form>
+        </section>
       </div>
-      <form id="recall" class="recall" role="search">
-        <input id="query" name="query" type="search" placeholder="Recall by meaning" aria-label="What to recall">
-        <fieldset class="segmented">
-          <legend class="visually-hidden">Network</legend>
-          <input id="net-all" type="radio" name="network" value="" checked><label for="net-all">All</label>
-          <input id="net-world" type="radio" name="network" value="world"><label for="net-world">World</label>
-          <input id="net-bank" type="radio" name="network" value="bank"><label for="net-bank">Bank</label>
-          <input id="net-opinion" type="radio" name="network" value="opinion"><label for="net-opinion">Opinion</label>
-        </fieldset>
-        <button type="submit">Recall</button>
-        <button id="browse" type="button" class="quiet">List all</button>
-      </form>
-      <p id="memory-note" class="note small" hidden></p>
-      <ol id="memories" class="memories"></ol>
-      <button id="more" type="button" class="quiet more" hidden></button>
-    </section>
-  </main>
+
+      <div class="view" data-view="devices" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Devices and handoffs</h2>
+          <p class="view-lede">The machines your agents run on, and the notes one left for another.</p>
+        </header>
+        <section aria-labelledby="h-devices">
+          <div class="section-head">
+            <h3 id="h-devices">Devices</h3>
+            <p id="devices-summary" class="muted small"></p>
+          </div>
+          <div class="panel">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Device</th>
+                    <th scope="col">Role</th>
+                    <th scope="col">Backend</th>
+                    <th scope="col">Last seen</th>
+                  </tr>
+                </thead>
+                <tbody id="devices"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+        <section aria-labelledby="h-handoffs">
+          <div class="section-head">
+            <h3 id="h-handoffs">Handoffs</h3>
+            <p id="handoffs-summary" class="muted small" aria-live="polite"></p>
+          </div>
+          <div class="panel">
+            <ul id="handoffs" class="list handoffs"></ul>
+          </div>
+        </section>
+      </div>
+
+      <div class="view" data-view="settings" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Policy</h2>
+          <p class="view-lede">How this workspace keeps, links and teaches what it remembers. An operator changes these from the console.</p>
+        </header>
+        <section aria-labelledby="h-policy">
+          <div class="section-head">
+            <h3 id="h-policy">Workspace policy</h3>
+            <p id="policy-summary" class="muted small"></p>
+          </div>
+          <div id="policy" class="policy"></div>
+        </section>
+      </div>
+
+    </main>
+  </div>
 </div>
 
 </body>

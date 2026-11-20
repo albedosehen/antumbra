@@ -1,6 +1,13 @@
 //! The web dashboard: a browser surface over the same tools an agent calls.
-//! It reads, but for the two decisions a user makes on a behavior drawn
-//! from their memories: accept it, so their expert learns it, or retire it.
+//! It reads, but for the decisions that are a user's own: a behavior drawn
+//! from their memories is accepted, so their expert learns it, or retired; and
+//! a handoff one of their machines left for another is marked done.
+//!
+//! It is one page with several views, the address's fragment naming the one
+//! showing: the workspace's (Overview, Memory, Behaviors, Experts,
+//! Dependencies, Knowledge, Policy) and the user's own (Account, Devices and
+//! handoffs). How it looks for a user (theme, density, opening page) is kept
+//! in their browser and nowhere else.
 //!
 //! The server hands out the page, its script and its style, and nothing else.
 //! None of them carries data, so they need no token. Everything the page shows
@@ -21,6 +28,10 @@ const SCRIPT: &str = include_str!("dashboard/app.js");
 /// The Behaviors section, in its own file so the main script stays readable;
 /// loaded after it and sharing its helpers.
 const BEHAVIORS: &str = include_str!("dashboard/behaviors.js");
+/// The shell: which page shows, the user's own pages (Account, Devices and
+/// handoffs), the workspace's policy and what the Overview says is waiting.
+/// Loaded last, sharing the helpers of the two before it.
+const SHELL: &str = include_str!("dashboard/shell.js");
 const STYLE: &str = include_str!("dashboard/app.css");
 /// The relics gallery and viewer (`/relics`, `/relic/<slug>`): one script and
 /// one style for both pages, self-contained because the dashboard's script
@@ -48,6 +59,10 @@ pub(super) fn routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
         )
         .route("/dashboard/app.js", get(script))
         .route("/dashboard/behaviors.js", get(behaviors))
+        .route(
+            "/dashboard/shell.js",
+            get(|| async { asset("text/javascript; charset=utf-8", SHELL) }),
+        )
         .route("/dashboard/app.css", get(style))
         .route(
             "/dashboard/relics.js",
@@ -109,6 +124,7 @@ mod tests {
             ("/dashboard", "text/html"),
             ("/dashboard/app.js", "text/javascript"),
             ("/dashboard/behaviors.js", "text/javascript"),
+            ("/dashboard/shell.js", "text/javascript"),
             ("/dashboard/app.css", "text/css"),
             ("/dashboard/relics.js", "text/javascript"),
             ("/dashboard/relics.css", "text/css"),
@@ -146,6 +162,8 @@ mod tests {
         assert!(!PAGE.contains("onclick") && !PAGE.contains("onload"));
         assert!(PAGE.contains(r#"src="dashboard/app.js""#));
         assert!(PAGE.contains(r#"src="dashboard/behaviors.js""#));
+        assert!(PAGE.contains(r#"src="dashboard/shell.js""#));
+        assert!(SHELL.contains("function startShell"));
         assert!(PAGE.contains(r#"href="dashboard/app.css""#));
         // The main script starts the page only once every deferred script has
         // run, since the sections in their own files define what it loads.
@@ -162,6 +180,7 @@ mod tests {
             ("app.js", SCRIPT),
             ("behaviors.js", BEHAVIORS),
             ("relics.js", RELICS_SCRIPT),
+            ("shell.js", SHELL),
         ] {
             for sink in [
                 "innerHTML",
