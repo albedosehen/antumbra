@@ -14,7 +14,7 @@ env:
 jobs:
   pace:
     name: scratch, time the NEON rows (not for merge)
-    runs-on: macos-latest  # Apple silicon: NEON with the dot product
+    runs-on: macos-latest  # Apple silicon, NEON with the dot product
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.96.0
@@ -22,9 +22,12 @@ jobs:
         run: |
           sysctl -n machdep.cpu.brand_string
           sysctl -n hw.ncpu hw.memsize hw.l1dcachesize hw.l2cachesize
-      - name: the kernels' own tests, optimized
-        run: cargo test -p antumbra-train --features models --release --lib -- tiles:: sketch::
+      - name: the tests of the two kernels, optimized
+        run: |
+          cargo test -p antumbra-train --features models --release --lib -- tiles sketch
       - name: pace, first run
-        run: cargo test -p antumbra-train --features models --release --lib pace_ -- --ignored --nocapture --test-threads=1
+        run: |
+          cargo test -p antumbra-train --features models --release --lib pace_ -- --ignored --nocapture --test-threads=1
       - name: pace, second run
-        run: cargo test -p antumbra-train --features models --release --lib pace_ -- --ignored --nocapture --test-threads=1
+        run: |
+          cargo test -p antumbra-train --features models --release --lib pace_ -- --ignored --nocapture --test-threads=1
