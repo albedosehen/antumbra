@@ -1185,6 +1185,98 @@ mod tests {
         Ok(())
     }
 
+    /// SCRATCH, not for merge: several inputs through the sketch a row after
+    /// another (as before) and through the kernel that cuts once for up to
+    /// four (as now), turn and turn about on one thread, the best of the
+    /// rounds kept for each.
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    #[ignore]
+    fn pace_of_sketch_rows() -> Result<()> {
+        use std::time::Instant;
+        let small = std::env::var("PACE_SMALL").is_ok();
+        let heads: &[(usize, &str)] = if small {
+            &[(1024, "in the cache")]
+        } else {
+            &[(1024, "in the cache"), (32768, "past the cache")]
+        };
+        let cols = 1536;
+        for &(rows, what) in heads {
+            let w = normals(7, rows * cols);
+            let Some(sketch) = sketched(&w, rows, cols)? else {
+                bail!("nothing is sketched on this CPU")
+            };
+            drop(w);
+            let sixteens = rows / ROWS;
+            for inputs in [1usize, 2, 3, 4, 5, 8] {
+                let given: Vec<Row> = (0..inputs)
+                    .map(|i| quantized(&normals(100 + i as u64, cols)))
+                    .collect();
+                let mut products = vec![vec![0f32; rows]; inputs];
+                let mut tops = vec![vec![0f32; sixteens]; inputs];
+                let places: Vec<Places> = products
+                    .iter_mut()
+                    .zip(tops.iter_mut())
+                    .map(|(products, tops)| Places {
+                        products: products.as_mut_ptr(),
+                        tops: tops.as_mut_ptr(),
+                    })
+                    .collect();
+                // The sixteens go by in the runs a unit of the dispatch
+                // claims.
+                let run = (tiles::CLAIM / (cols / 4 * sketch.layout.group())).max(1);
+                let once = |alone: bool| {
+                    let start = Instant::now();
+                    for first in (0..sixteens).step_by(run) {
+                        let last = (first + run).min(sixteens);
+                        // SAFETY: a sketch was made, so the CPU has the
+                        // kernels' features; every row holds the sketch's
+                        // columns and has room of its own.
+                        unsafe {
+                            if alone {
+                                for (row, place) in given.iter().zip(&places) {
+                                    kernels::sixteens(
+                                        &sketch,
+                                        first,
+                                        last,
+                                        row,
+                                        place.products,
+                                        place.tops,
+                                    );
+                                }
+                            } else {
+                                sixteens_of_each(&sketch, first, last, &given, &places);
+                            }
+                        }
+                    }
+                    start.elapsed().as_secs_f64()
+                };
+                let first = once(true).max(once(false)).max(1e-9);
+                let reps = ((0.02 / first) as usize).clamp(1, 2000);
+                let (mut alone, mut together) = (f64::MAX, f64::MAX);
+                for _ in 0..(if small { 2 } else { 9 }) {
+                    let mut a = 0.0;
+                    for _ in 0..reps {
+                        a += once(true);
+                    }
+                    let mut t = 0.0;
+                    for _ in 0..reps {
+                        t += once(false);
+                    }
+                    alone = alone.min(a / reps as f64);
+                    together = together.min(t / reps as f64);
+                }
+                eprintln!(
+                    "pace sketch {rows}x{cols} ({what}), {inputs} inputs: a row after another {:.1} us, sharing {:.1} us, ratio {:.3}",
+                    alone * 1e6,
+                    together * 1e6,
+                    together / alone
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// What does not fit is not sketched, and a sketch refuses a row or
     /// dense rows that are not its own.
     #[test]

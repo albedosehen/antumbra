@@ -1,185 +1,30 @@
 name: ci
 
+# SCRATCH, not for merge. This branch exists to time two NEON kernels on the
+# Apple-silicon runner, which no other machine at hand can run. It replaces
+# the whole workflow with the one job, so the pull request that carries it
+# runs nothing else, and it is closed once the figures are read.
+
 on:
-  push:
-    branches: [main]
   pull_request:
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    name: fmt + clippy + test
-    runs-on: ubuntu-latest
-    env:
-      # This job links roughly thirty test binaries, each statically embedding
-      # the whole SurrealDB stack. At the default `debug = 2` the DWARF dwarfs
-      # the code and target/ outgrows the runner's disk, at which point lld --
-      # which writes its output through an mmap -- dies with SIGBUS rather than
-      # anything that says "no space left". That was this job's failure for a
-      # month: `collect2: fatal error: ld terminated with signal 7 [Bus error]`.
-      #
-      # Line tables keep file and line in panic backtraces, which is what a
-      # test failure actually needs, at a fraction of full debug info. Set here
-      # rather than in Cargo.toml so a local `cargo build` keeps its variables.
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
-    steps:
-      - uses: actions/checkout@v4
-      # The image ships toolchains this workspace never uses, and they are the
-      # difference between fitting on disk and not.
-      - name: reclaim runner disk
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
-          sudo docker image prune --all --force || true
-          df -h /
-      # Pinned to match rust-toolchain.toml so fmt/clippy are deterministic and
-      # never drift from local. Bump both together when moving to a newer Rust.
-      - uses: dtolnay/rust-toolchain@1.96.0
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: rustfmt
-        run: cargo fmt --all --check
-      - name: clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: test
-        run: cargo test --workspace
-      # Runs even when the build died, so a recurrence says whether disk was
-      # the reason instead of leaving the next reader to infer it from SIGBUS.
-      - name: disk after build
-        if: always()
-        run: df -h / && du -sh target 2>/dev/null || true
-
-  models-build:
-    name: candle model build + clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.96.0
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      # Compile AND lint the candle Qwen2.5-Coder + LoRA stack and everything
-      # gated on `models` (serving, the MCP consolidation trigger, the CLI train
-      # command). No run — training/inference needs a GPU — but `-D warnings`
-      # keeps the model path from drifting, since the default-feature clippy above
-      # never sees it.
-      - name: clippy --features models
-        run: cargo clippy -p antumbra-train -p antumbra-serve -p antumbra-mcp -p antumbra-cli --features models --all-targets -- -D warnings
-      # The row kernels are held to their plain twins by the trainer crate's
-      # unit tests, which load no model: once through whatever this runner's
-      # CPU has, and once held to AVX2, which a runner with AVX-512 would not
-      # otherwise reach.
-      - name: test the kernels
-        run: cargo test -p antumbra-train --features models --lib
-      - name: test the kernels, held to AVX2
-        run: cargo test -p antumbra-train --features models --lib
-        env:
-          ANTUMBRA_CPU_KERNELS: avx2
-
-  models-arm:
-    name: candle model kernels on aarch64
+  pace:
+    name: scratch, time the NEON rows (not for merge)
     runs-on: macos-latest  # Apple silicon: NEON with the dot product
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.96.0
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      # The tile kernels have an aarch64 half that no x86-64 runner compiles.
-      # Lint it, and run the trainer crate's unit tests, which hold every
-      # kernel to its plain twin; nothing here loads a model.
-      - name: clippy --features models
-        run: cargo clippy -p antumbra-train --features models --all-targets -- -D warnings
-      - name: test --features models
-        run: cargo test -p antumbra-train --features models --lib
-
-  hooks:
-    name: agent hook scripts
-    runs-on: ubuntu-latest  # jq + curl preinstalled — exercises the POSIX .sh path
-    steps:
-      - uses: actions/checkout@v4
-      - name: syntax check (bash -n)
-        run: for f in scripts/hooks/*.sh; do bash -n "$f"; done
-      - name: capture hook reminds as feedback and not as a block, then fires once
+      - name: what the runner is
         run: |
-          out=$(printf '%s' '{"session_id":"ci","hook_event_name":"Stop"}' | bash scripts/hooks/antumbra-capture.sh)
-          echo "$out" | jq -e '(has("decision") | not) and .hookSpecificOutput.hookEventName == "Stop"' > /dev/null
-          # The same turn fires once: a second call clears the sentinel and is silent.
-          printf '%s' '{"session_id":"ci2","hook_event_name":"Stop"}' | bash scripts/hooks/antumbra-capture.sh > /dev/null
-          again=$(printf '%s' '{"session_id":"ci2","hook_event_name":"Stop"}' | bash scripts/hooks/antumbra-capture.sh)
-          test -z "$again"
-      - name: capture reports the end of a turn, once (.sh)
-        run: bash scripts/hooks/tests/capture.sh
-      - name: capture reports the end of a turn, once (.ps1)
-        run: pwsh -NoProfile -File scripts/hooks/tests/capture.ps1
-      - name: strip-attribution denies vendor attribution and allows a clean command, over one list of cases (.sh)
-        run: bash scripts/hooks/tests/strip-attribution.sh
-      - name: strip-attribution denies vendor attribution and allows a clean command, over one list of cases (.ps1)
-        run: pwsh -NoProfile -File scripts/hooks/tests/strip-attribution.ps1
-      - name: session-start emits valid additionalContext (no server → cold bootstrap)
-        run: |
-          ctx=$(printf '%s' '{}' | ANTUMBRA_URL=http://127.0.0.1:1 bash scripts/hooks/antumbra-session-start.sh)
-          echo "$ctx" | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' > /dev/null
-      - name: session-start stays under the agent's limit and says what is different first (.sh)
-        run: bash scripts/hooks/tests/session-start.sh
-      - name: session-start stays under the agent's limit and says what is different first (.ps1)
-        run: pwsh -NoProfile -File scripts/hooks/tests/session-start.ps1
-      - name: prompt-recall recalls for a prompt, not for a task notification (.sh)
-        run: bash scripts/hooks/tests/prompt-recall.sh
-      - name: prompt-recall recalls for a prompt, not for a task notification (.ps1)
-        run: pwsh -NoProfile -File scripts/hooks/tests/prompt-recall.ps1
-      - name: mcp-headers sends the bearer and names this machine (.sh)
-        run: bash scripts/hooks/tests/mcp-headers.sh
-      - name: mcp-headers sends the bearer and names this machine (.ps1)
-        run: pwsh -NoProfile -File scripts/hooks/tests/mcp-headers.ps1
-      - name: the OpenCode plugin does the three touchpoints, as 1.x and as 2.x call it
-        run: node --test scripts/hooks/tests/opencode-plugin.test.mjs
-
-  audit:
-    name: cargo audit (advisories)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.96.0
-      - uses: taiki-e/install-action@cargo-audit
-      # Scans the committed Cargo.lock against the RustSec advisory DB. Fails on a
-      # known vulnerability; triage an unfixable transitive one with `--ignore
-      # RUSTSEC-XXXX` (or move it into an audit.toml) rather than dropping the gate.
-      - name: cargo audit
-        run: cargo audit
-      # The control server is its own cargo workspace with its own lockfile, so
-      # the scan above never sees it. Run from the root so `.cargo/audit.toml`
-      # applies to both.
-      - name: cargo audit (control server)
-        run: cargo audit --file crates/antumbra-control-server/Cargo.lock
-
-  control-server:
-    name: control server (own workspace, contract gate)
-    runs-on: ubuntu-latest
-    env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.96.0
-        with:
-          components: rustfmt, clippy
-      # The hosted control plane is its own cargo workspace (root Cargo.toml
-      # `exclude`). Its `contract` feature pulls oneiriq-kayak from crates.io
-      # like every other dependency, so this job needs no token either.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: crates/antumbra-control-server
-      - name: rustfmt
-        working-directory: crates/antumbra-control-server
-        run: cargo fmt --all --check
-      - name: clippy (default features, then contract)
-        working-directory: crates/antumbra-control-server
-        run: |
-          cargo clippy --all-targets -- -D warnings
-          cargo clippy --all-targets --features contract -- -D warnings
-      - name: test (contract drift gate included)
-        working-directory: crates/antumbra-control-server
-        run: cargo test --features contract
+          sysctl -n machdep.cpu.brand_string
+          sysctl -n hw.ncpu hw.memsize hw.l1dcachesize hw.l2cachesize
+      - name: the kernels' own tests, optimized
+        run: cargo test -p antumbra-train --features models --release --lib -- tiles:: sketch::
+      - name: pace, first run
+        run: cargo test -p antumbra-train --features models --release --lib pace_ -- --ignored --nocapture --test-threads=1
+      - name: pace, second run
+        run: cargo test -p antumbra-train --features models --release --lib pace_ -- --ignored --nocapture --test-threads=1

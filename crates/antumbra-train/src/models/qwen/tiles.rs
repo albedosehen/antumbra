@@ -1808,6 +1808,70 @@ mod tests {
         Ok(())
     }
 
+    /// SCRATCH, not for merge: rows of a six-bit weight with the leftover
+    /// rows a row at a time (as before) and through one cutting (as now), turn
+    /// and turn about on one thread, the best of the rounds kept for each.
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    #[ignore]
+    fn pace_of_six_bit_rows() -> Result<()> {
+        use std::sync::atomic::Ordering::Relaxed;
+        use std::time::Instant;
+        let small = std::env::var("PACE_SMALL").is_ok();
+        let weights: &[(usize, usize, &str)] = if small {
+            &[(64, 1536, "in the cache")]
+        } else {
+            &[
+                (256, 1536, "in the cache"),
+                (1536, 1536, "an attention weight"),
+                (8960, 1536, "an MLP weight"),
+            ]
+        };
+        for &(rows_w, cols, what) in weights {
+            let (Some(tiled), _) = weight(rows_w, cols, GgmlDType::Q6K)? else {
+                bail!("Q6K was not tiled")
+            };
+            let xs: Vec<f32> = Tensor::randn(0f32, 1.0, 8 * cols, &Device::Cpu)?.to_vec1()?;
+            let rows = quantize_rows(&xs, cols);
+            for n in [1usize, 2, 3, 4, 5, 6, 7, 8] {
+                let mut out = vec![0f32; n * rows_w];
+                let mut once = |alone: bool| {
+                    kernels::LEFT_ALONE.store(alone, Relaxed);
+                    let start = Instant::now();
+                    // SAFETY: each row holds the weight's values, `out`
+                    // every row's products, and nothing else writes them.
+                    unsafe {
+                        tiled.multiply_sixteens(0, tiled.sixteens(), &rows[..n], out.as_mut_ptr())
+                    };
+                    start.elapsed().as_secs_f64()
+                };
+                let first = once(true).max(once(false)).max(1e-9);
+                let reps = ((0.02 / first) as usize).clamp(1, 2000);
+                let (mut alone, mut together) = (f64::MAX, f64::MAX);
+                for _ in 0..(if small { 2 } else { 9 }) {
+                    let mut a = 0.0;
+                    for _ in 0..reps {
+                        a += once(true);
+                    }
+                    let mut t = 0.0;
+                    for _ in 0..reps {
+                        t += once(false);
+                    }
+                    alone = alone.min(a / reps as f64);
+                    together = together.min(t / reps as f64);
+                }
+                kernels::LEFT_ALONE.store(false, Relaxed);
+                eprintln!(
+                    "pace tiles Q6_K {rows_w}x{cols} ({what}), {n} rows: leftovers alone {:.1} us, sharing {:.1} us, ratio {:.3}",
+                    alone * 1e6,
+                    together * 1e6,
+                    together / alone
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// What cannot be tiled is left to candle, and rows that do not fit the
     /// weights are refused rather than read out of bounds.
     #[test]
