@@ -42,12 +42,24 @@ pub(crate) fn blend_key(specs: &[(String, f32)]) -> BlendKey {
 /// Where a request's answer goes.
 pub(crate) type Reply = Box<dyn FnOnce(Result<String>) + Send>;
 
-/// One request: its prompt, the blend to answer it with, and where the
-/// answer goes.
+/// Whether whoever asked has stopped waiting for the answer.
+pub(crate) type Gone = Box<dyn Fn() -> bool + Send>;
+
+/// One request: its prompt, the blend to answer it with, where the answer
+/// goes, and whether anyone still waits for it.
 pub(crate) struct Job {
     pub(crate) prompt: String,
     pub(crate) specs: Specs,
     pub(crate) reply: Reply,
+    pub(crate) gone: Gone,
+}
+
+/// A request being answered: where its answer goes, the slot it reads, and
+/// whether anyone still waits for it.
+struct Answering {
+    reply: Reply,
+    slot: usize,
+    gone: Gone,
 }
 
 /// The resident model, as the schedule drives it.
@@ -61,6 +73,9 @@ pub(crate) trait Model {
     /// One pass for every request taken in: the places of those that ended
     /// in it, each with its answer.
     fn advance(&mut self) -> Result<Vec<(usize, String)>>;
+    /// Let go of the request at `place`, which no one waits for: it takes
+    /// no more tokens and its place is free.
+    fn leave(&mut self, place: usize);
     /// Let go of every request taken in, after a pass that failed.
     fn reset(&mut self);
     /// Answer one request by itself, with `specs` loaded.
@@ -81,27 +96,67 @@ struct Slot {
 pub(crate) struct Schedule {
     slots: Vec<Slot>,
     waiting: VecDeque<Job>,
-    /// By place: where the answer goes, and the slot the request reads.
-    answering: HashMap<usize, (Reply, usize)>,
+    /// How many may wait at once: one that would be past it is refused.
+    waiting_at_most: usize,
+    /// By place.
+    answering: HashMap<usize, Answering>,
     clock: u64,
     /// Whether the model keeps blends: not known until it is first asked to.
     keeps: Option<bool>,
 }
 
 impl Schedule {
-    /// A schedule over a model that keeps up to `slots` blends at once.
-    pub(crate) fn new(slots: usize) -> Self {
+    /// A schedule over a model that keeps up to `slots` blends at once, with
+    /// no more than `waiting_at_most` requests waiting to be taken in.
+    pub(crate) fn new(slots: usize, waiting_at_most: usize) -> Self {
         Self {
             slots: (0..slots.max(1)).map(|_| Slot::default()).collect(),
             waiting: VecDeque::new(),
+            waiting_at_most: waiting_at_most.max(1),
             answering: HashMap::new(),
             clock: 0,
             keeps: None,
         }
     }
 
+    /// A request joins those waiting, or is told the engine is busy when
+    /// as many wait as may: an answer that would come after hundreds of
+    /// others is better refused now than awaited.
     pub(crate) fn push(&mut self, job: Job) {
+        if self.waiting.len() >= self.waiting_at_most {
+            (job.reply)(Err(AntumbraError::other(format!(
+                "the serving engine is busy: {} requests already wait for it",
+                self.waiting.len()
+            ))));
+            return;
+        }
         self.waiting.push_back(job);
+    }
+
+    /// Requests waiting to be taken in.
+    #[cfg(test)]
+    fn waits(&self) -> usize {
+        self.waiting.len()
+    }
+
+    /// Requests no one waits for any more are let go of: one still waiting
+    /// is dropped, and one being answered gives up its place and its hold
+    /// on its blend's slot, where it would have taken tokens to its end for
+    /// nobody.
+    fn forget_the_gone(&mut self, model: &mut impl Model) {
+        self.waiting.retain(|job| !(job.gone)());
+        let left: Vec<usize> = self
+            .answering
+            .iter()
+            .filter(|(_, request)| (request.gone)())
+            .map(|(place, _)| *place)
+            .collect();
+        for place in left {
+            if let Some(request) = self.answering.remove(&place) {
+                self.slots[request.slot].users = self.slots[request.slot].users.saturating_sub(1);
+                model.leave(place);
+            }
+        }
     }
 
     /// Whether nothing waits and nothing is being answered.
@@ -131,6 +186,10 @@ impl Schedule {
     /// for those being answered. Each request that ends, or fails, is
     /// answered here.
     pub(crate) fn turn(&mut self, model: &mut impl Model) {
+        self.forget_the_gone(model);
+        if self.idle() {
+            return;
+        }
         if self.keeps == Some(false) {
             self.one_at_a_time(model);
             return;
@@ -183,7 +242,14 @@ impl Schedule {
                     self.clock += 1;
                     self.slots[at].last = self.clock;
                     self.slots[at].users += 1;
-                    self.answering.insert(place, (job.reply, at));
+                    self.answering.insert(
+                        place,
+                        Answering {
+                            reply: job.reply,
+                            slot: at,
+                            gone: job.gone,
+                        },
+                    );
                 }
                 Ok(None) => {
                     // No room for another: it and the rest wait for a place.
@@ -207,9 +273,10 @@ impl Schedule {
         match model.advance() {
             Ok(ended) => {
                 for (place, answer) in ended {
-                    if let Some((reply, at)) = self.answering.remove(&place) {
+                    if let Some(request) = self.answering.remove(&place) {
+                        let at = request.slot;
                         self.slots[at].users = self.slots[at].users.saturating_sub(1);
-                        reply(Ok(answer));
+                        (request.reply)(Ok(answer));
                     }
                 }
             }
@@ -217,9 +284,10 @@ impl Schedule {
                 // What the model holds of these requests is not to be
                 // trusted after a pass that failed: each is told, and let go.
                 let why = err.to_string();
-                for (_, (reply, at)) in self.answering.drain() {
+                for (_, request) in self.answering.drain() {
+                    let at = request.slot;
                     self.slots[at].users = self.slots[at].users.saturating_sub(1);
-                    reply(Err(AntumbraError::other(format!(
+                    (request.reply)(Err(AntumbraError::other(format!(
                         "a pass over the resident model failed: {why}"
                     ))));
                 }
@@ -231,6 +299,11 @@ impl Schedule {
     /// Every waiting request answered by itself, in order.
     fn one_at_a_time(&mut self, model: &mut impl Model) {
         while let Some(job) = self.waiting.pop_front() {
+            // One whose caller left while the others were answered is not
+            // answered for nobody.
+            if (job.gone)() {
+                continue;
+            }
             (job.reply)(model.alone(&job.prompt, &job.specs));
         }
     }
@@ -239,6 +312,7 @@ impl Schedule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, PoisonError};
 
     /// A model that answers a prompt with its blend's name and the prompt,
@@ -319,6 +393,11 @@ mod tests {
             Ok(ended)
         }
 
+        fn leave(&mut self, place: usize) {
+            self.places.remove(&place);
+            self.log.push(format!("leave {place}"));
+        }
+
         fn reset(&mut self) {
             self.places.clear();
             self.log.push("reset".into());
@@ -333,8 +412,15 @@ mod tests {
     type Answers = Arc<Mutex<Vec<(String, std::result::Result<String, String>)>>>;
 
     fn job(answers: &Answers, prompt: &str, blend: &str) -> Job {
+        job_of(answers, prompt, blend, &Arc::new(AtomicBool::new(false)))
+    }
+
+    /// A request whose caller has left once `gone` is set.
+    fn job_of(answers: &Answers, prompt: &str, blend: &str, gone: &Arc<AtomicBool>) -> Job {
         let (answers, id) = (answers.clone(), prompt.to_string());
+        let gone = gone.clone();
         Job {
+            gone: Box::new(move || gone.load(Ordering::Relaxed)),
             prompt: prompt.to_string(),
             specs: vec![(blend.to_string(), 1.0)],
             reply: Box::new(move |answer| {
@@ -368,7 +454,7 @@ mod tests {
     #[test]
     fn requests_of_different_blends_share_their_passes() -> Result<()> {
         let answers = Answers::default();
-        let (mut schedule, mut model) = (Schedule::new(4), Fake::keeping(8));
+        let (mut schedule, mut model) = (Schedule::new(4, 64), Fake::keeping(8));
         schedule.push(job(&answers, "a long one", "rust"));
         schedule.push(job(&answers, "middling", "git"));
         schedule.push(job(&answers, "hi", "rust"));
@@ -390,7 +476,7 @@ mod tests {
     #[test]
     fn a_request_joins_at_the_next_pass() -> Result<()> {
         let answers = Answers::default();
-        let (mut schedule, mut model) = (Schedule::new(4), Fake::keeping(8));
+        let (mut schedule, mut model) = (Schedule::new(4, 64), Fake::keeping(8));
         schedule.push(job(&answers, "a request of many letters", "rust"));
         schedule.turn(&mut model);
         schedule.turn(&mut model);
@@ -411,7 +497,7 @@ mod tests {
     #[test]
     fn a_blend_in_use_keeps_its_slot() -> Result<()> {
         let answers = Answers::default();
-        let (mut schedule, mut model) = (Schedule::new(2), Fake::keeping(8));
+        let (mut schedule, mut model) = (Schedule::new(2, 64), Fake::keeping(8));
         schedule.push(job(&answers, "first, and long", "a"));
         schedule.push(job(&answers, "second, long too", "b"));
         schedule.push(job(&answers, "third", "c"));
@@ -440,7 +526,7 @@ mod tests {
     #[test]
     fn a_request_waits_for_a_place() -> Result<()> {
         let answers = Answers::default();
-        let (mut schedule, mut model) = (Schedule::new(2), Fake::keeping(2));
+        let (mut schedule, mut model) = (Schedule::new(2, 64), Fake::keeping(2));
         for prompt in ["one", "two", "three", "four"] {
             schedule.push(job(&answers, prompt, "rust"));
         }
@@ -461,7 +547,7 @@ mod tests {
     #[test]
     fn a_model_that_keeps_no_blends_answers_one_at_a_time() -> Result<()> {
         let answers = Answers::default();
-        let (mut schedule, mut model) = (Schedule::new(4), Fake::default());
+        let (mut schedule, mut model) = (Schedule::new(4, 64), Fake::default());
         schedule.push(job(&answers, "one", "rust"));
         schedule.push(job(&answers, "two", "git"));
         run(&mut schedule, &mut model);
@@ -480,7 +566,7 @@ mod tests {
     #[test]
     fn a_failure_is_told_to_those_it_is_theirs() -> Result<()> {
         let answers = Answers::default();
-        let (mut schedule, mut model) = (Schedule::new(4), Fake::keeping(8));
+        let (mut schedule, mut model) = (Schedule::new(4, 64), Fake::keeping(8));
         schedule.push(job(&answers, "fine", "rust"));
         schedule.push(job(&answers, "lost", "broken"));
         run(&mut schedule, &mut model);
@@ -507,6 +593,81 @@ mod tests {
             answered(&answers),
             [("after".to_string(), Ok("rust: after".to_string()))]
         );
+        Ok(())
+    }
+
+    /// A request no one waits for stops taking tokens: its place goes to
+    /// the next request and it is never answered.
+    #[test]
+    fn a_request_whose_caller_left_gives_up_its_place() -> Result<()> {
+        let (mut schedule, mut model) = (Schedule::new(2, 64), Fake::keeping(1));
+        let answers = Answers::default();
+        let left = Arc::new(AtomicBool::new(false));
+        schedule.push(job_of(&answers, "a long answer", "a", &left));
+        schedule.push(job(&answers, "xy", "b"));
+        schedule.turn(&mut model);
+        assert_eq!(schedule.waits(), 1, "the one place is taken");
+        left.store(true, Ordering::Relaxed);
+        run(&mut schedule, &mut model);
+        assert_eq!(
+            answered(&answers),
+            vec![("xy".to_string(), Ok("b: xy".to_string()))]
+        );
+        assert!(
+            model.log.contains(&"leave 0".to_string()),
+            "{:?}",
+            model.log
+        );
+        // One pass for the first before its caller left, two for the second.
+        assert_eq!(
+            model.log.iter().filter(|l| l.starts_with("pass")).count(),
+            3
+        );
+        Ok(())
+    }
+
+    /// One that left while it waited is never read: its blend is not kept
+    /// and nothing is decoded for it, with or without kept blends.
+    #[test]
+    fn a_request_that_left_while_waiting_is_never_read() -> Result<()> {
+        for mut model in [Fake::keeping(8), Fake::default()] {
+            let mut schedule = Schedule::new(2, 64);
+            let answers = Answers::default();
+            let left = Arc::new(AtomicBool::new(true));
+            schedule.push(job_of(&answers, "nobody", "a", &left));
+            schedule.push(job(&answers, "xy", "b"));
+            run(&mut schedule, &mut model);
+            assert_eq!(
+                answered(&answers),
+                vec![("xy".to_string(), Ok("b: xy".to_string()))]
+            );
+            assert!(
+                model.log.iter().all(|l| !l.ends_with(" a")),
+                "{:?}",
+                model.log
+            );
+        }
+        Ok(())
+    }
+
+    /// No more wait than may: the one past the bound is told the engine is
+    /// busy, at once, and those within it are answered.
+    #[test]
+    fn a_request_past_the_bound_is_refused_at_once() -> Result<()> {
+        let (mut schedule, mut model) = (Schedule::new(2, 2), Fake::keeping(8));
+        let answers = Answers::default();
+        for prompt in ["ab", "cd", "ef"] {
+            schedule.push(job(&answers, prompt, "a"));
+        }
+        let refused = answered(&answers);
+        assert_eq!(refused.len(), 1);
+        assert_eq!(refused[0].0, "ef");
+        assert!(
+            matches!(&refused[0].1, Err(why) if why.contains("busy")),
+            "{refused:?}"
+        );
+        run(&mut schedule, &mut model);
+        assert_eq!(answered(&answers).len(), 3);
         Ok(())
     }
 }

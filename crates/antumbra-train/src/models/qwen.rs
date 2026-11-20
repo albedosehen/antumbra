@@ -362,6 +362,15 @@ impl Together {
         self.places.iter().flatten().count()
     }
 
+    /// Let go of the request at `place`, answered or not: it takes no more
+    /// tokens and its place is free for another, whose prompt is read into
+    /// a cache cleared for it.
+    pub fn leave(&mut self, place: usize) {
+        if let Some(slot) = self.places.get_mut(place) {
+            *slot = None;
+        }
+    }
+
     /// The answer of the request at `place`, once it has ended, and its
     /// place with it: free for another request from then on. `None` while
     /// it is still answering, or when no request is there.

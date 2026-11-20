@@ -113,10 +113,43 @@ async fn the_engine_answers_requests_together_as_it_answers_them_alone(
     for (i, (got, want)) in together.iter().zip(&alone).enumerate() {
         assert_eq!(got, want, "request {i} of eight at once");
     }
+
+    // The eight again, and the callers of every other one hang up a moment
+    // in: the four that stay are answered as alone, and sooner than when
+    // all eight were answered, since nothing is decoded for the four that
+    // left.
+    let started = Instant::now();
+    let mut asked = Vec::new();
+    for (i, (prompt, expert)) in requests.iter().enumerate() {
+        let (engine, expert) = (engine.clone(), experts[*expert].clone());
+        let prompt = PROMPTS[*prompt];
+        asked.push(tokio::spawn(async move {
+            engine
+                .act(ActRequest::new(format!("some-{i}"), prompt, vec![expert]))
+                .await
+        }));
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    for asked in asked.iter().skip(1).step_by(2) {
+        asked.abort();
+    }
+    for (i, asked) in asked.into_iter().enumerate().step_by(2) {
+        assert_eq!(
+            asked.await??.final_output,
+            alone[i],
+            "request {i}, with four callers gone"
+        );
+    }
+    let with_four_gone = started.elapsed().as_secs_f64();
+    assert!(
+        with_four_gone < at_once,
+        "four of eight answered in {with_four_gone:.2}s, all eight in {at_once:.2}s"
+    );
     let _ = std::fs::remove_dir_all(&dir);
     eprintln!(
         "RESULT cpu together {}: eight requests of two blends one after another {one_by_one:.2}s, \
-         at once {at_once:.2}s ({:.2} times as fast), every answer as alone",
+         at once {at_once:.2}s ({:.2} times as fast), every answer as alone; with four callers gone \
+         after 0.2s the other four in {with_four_gone:.2}s",
         quant.map_or("dense", ServeQuant::name),
         one_by_one / at_once
     );
