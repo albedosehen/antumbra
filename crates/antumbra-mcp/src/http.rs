@@ -311,6 +311,7 @@ pub async fn serve(
     behave_drift: String,
     source: Option<Arc<crate::server::pull::ExpertSource>>,
     serve_quant: &str,
+    serve_ahead: bool,
     sync: Option<sync::Settings>,
 ) -> Result<()> {
     let mut store = crate::connect(&url, &db).await?;
@@ -338,7 +339,7 @@ pub async fn serve(
     };
     // Built once here in owner mode (before any per-request signin), so it sees
     // the whole population; the answer tool's routing enforces per-session scope.
-    let serve = crate::build_serve(&store, &host, &recipe, serve_quant).await?;
+    let serve = crate::build_serve(&store, &host, &recipe, serve_quant, serve_ahead).await?;
     let state = Arc::new(HttpState {
         store,
         serving,

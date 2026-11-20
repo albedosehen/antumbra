@@ -164,6 +164,27 @@ struct Cli {
     /// Experts are never quantized.
     #[arg(long, env = "ANTUMBRA_SERVE_QUANT", default_value = "auto")]
     serve_quant: String,
+    /// Whether an expert's answer is decoded several tokens a pass on a CPU:
+    /// `on` or `off`. On, a pass over the weights carries, after the token in
+    /// hand, the tokens guessed to follow it, and keeps each that is the
+    /// model's own next token: the answer is the one a token at a time
+    /// writes, in fewer passes. The guesses come from what the model wrote
+    /// for earlier requests through the same experts, which the server
+    /// remembers while it runs, and from the request's own prompt. So a
+    /// request is answered faster where its answer resembles an earlier one
+    /// through the same experts, and several times faster where the very
+    /// prompt was answered before; a caller who can time answers through
+    /// those experts can tell that it was. `off` remembers nothing and
+    /// decodes a token a pass. It is only read ahead where the base is
+    /// served quantized on a CPU with the fast kernels.
+    #[arg(
+        long,
+        env = "ANTUMBRA_SERVE_AHEAD",
+        default_value_t = true,
+        action = clap::ArgAction::Set,
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    serve_ahead: bool,
     /// Shift every seeded stream a training draws from: the same set trained
     /// under another value is another draw, for measuring how much a training
     /// varies. 0, the default, is the stream every training has used.
@@ -441,6 +462,7 @@ async fn build_session(
     embedder: Arc<dyn Embedder>,
     recipe: antumbra_core::behavior::Recipe,
     serve_quant: &str,
+    serve_ahead: bool,
 ) -> Result<McpServer> {
     let store = connect(url, db).await?;
     let default_compartment = provision_identity(&store, &tenant, &user).await?;
@@ -448,7 +470,7 @@ async fn build_session(
     register_node(&store, &tenant, &user, &host).await;
     // The `answer` tool serves through the routed expert. Build the engine from
     // the session's visible population (one connection; embedded is single-writer).
-    let serve = build_serve(&store, &host, &recipe, serve_quant).await?;
+    let serve = build_serve(&store, &host, &recipe, serve_quant, serve_ahead).await?;
     // The process outlives the record session, so a keeper re-signs the
     // connection in before it expires (checked at every tool call).
     let keeper = session::SessionKeeper::new(store.clone(), tenant.clone(), user.clone());
@@ -482,6 +504,7 @@ pub(crate) async fn build_serve(
     host: &str,
     recipe: &antumbra_core::behavior::Recipe,
     serve_quant: &str,
+    serve_ahead: bool,
 ) -> Result<Option<Arc<dyn antumbra_core::ports::Serve>>> {
     use antumbra_serve::{MultiAdapterServe, RaftConfig, ServeQuant};
 
@@ -507,12 +530,17 @@ pub(crate) async fn build_serve(
         lora_rank: trained.lora_rank,
         lora_alpha: trained.lora_alpha,
         serve_quant: quant,
+        read_ahead: serve_ahead,
         ..RaftConfig::for_serving(RaftConfig::default().max_new_tokens, 0.0)
     };
     eprintln!(
-        "antumbra-mcp: experts are served on the {} backend from a {} base",
+        "antumbra-mcp: experts are served on the {} backend from a {} base, {}",
         hardware::backend(),
-        quant.map_or("dense", ServeQuant::name)
+        quant.map_or("dense", ServeQuant::name),
+        match serve_ahead {
+            true => "several tokens a pass where the CPU reads ahead",
+            false => "a token a pass",
+        }
     );
     let mut engine = MultiAdapterServe::new(base, cfg);
     // Only the adapters this machine trained. An expert's row reaches every
@@ -542,6 +570,7 @@ pub(crate) async fn build_serve(
     _host: &str,
     _recipe: &antumbra_core::behavior::Recipe,
     _serve_quant: &str,
+    _serve_ahead: bool,
 ) -> Result<Option<Arc<dyn antumbra_core::ports::Serve>>> {
     Ok(None)
 }
@@ -945,6 +974,7 @@ async fn run() -> Result<()> {
             cli.behave_drift,
             source,
             &cli.serve_quant,
+            cli.serve_ahead,
             sync,
         )
         .await;
@@ -965,6 +995,7 @@ async fn run() -> Result<()> {
         embedder,
         recipe,
         &cli.serve_quant,
+        cli.serve_ahead,
     )
     .await?;
     if let Some(threshold) = cli.auto_propose {
@@ -1225,6 +1256,7 @@ mod tests {
             "test-host",
             &antumbra_core::behavior::Recipe::default(),
             "auto",
+            true,
         )
         .await?
         else {
