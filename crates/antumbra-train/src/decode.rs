@@ -18,9 +18,10 @@ use rand::rngs::StdRng;
 
 /// How each generation step turns logits into a token. Pure logits math, so the
 /// whole policy is unit-tested on CPU (no candle) and reused by the candle
-/// sampler. Grounded in the neural-text-degeneration literature: a repetition
-/// penalty (Keskar et al, 1909.05858) and nucleus sampling (Holtzman et al,
-/// 1904.09751) are what keep greedy/likelihood decoding from looping.
+/// sampler. A repetition penalty (Keskar et al, 1909.05858) and a block on
+/// repeated n-grams keep likelihood decoding out of loops, and rewrite what
+/// a model that does not loop would have said: both are off unless a caller
+/// turns them on, and a generation that loops is ended instead ([`loops`]).
 pub struct DecodePolicy {
     /// `<= 0` = greedy/argmax; otherwise softmax temperature.
     pub temperature: f64,
@@ -30,6 +31,34 @@ pub struct DecodePolicy {
     pub repetition_penalty: f64,
     /// Block tokens that would complete an `n`-gram already in the continuation.
     pub no_repeat_ngram_size: usize,
+}
+
+/// The longest block of tokens a loop is looked for in.
+const LOOP_BLOCK_MOST: usize = 64;
+/// A loop is one block at least this many times running,
+const LOOP_TIMES: usize = 3;
+/// over at least this many tokens.
+const LOOP_SPAN: usize = 32;
+
+/// Whether a generation has run into a loop: `generated` ends with one block
+/// of tokens repeated without a break, at least three times and over at
+/// least 32 tokens. Nothing that follows a loop is an answer, so whoever
+/// generates stops there, where it used to run on to its token limit.
+///
+/// It looks only at what was generated and changes no token, unlike a
+/// repetition penalty or a block on repeated n-grams, which keep a model out
+/// of loops by forbidding repeats a right answer needs: a name said twice, a
+/// type used twice in one line of code. The span keeps what repeats by right
+/// from being taken for a loop: the zeros of `1000`, the columns of a
+/// table's rule, a short list of equal values.
+pub fn loops(generated: &[u32]) -> bool {
+    (1..=LOOP_BLOCK_MOST).any(|block| {
+        let span = (LOOP_TIMES * block).max(LOOP_SPAN);
+        generated.len() >= span && {
+            let tail = &generated[generated.len() - span..];
+            tail.iter().zip(&tail[block..]).all(|(a, b)| a == b)
+        }
+    })
 }
 
 /// Apply the policy to one step's `logits` (given the tokens generated so far,
@@ -338,6 +367,48 @@ mod tests {
         for logits in cases {
             assert_eq!(argmax(&logits), plainly(&logits), "{} logits", logits.len());
         }
+    }
+
+    /// A loop is one block three or more times running over 32 tokens or
+    /// more, whatever came before it; what repeats for less than that, or
+    /// with one token out of place, is not.
+    #[test]
+    fn a_loop_is_one_block_over_and_over_for_long_enough() {
+        let repeated = |block: &[u32], tokens: usize| -> Vec<u32> {
+            block.iter().copied().cycle().take(tokens).collect()
+        };
+        let after = |lead: &[u32], tail: Vec<u32>| -> Vec<u32> {
+            lead.iter().copied().chain(tail).collect()
+        };
+        // One token over and over: a loop at 32 of them and not at 31.
+        assert!(!loops(&repeated(&[7], 31)));
+        assert!(loops(&repeated(&[7], 32)));
+        assert!(loops(&after(&[1, 2, 3], repeated(&[7], 32))));
+        // A block of two: sixteen times is a loop, fifteen is not.
+        assert!(!loops(&repeated(&[7, 9], 30)));
+        assert!(loops(&repeated(&[7, 9], 32)));
+        // A sentence of twelve tokens: twice is not a loop, three times is.
+        let sentence: Vec<u32> = (100..112).collect();
+        assert!(!loops(&after(&[5, 6], repeated(&sentence, 24))));
+        assert!(!loops(&after(&[5, 6], repeated(&sentence, 35))));
+        assert!(loops(&after(&[5, 6], repeated(&sentence, 36))));
+        // A block of ten needs 32 tokens of it, not only three whole copies.
+        let ten: Vec<u32> = (200..210).collect();
+        assert!(!loops(&repeated(&ten, 31)));
+        assert!(loops(&repeated(&ten, 32)));
+        // One token out of place and it is no loop.
+        let mut broken = repeated(&sentence, 36);
+        broken[20] = 0;
+        assert!(!loops(&broken));
+        // The longest block looked for is 64 tokens; a longer one runs on.
+        let long: Vec<u32> = (1000..1064).collect();
+        assert!(loops(&repeated(&long, 192)));
+        let longer: Vec<u32> = (1000..1065).collect();
+        assert!(!loops(&repeated(&longer, 195)));
+        // What repeats by right: the zeros of a number, a short list.
+        assert!(!loops(&[1, 0, 0, 0, 0, 0, 0]));
+        assert!(!loops(&repeated(&[0, 11], 24)));
+        assert!(!loops(&[]));
     }
 
     #[test]

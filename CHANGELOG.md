@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.5 - 2026-11-19
+
+The server answers what admission verified. Until now it decoded with two penalties that admission never used, and they rewrote answers: a type or a name written twice could come back misspelled the second time. And a server with no GPU now serves from Q6_K by default where that is the faster form.
+
+### Before you upgrade
+
+- **Every served answer may be worded differently once, on a GPU and on a CPU** ([#466](https://github.com/albedosehen/antumbra/pull/466)). It is now the answer admission read. Nothing needs setting.
+- **A server with no GPU serves from Q6_K where its CPU has AVX-512 VNNI and VBMI** ([#467](https://github.com/albedosehen/antumbra/pull/467)), where it served from Q8_0: about a third more tokens a second, and answers worded differently again. `ANTUMBRA_SERVE_QUANT=q8_0` keeps Q8_0. On any other CPU, and on a GPU, nothing changes.
+- **A training server measures an admitted expert's drift on two forms** ([#467](https://github.com/albedosehen/antumbra/pull/467)), Q8_0 and Q6_K, where it measured one: one more load of the base for each admitted training. `ANTUMBRA_BEHAVE_DRIFT=q8_0` keeps it to one.
+
+### Server
+
+- **The server decodes as admission does** ([#466](https://github.com/albedosehen/antumbra/pull/466)). `ask`, `serve` and `answer` applied a repetition penalty of 1.2 and a block on repeated 3-grams; admission, the audits and the drift measurement applied neither. A block on 3-grams cannot let a name of three tokens be written twice: asked for a function that adds two `i64` values, an expert answered `fn add(a: i64, b: i32) -> i6 { a + b as i6 }`, and without the block `fn add(a: i64, b: i64) -> i64 { a + b }`. Over that expert's 78 held-out tasks the same number of answers followed their behavior either way (57 and 58), and only 14 came out worded as admission had read them: the block misspelled names the second time they were said and changed numbers, and the penalty alone reworded four answers in five. Both are now off in serving, as they are in admission, and stay in `RaftConfig` for a caller that wants them.
+- **A generation that runs into a loop ends there** ([#466](https://github.com/albedosehen/antumbra/pull/466)). The penalties were turned on for an expert that repeated itself without end. A loop is one block of up to 64 tokens, three or more times running, over 32 tokens or more; the check changes no token, so it cannot rewrite an answer, and admission ends a loop where serving does. A loop used to run on to the token limit.
+
+### Serving on a CPU
+
+- **Q6_K by default where it is the faster form** ([#467](https://github.com/albedosehen/antumbra/pull/467)). On a CPU that multiplies six-bit tiles a base at Q6_K decodes at 28.6 tokens a second where Q8_0 decodes at 22.1 (one laptop CPU, a 1.5B base), and `auto` now picks it there. Measured on two experts before it was made the default: Q6_K shifts an expert's log-probabilities from the dense base's by 0.144 and 0.120 nats on average where Q8_0 shifts them by 0.098 and 0.086 (Q4_K: 0.413 and 0.365), and of the two experts' 113 held-out tasks 82 answers followed their behavior over Q6_K and 80 over Q8_0 (Q4_K: 77).
+
+### Known limits
+
+- **A loop is ended after 32 tokens of it at the earliest,** and what it had repeated by then stays in the answer.
+- **Thirty-two tokens of one block repeated are taken for a loop whatever they are:** a list of sixteen equal values written out in full ends there.
+- **Q6_K is the default only where its tiles are:** a CPU with AVX-512 VNNI and without VBMI (Intel's Cascade Lake), and any CPU without AVX-512 VNNI, serve from Q8_0 as before.
+
 ## 0.4.4 - 2026-11-19
 
 Serving on a CPU, measured on the model the server actually holds. A request with one expert decodes about a third faster at Q4_K than under 0.4.3, its prompt is read at two to three times the speed, and a blend is set in an eighth of the time. Q6_K joins Q8_0 and Q4_K as a form to serve a base in. A server with a GPU serves as it did.

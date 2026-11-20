@@ -69,5 +69,12 @@ async fn the_engine_serves_an_expert_on_a_node_with_no_gpu(
     eprintln!("one expert: {one:?}\ntwo halves: {two:?}");
     eprintln!("RESULT first answer {first:.1}s (base load included), second {second:.1}s");
     assert_eq!(two, one, "two half-weight copies answer as the expert does");
+    // The engine decodes as admission does. Under the block on repeated
+    // 3-grams it served with until 0.4.5, the type could not be written a
+    // second time and the function came back returning `i6`.
+    assert!(
+        one.matches("i64").count() >= 3,
+        "a function that adds two i64 values names the type three times: {one:?}"
+    );
     Ok(())
 }

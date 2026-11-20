@@ -329,7 +329,8 @@ pub enum Command {
     /// --task, routes each via the learned router, and serves the answer from the
     /// resident engine, so a stream of prompts pays the base load only once.
     /// Needs --features models. A build with no GPU backend serves on the CPU,
-    /// from a Q8_0 base.
+    /// from a Q6_K base where the CPU has its fast kernels and a Q8_0 base
+    /// where it does not.
     Serve(crate::commands::ServeArgs),
     /// Collector/sync: bidirectionally reconcile this local store (the
     /// global `--url`, an embedded penumbra) with a remote authoritative
