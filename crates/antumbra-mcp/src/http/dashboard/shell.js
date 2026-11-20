@@ -18,8 +18,14 @@ const VIEWS = {
   settings: "Policy",
 };
 
-const PREFERENCES_KEY = "antumbra.dashboard.preferences";
-const PREFERENCES = { theme: ["system", "light", "dark"], density: ["comfortable", "compact"], home: ["overview", "memory", "behaviors"] };
+/** Where the preferences are kept: the key theme.js reads the theme from. */
+const PREFERENCES_KEY = THEME_KEY;
+const PREFERENCES = {
+  theme: ["system", "light", "dark"],
+  density: ["comfortable", "compact"],
+  home: ["overview", "memory", "behaviors"],
+  side: ["open", "collapsed"],
+};
 /** A token with fewer days left than this is said to be expiring. */
 const EXPIRING_DAYS = 30;
 const RECENT_SHOWN = 5;
@@ -139,26 +145,47 @@ function preferences() {
 }
 
 function applyPreferences(chosen) {
-  const root = document.documentElement;
-  if (chosen.theme === "system") delete root.dataset.theme;
-  else root.dataset.theme = chosen.theme;
-  if (chosen.density === "compact") root.dataset.density = "compact";
-  else delete root.dataset.density;
+  // theme.js put the kept theme on the page before it was first drawn; this
+  // is the same call, for a change made while the page is open.
+  applyTheme(chosen.theme, chosen.density, chosen.side);
+  showSide(chosen.side);
   for (const [key, value] of Object.entries(chosen)) {
     const input = byId("preferences").querySelector(`input[name=${key}][value=${value}]`);
     if (input) input.checked = true;
   }
+  const inMenu = byId("menu-theme").querySelector(`input[value=${chosen.theme}]`);
+  if (inMenu) inMenu.checked = true;
 }
 
 function keepPreferences() {
   const form = new FormData(byId("preferences"));
-  const chosen = Object.fromEntries(Object.keys(PREFERENCES).map((key) => [key, form.get(key)]));
+  // The sidebar's width is not in the form: it is as the page has it.
+  const side = document.documentElement.dataset.side === "collapsed" ? "collapsed" : "open";
+  const chosen = Object.fromEntries(Object.keys(PREFERENCES).map((key) => [key, key === "side" ? side : form.get(key)]));
   try {
     localStorage.setItem(PREFERENCES_KEY, JSON.stringify(chosen));
   } catch {
     // Refused: this load only.
   }
   applyPreferences(chosen);
+}
+
+// The sidebar: full, or collapsed to its icons. Kept with the preferences,
+// and put on the page by theme.js before it is drawn.
+
+function showSide(side) {
+  const collapsed = side === "collapsed";
+  const toggle = byId("side-toggle");
+  toggle.setAttribute("aria-expanded", String(!collapsed));
+  toggle.setAttribute("aria-label", collapsed ? "Expand the sidebar" : "Collapse the sidebar");
+  toggle.title = collapsed ? "Expand the sidebar ( [ )" : "Collapse the sidebar ( [ )";
+}
+
+function toggleSide() {
+  const root = document.documentElement;
+  if (root.dataset.side === "collapsed") delete root.dataset.side;
+  else root.dataset.side = "collapsed";
+  keepPreferences();
 }
 
 // Who is signed in
@@ -598,6 +625,15 @@ function startShell() {
   state.shell = { devices: [], handoffs: 0, tokenDaysLeft: null, policy: null };
   applyPreferences(preferences());
   byId("preferences").addEventListener("change", keepPreferences);
+  // The menu's theme is the Account page's, a click nearer.
+  byId("menu-theme").addEventListener("change", (event) => {
+    const same = byId("preferences").querySelector(`input[name=theme][value=${event.target.value}]`);
+    if (!same) return;
+    same.checked = true;
+    keepPreferences();
+  });
+  // Changed in another tab (theme.js has already put it on the page).
+  document.addEventListener("antumbra:preferences", () => applyPreferences(preferences()));
   window.addEventListener("hashchange", route);
   route();
 
@@ -612,11 +648,17 @@ function startShell() {
     if (event.key === "Escape") closeMenu();
     // "/" goes to the search, unless something is being typed into.
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable;
+    const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
+    if (event.key === "[" && plain && !typing && !byId("app").hidden) {
+      event.preventDefault();
+      toggleSide();
+    }
     if (event.key === "/" && !typing && !byId("app").hidden) {
       event.preventDefault();
       byId("jump-query").focus();
     }
   });
+  byId("side-toggle").addEventListener("click", toggleSide);
   byId("signout-here").addEventListener("click", () => signOut(""));
   // The bar's search is the Memory page's recall, from any page.
   byId("jump").addEventListener("submit", (event) => {

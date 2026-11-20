@@ -492,6 +492,11 @@ mod tests {
                 page.contains(&format!(r#"src="{prefix}relics.js""#)),
                 "{name}"
             );
+            // The held theme, before the page is drawn.
+            assert!(
+                page.contains(&format!(r#"<script src="{prefix}theme.js"></script>"#)),
+                "{name}"
+            );
             assert!(
                 page.contains(&format!(r#"href="{prefix}app.css""#)),
                 "{name}"

@@ -33,6 +33,10 @@ const BEHAVIORS: &str = include_str!("dashboard/behaviors.js");
 /// handoffs), the workspace's policy and what the Overview says is waiting.
 /// Loaded last, sharing the helpers of the two before it.
 const SHELL: &str = include_str!("dashboard/shell.js");
+/// The theme, put on the page before it is first drawn: the one script
+/// loaded in the head without `defer`, by the dashboard and by the relics
+/// pages, so a held theme never shows as the system's first.
+const THEME: &str = include_str!("dashboard/theme.js");
 const STYLE: &str = include_str!("dashboard/app.css");
 /// The relics gallery and viewer (`/relics`, `/relic/<slug>`): one script and
 /// one style for both pages, self-contained because the dashboard's script
@@ -60,6 +64,10 @@ pub(super) fn routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
         )
         .route("/dashboard/app.js", get(script))
         .route("/dashboard/behaviors.js", get(behaviors))
+        .route(
+            "/dashboard/theme.js",
+            get(|| async { asset("text/javascript; charset=utf-8", THEME) }),
+        )
         .route(
             "/dashboard/shell.js",
             get(|| async { asset("text/javascript; charset=utf-8", SHELL) }),
@@ -126,6 +134,7 @@ mod tests {
             ("/dashboard/app.js", "text/javascript"),
             ("/dashboard/behaviors.js", "text/javascript"),
             ("/dashboard/shell.js", "text/javascript"),
+            ("/dashboard/theme.js", "text/javascript"),
             ("/dashboard/app.css", "text/css"),
             ("/dashboard/relics.js", "text/javascript"),
             ("/dashboard/relics.css", "text/css"),
@@ -165,6 +174,19 @@ mod tests {
         assert!(PAGE.contains(r#"src="dashboard/behaviors.js""#));
         assert!(PAGE.contains(r#"src="dashboard/shell.js""#));
         assert!(SHELL.contains("function startShell"));
+        // The theme is on the page before its style is read or anything is
+        // drawn: its script comes first and is not deferred.
+        let theme = PAGE
+            .find(r#"<script src="dashboard/theme.js"></script>"#)
+            .ok_or_else(|| anyhow::anyhow!("the page does not load theme.js undeferred"))?;
+        let style = PAGE
+            .find(r#"href="dashboard/app.css""#)
+            .ok_or_else(|| anyhow::anyhow!("the page does not link its style"))?;
+        assert!(theme < style, "theme.js is loaded after the style");
+        assert!(
+            !THEME.contains("sessionStorage"),
+            "the theme reads the token's storage"
+        );
         assert!(PAGE.contains(r#"href="dashboard/app.css""#));
         // The main script starts the page only once every deferred script has
         // run, since the sections in their own files define what it loads.
@@ -182,6 +204,7 @@ mod tests {
             ("behaviors.js", BEHAVIORS),
             ("relics.js", RELICS_SCRIPT),
             ("shell.js", SHELL),
+            ("theme.js", THEME),
         ] {
             for sink in [
                 "innerHTML",
