@@ -327,8 +327,9 @@ const BLENDS_REMEMBERED: usize = 8;
 /// in hand.
 #[derive(Default)]
 struct Memories {
-    /// The generation in hand: its prompt and what it has written.
-    near: crate::draft::Drafts,
+    /// What the generation in hand guesses from of its own, where one is
+    /// decoded by itself; requests answered together have one each.
+    reading: ahead::Reading,
     /// What was written through each blend, the latest used last.
     far: Vec<(String, crate::draft::Drafts)>,
     /// What guesses have been worth on this machine, whatever the blend.
@@ -349,6 +350,14 @@ impl Memories {
         self.far.push(held);
         self.far.len() - 1
     }
+
+    /// What was written through `blend`, if it is still remembered.
+    fn of_mut(&mut self, blend: &str) -> Option<&mut crate::draft::Drafts> {
+        self.far
+            .iter_mut()
+            .find(|(name, _)| name == blend)
+            .map(|(_, far)| far)
+    }
 }
 
 /// One request being answered beside others.
@@ -359,6 +368,8 @@ struct Sequence {
     rng: StdRng,
     /// The answer, once the request has ended.
     answer: Option<String>,
+    /// What it guesses from of its own, where the model reads ahead.
+    reading: ahead::Reading,
 }
 
 /// The requests one model is answering side by side
@@ -459,6 +470,10 @@ pub struct QwenCausalLm {
     /// to. Writing through one blend is never guessed from under another.
     blend: String,
     adapter_on: bool,
+    /// The names of the blends kept beside it ([`QwenCausalLm::keep_blend`]),
+    /// blend `n`'s at `n - 1`: a blend is remembered by what it is, whichever
+    /// place it is kept in.
+    kept: Vec<String>,
 }
 
 /// What a seeded run's two streams are told apart by: the adapter's starting
@@ -611,6 +626,7 @@ impl QwenCausalLm {
             ahead: cfg.read_ahead.then(Memories::default),
             blend: String::new(),
             adapter_on: true,
+            kept: Vec::new(),
         })
     }
 
@@ -755,7 +771,32 @@ impl QwenCausalLm {
     pub fn keep_blend(&mut self, blend: u16, specs: &[(String, f32)]) -> Result<bool> {
         self.load_blend(specs)?;
         self.model.set_grad(false);
-        self.model.keep_blend(blend).map_err(ce)
+        let kept = self.model.keep_blend(blend).map_err(ce)?;
+        if kept {
+            let place = usize::from(blend) - 1;
+            if self.kept.len() <= place {
+                self.kept.resize(place + 1, String::new());
+            }
+            self.kept[place].clone_from(&self.blend);
+        }
+        Ok(kept)
+    }
+
+    /// The name of blend `blend`: the loaded blend's for 0, or nothing with
+    /// the adapter off, and a kept blend's for its place.
+    fn blend_name(&self, blend: u16) -> &str {
+        match blend {
+            0 if self.adapter_on => self.blend.as_str(),
+            0 => "",
+            n => self.kept.get(usize::from(n) - 1).map_or("", String::as_str),
+        }
+    }
+
+    /// Whether a pass for requests answered together carries guesses: the
+    /// model is set to read ahead, every token is the largest logit, and the
+    /// head has a sketch to find it by.
+    fn answers_ahead(&self) -> bool {
+        self.ahead.is_some() && self.policy().takes_the_first() && self.model.reads_ahead()
     }
 
     /// Wrap a raw prompt in the Qwen chat template for an `-Instruct` base, so
@@ -838,7 +879,7 @@ impl QwenCausalLm {
             let ahead = ahead::Ahead {
                 eos: self.eos,
                 most: self.max_new_tokens,
-                near: &mut memories.near,
+                reading: &mut memories.reading,
                 far: &memories.far[at].1,
                 odds: &mut memories.odds,
             };
@@ -975,6 +1016,7 @@ impl QwenCausalLm {
             timing.prompt_secs += together.timing.prompt_secs;
             timing.decoded += together.timing.decoded;
             timing.decode_secs += together.timing.decode_secs;
+            timing.passes += together.timing.passes;
         }
         self.timing = Some(timing);
         Ok(answers)
@@ -1009,6 +1051,7 @@ impl QwenCausalLm {
             blend,
             rng: StdRng::seed_from_u64(seed),
             answer: None,
+            reading: ahead::Reading::default(),
         };
         self.model.clear_sequence(place).map_err(ce)?;
         let began = std::time::Instant::now();
@@ -1028,10 +1071,26 @@ impl QwenCausalLm {
         };
         together.timing.prompt_tokens += sequence.prompt_len;
         together.timing.prompt_secs += began.elapsed().as_secs_f64();
+        if self.answers_ahead() {
+            // What this blend wrote after this very prompt before, if that
+            // is kept: the request is guessed from it for as long as it goes
+            // the same way.
+            let name = self.blend_name(blend).to_string();
+            if let Some(memories) = self.ahead.as_mut() {
+                let at = memories.place(&name);
+                let said = memories.far[at].1.said(&sequence.tokens);
+                sequence.reading.begin(said);
+            }
+        }
         if self.max_new_tokens == 0 || next == self.eos {
             sequence.answer = Some(self.answer_of(&sequence)?);
         } else {
             sequence.tokens.push(next);
+            // A request allowed one token has it: answered by itself it
+            // writes no second.
+            if self.max_new_tokens == 1 {
+                sequence.answer = Some(self.answer_of(&sequence)?);
+            }
         }
         together.places[place] = Some(sequence);
         Ok(Some(place))
@@ -1042,6 +1101,9 @@ impl QwenCausalLm {
     /// ([`Together::take`]). The places of those that ended in this pass are
     /// what comes back.
     pub fn advance(&mut self, together: &mut Together) -> Result<Vec<usize>> {
+        if self.answers_ahead() {
+            return self.advance_ahead(together);
+        }
         let policy = self.policy();
         let first = policy.takes_the_first();
         let each: Vec<Next> = together
@@ -1069,6 +1131,7 @@ impl QwenCausalLm {
         };
         together.timing.decoded += each.len();
         together.timing.decode_secs += began.elapsed().as_secs_f64();
+        together.timing.passes += 1;
         let mut ended = Vec::new();
         for (next, stepped) in each.iter().zip(stepped) {
             let Some(sequence) = together.places[next.sequence].as_mut() else {
@@ -1093,6 +1156,96 @@ impl QwenCausalLm {
                 let answer = self.answer_of(sequence)?;
                 sequence.answer = Some(answer);
                 ended.push(next.sequence);
+            }
+        }
+        Ok(ended)
+    }
+
+    /// [`QwenCausalLm::advance`] where the model reads ahead: each request's
+    /// row in the pass is followed by the tokens guessed to come after it,
+    /// as many as are worth their rows and as the pass has room for, and the
+    /// request takes its next token and every guess after it that was the
+    /// model's own ([`ahead::pass`]). Each request's answer is the one a
+    /// token a pass gives it.
+    fn advance_ahead(&mut self, together: &mut Together) -> Result<Vec<usize>> {
+        // Each answering request's place and the name of its blend.
+        let answering: Vec<(usize, String)> = together
+            .places
+            .iter()
+            .enumerate()
+            .filter_map(|(place, sequence)| {
+                let sequence = sequence.as_ref().filter(|s| s.answer.is_none())?;
+                Some((place, self.blend_name(sequence.blend).to_string()))
+            })
+            .collect();
+        if answering.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (eos, most) = (self.eos, self.max_new_tokens);
+        let Some(memories) = self.ahead.as_mut() else {
+            return Err(AntumbraError::other(
+                "a model that does not read ahead was asked for a pass that does",
+            ));
+        };
+        let passed = {
+            let Memories { far, odds, .. } = &mut *memories;
+            let far = &*far;
+            let mut names = answering.iter();
+            let mut seats: Vec<ahead::Seat> = together
+                .places
+                .iter_mut()
+                .enumerate()
+                .filter_map(|(place, sequence)| {
+                    let sequence = sequence.as_mut().filter(|s| s.answer.is_none())?;
+                    let (_, name) = names.next()?;
+                    Some(ahead::Seat {
+                        sequence: place,
+                        blend: sequence.blend,
+                        tokens: &mut sequence.tokens,
+                        prompt_len: sequence.prompt_len,
+                        reading: &mut sequence.reading,
+                        far: far
+                            .iter()
+                            .find(|(held, _)| held == name)
+                            .map(|(_, far)| far),
+                    })
+                })
+                .collect();
+            ahead::pass(
+                &mut self.model,
+                &mut seats,
+                eos,
+                most,
+                Together::AT_ONCE,
+                odds,
+            )
+            .map_err(ce)?
+        };
+        together.timing.decoded += passed.decided;
+        together.timing.decode_secs += passed.took.as_secs_f64();
+        together.timing.passes += 1;
+        // What a request that ended wrote is remembered for its blend's
+        // next; its prompt is not.
+        let mut ended = Vec::new();
+        for ((place, name), done) in answering.iter().zip(&passed.ended) {
+            if !*done {
+                continue;
+            }
+            if let (Some(far), Some(sequence)) =
+                (memories.of_mut(name), together.places[*place].as_ref())
+            {
+                let (prompt, written) = sequence.tokens.split_at(sequence.prompt_len);
+                far.learn(&sequence.tokens, sequence.prompt_len);
+                far.keep(prompt, written);
+            }
+            ended.push(*place);
+        }
+        for place in &ended {
+            if let Some(sequence) = together.places[*place].as_ref() {
+                let answer = self.answer_of(sequence)?;
+                if let Some(sequence) = together.places[*place].as_mut() {
+                    sequence.answer = Some(answer);
+                }
             }
         }
         Ok(ended)

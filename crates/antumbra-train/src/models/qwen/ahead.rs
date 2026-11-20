@@ -39,8 +39,8 @@ use std::time::{Duration, Instant};
 
 use candle_core::{bail, Result};
 
-use super::{GenTiming, QwenLora, Stepped};
-use crate::draft::{guess, Drafts};
+use super::{GenTiming, Next, QwenLora, Stepped};
+use crate::draft::{guess, Drafts, Guess};
 
 /// Guesses a pass carries at most: sixteen rows with the token in hand.
 const CARRY_MOST: usize = 15;
@@ -198,14 +198,92 @@ impl Odds {
     }
 }
 
+/// What one sequence guesses from: its own prompt and tokens, and what was
+/// written after its very prompt before. And the guesses a pass is to carry
+/// for it.
+#[derive(Default)]
+pub(in crate::models::qwen) struct Reading {
+    /// The sequence's prompt and what it has written, as far as that has
+    /// been learned.
+    near: Drafts,
+    learned: usize,
+    /// What was written after this prompt before, where that was kept: the
+    /// sequence is guessed from it for as long as it goes the same way.
+    said: Vec<u32>,
+    /// The guesses offered for the next pass, the kinds of those worth
+    /// their rows, and those guesses.
+    offered: Vec<Guess>,
+    kinds: Vec<u8>,
+    guesses: Vec<u32>,
+}
+
+impl Reading {
+    /// A sequence begins: nothing of another is left, and `said` is what
+    /// was written after its prompt before.
+    pub(in crate::models::qwen) fn begin(&mut self, said: Option<&[u32]>) {
+        self.near.clear();
+        self.learned = 0;
+        self.said.clear();
+        self.said.extend_from_slice(said.unwrap_or(&[]));
+        self.kinds.clear();
+        self.guesses.clear();
+    }
+
+    /// Choose the guesses the next pass carries after `tokens`, for a
+    /// sequence that may write `room` tokens after the one the pass decides
+    /// anyway: no more than are worth their rows.
+    fn choose(
+        &mut self,
+        tokens: &[u32],
+        prompt_len: usize,
+        far: Option<&Drafts>,
+        room: usize,
+        eos: u32,
+        odds: &Odds,
+    ) {
+        self.near.learn(tokens, self.learned);
+        self.learned = tokens.len();
+        self.kinds.clear();
+        self.guesses.clear();
+        let written = tokens.len() - prompt_len;
+        match self.said.len() > written && self.said[..written] == tokens[prompt_len..] {
+            // The same prompt and the same words so far: what came next
+            // then.
+            true => {
+                self.kinds.resize(room.min(self.said.len() - written), SAID);
+                self.kinds.truncate(odds.carry(&self.kinds));
+                self.guesses
+                    .extend_from_slice(&self.said[written..written + self.kinds.len()]);
+            }
+            false => {
+                match far {
+                    Some(far) => guess(&[&self.near, far], tokens, room, eos, &mut self.offered),
+                    None => guess(&[&self.near], tokens, room, eos, &mut self.offered),
+                }
+                self.kinds.extend(
+                    self.offered
+                        .iter()
+                        .enumerate()
+                        .map(|(at, guess)| kind(at, guess.run)),
+                );
+                self.kinds.truncate(odds.carry(&self.kinds));
+                self.guesses.extend(
+                    self.offered[..self.kinds.len()]
+                        .iter()
+                        .map(|guess| guess.token),
+                );
+            }
+        }
+    }
+}
+
 /// What a generation is decoded ahead with.
 pub(in crate::models::qwen) struct Ahead<'a> {
     /// The token that ends a generation, and the most tokens it may write.
     pub eos: u32,
     pub most: usize,
-    /// What this generation's own prompt and tokens are remembered in: let
-    /// go and filled here.
-    pub near: &'a mut Drafts,
+    /// What this generation guesses from of its own: begun and filled here.
+    pub reading: &'a mut Reading,
     /// What earlier generations wrote.
     pub far: &'a Drafts,
     /// What guesses have been worth, counted on here.
@@ -237,7 +315,7 @@ pub(in crate::models::qwen) fn decode(
     let Ahead {
         eos,
         most,
-        near,
+        reading,
         far,
         odds,
     } = ahead;
@@ -256,12 +334,8 @@ pub(in crate::models::qwen) fn decode(
         None => return Ok(None),
     };
     timing.record(0, tokens.len(), began.elapsed());
-    // What was written after this very prompt before, if that is kept: the
-    // generation is guessed from it for as long as it goes the same way.
-    let said = far.said(&tokens[..prompt_len]).unwrap_or(&[]);
-    near.clear();
-    let mut learned = 0;
-    let (mut offered, mut kinds, mut rows) = (Vec::new(), Vec::new(), Vec::new());
+    reading.begin(far.said(&tokens[..prompt_len]));
+    let mut rows = Vec::new();
     loop {
         // `next` follows everything in `tokens`.
         if next == eos {
@@ -275,33 +349,12 @@ pub(in crate::models::qwen) fn decode(
         // One pass: the token just written, and what is guessed to follow
         // it, no further than the generation may go and no more than the
         // guesses are worth.
-        near.learn(tokens, learned);
-        learned = tokens.len();
         let at = tokens.len() - 1;
         let room = (most - written - 1).min(CARRY_MOST);
-        kinds.clear();
+        reading.choose(tokens, prompt_len, Some(far), room, eos, odds);
         rows.clear();
         rows.push(tokens[at]);
-        match said.len() > written && said[..written] == tokens[prompt_len..] {
-            // The same prompt and the same words so far: what came next
-            // then.
-            true => {
-                kinds.resize(room.min(said.len() - written), SAID);
-                kinds.truncate(odds.carry(&kinds));
-                rows.extend_from_slice(&said[written..written + kinds.len()]);
-            }
-            false => {
-                guess(&[&*near, far], tokens, room, eos, &mut offered);
-                kinds.extend(
-                    offered
-                        .iter()
-                        .enumerate()
-                        .map(|(at, guess)| kind(at, guess.run)),
-                );
-                kinds.truncate(odds.carry(&kinds));
-                rows.extend(offered[..kinds.len()].iter().map(|guess| guess.token));
-            }
-        }
+        rows.extend_from_slice(&reading.guesses);
         let began = Instant::now();
         let Some(firsts) = model.step_ahead(&rows, at)? else {
             bail!("a model that read its prompt ahead did not read a token ahead")
@@ -322,7 +375,13 @@ pub(in crate::models::qwen) fn decode(
         }
         let (took, decided) = (began.elapsed(), kept + usize::from(!over));
         timing.passed(decided, took);
-        odds.saw(&kinds, kept);
+        // Where the generation ended on a guess that held, the guess after
+        // it was never tried.
+        let tried = match over {
+            true => kept,
+            false => guesses.len(),
+        };
+        odds.saw(&reading.kinds[..tried], kept);
         odds.passed(rows.len(), decided, took);
         told.passes += 1;
         told.guessed += guesses.len();
@@ -335,6 +394,140 @@ pub(in crate::models::qwen) fn decode(
         model.truncate(at + 1 + kept);
     }
     Ok(Some(told))
+}
+
+/// One of the sequences a shared pass reads ([`pass`]).
+pub(in crate::models::qwen) struct Seat<'a> {
+    /// The sequence's place among the model's caches, and the blend of
+    /// experts it is answered with.
+    pub sequence: usize,
+    pub blend: u16,
+    /// Its prompt and what it has written, the last of which is the token
+    /// in hand: the pass writes on from there.
+    pub tokens: &'a mut Vec<u32>,
+    pub prompt_len: usize,
+    /// What it guesses from of its own, and what its blend wrote before.
+    pub reading: &'a mut Reading,
+    pub far: Option<&'a Drafts>,
+}
+
+/// What a shared pass came to.
+pub(in crate::models::qwen) struct Passed {
+    /// For each seat, whether its sequence ended in the pass.
+    pub ended: Vec<bool>,
+    /// Tokens the pass decided, over all the sequences, and how long the
+    /// reading took.
+    pub decided: usize,
+    pub took: Duration,
+}
+
+/// One pass over the weights for every one of `seats`, greedily: each
+/// sequence's token in hand is read and, after it, the tokens guessed to
+/// follow, as many as are worth their rows and as the pass has room for
+/// beside a row for every sequence (`rows_most` in all). Each sequence
+/// writes what a token at a time would write it, as [`decode`] does for one:
+/// its next token, and each guess after that which was the model's own. A
+/// sequence ends at the end token, at `most` tokens, or in a loop.
+///
+/// The rows are shared out where they are worth most by the same count that
+/// decides them for one sequence: with many sequences in a pass a token
+/// takes little time, and a guess has to be all but sure to be worth a row.
+pub(in crate::models::qwen) fn pass(
+    model: &mut QwenLora,
+    seats: &mut [Seat],
+    eos: u32,
+    most: usize,
+    rows_most: usize,
+    odds: &mut Odds,
+) -> Result<Passed> {
+    let mut rows: Vec<Next> = Vec::with_capacity(rows_most);
+    let mut spare = rows_most.saturating_sub(seats.len());
+    for seat in seats.iter_mut() {
+        let Some(in_hand) = seat.tokens.last().copied() else {
+            bail!("sequence {} has no token to read", seat.sequence)
+        };
+        let at = seat.tokens.len() - 1;
+        let written = seat.tokens.len().saturating_sub(seat.prompt_len);
+        let room = most.saturating_sub(written + 1).min(CARRY_MOST).min(spare);
+        seat.reading
+            .choose(seat.tokens, seat.prompt_len, seat.far, room, eos, odds);
+        spare -= seat.reading.guesses.len();
+        let row = |token: u32, position: usize| Next {
+            sequence: seat.sequence,
+            token,
+            position,
+            blend: seat.blend,
+        };
+        rows.push(row(in_hand, at));
+        rows.extend(
+            seat.reading
+                .guesses
+                .iter()
+                .enumerate()
+                .map(|(i, guess)| row(*guess, at + 1 + i)),
+        );
+    }
+    let began = Instant::now();
+    let Some(stepped) = model.step_each(&rows, true)? else {
+        bail!("a model that read its prompts as plain rows stopped reading rows that way")
+    };
+    let took = began.elapsed();
+    let mut firsts = Vec::with_capacity(stepped.len());
+    for stepped in stepped {
+        match stepped {
+            Stepped::First(token) => firsts.push(token),
+            Stepped::Logits(_) => bail!("a head that reads ahead gave logits for a token"),
+        }
+    }
+    let (mut from, mut decided) = (0, 0);
+    let mut ended = Vec::with_capacity(seats.len());
+    for seat in seats.iter_mut() {
+        let guesses = seat.reading.guesses.as_slice();
+        let own = &firsts[from..from + 1 + guesses.len()];
+        from += own.len();
+        // The rows of the sequence that were read on text it has written:
+        // the token in hand's, and each kept guess's.
+        let read = seat.tokens.len();
+        let mut kept = 0;
+        let mut next = own[0];
+        // Whether the sequence ended, and whether a guess was tried and was
+        // not the model's token: one that was never reached says nothing.
+        let (done, missed) = loop {
+            // `next` follows everything in the sequence's tokens.
+            decided += 1;
+            let guessed = kept < guesses.len();
+            if next == eos {
+                break (true, guessed);
+            }
+            seat.tokens.push(next);
+            let held = guessed && guesses[kept] == next;
+            if held {
+                kept += 1;
+            }
+            let written = &seat.tokens[seat.prompt_len..];
+            if written.len() >= most || crate::decode::loops(written) {
+                break (true, guessed && !held);
+            }
+            if !held {
+                break (false, guessed);
+            }
+            next = own[kept];
+        };
+        odds.saw(&seat.reading.kinds[..kept + usize::from(missed)], kept);
+        // The rows after the first guess that was not the model's token
+        // were read on text that was never written. A sequence that ended
+        // has its cache cleared before another takes its place.
+        if !done && kept < guesses.len() {
+            model.truncate_sequence(seat.sequence, read + kept)?;
+        }
+        ended.push(done);
+    }
+    odds.passed(rows.len(), decided, took);
+    Ok(Passed {
+        ended,
+        decided,
+        took,
+    })
 }
 
 #[cfg(test)]

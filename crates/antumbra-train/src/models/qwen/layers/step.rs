@@ -2200,7 +2200,7 @@ mod tests {
                 // Under the odds a served model counts, whatever they come
                 // to on this machine today: the same tokens.
                 let mut counted = model(&cfg, &weights, Some(serve), true)?;
-                let (mut tokens, mut near) = (PROMPT.to_vec(), Drafts::new());
+                let (mut tokens, mut reading) = (PROMPT.to_vec(), ahead::Reading::default());
                 let read = ahead::decode(
                     &mut counted,
                     &mut tokens,
@@ -2208,7 +2208,7 @@ mod tests {
                     ahead::Ahead {
                         eos,
                         most,
-                        near: &mut near,
+                        reading: &mut reading,
                         far: &far,
                         odds: &mut odds,
                     },
@@ -2219,7 +2219,7 @@ mod tests {
                 // And with every guess offered carried, so that passes of
                 // every width are read.
                 let mut ahead = model(&cfg, &weights, Some(serve), true)?;
-                let (mut tokens, mut near) = (PROMPT.to_vec(), Drafts::new());
+                let (mut tokens, mut reading) = (PROMPT.to_vec(), ahead::Reading::default());
                 let mut timing = GenTiming::default();
                 let Some(passes) = ahead::decode(
                     &mut ahead,
@@ -2228,7 +2228,7 @@ mod tests {
                     ahead::Ahead {
                         eos,
                         most,
-                        near: &mut near,
+                        reading: &mut reading,
                         far: &far,
                         odds: &mut ahead::Odds::eager(),
                     },
@@ -2266,7 +2266,7 @@ mod tests {
         // A model with no sketch of its head is not read ahead, and nothing
         // of the prompt is read.
         let mut dense = model(&cfg, &weights, None, false)?;
-        let (mut tokens, mut near) = (PROMPT.to_vec(), Drafts::new());
+        let (mut tokens, mut reading) = (PROMPT.to_vec(), ahead::Reading::default());
         let none = ahead::decode(
             &mut dense,
             &mut tokens,
@@ -2274,7 +2274,7 @@ mod tests {
             ahead::Ahead {
                 eos: NEVER,
                 most: 8,
-                near: &mut near,
+                reading: &mut reading,
                 far: &Drafts::new(),
                 odds: &mut ahead::Odds::default(),
             },
@@ -2395,6 +2395,178 @@ mod tests {
                 "no such sequence"
             );
         }
+        Ok(())
+    }
+
+    /// Requests answered together, each carrying its own guesses in the
+    /// passes they share, write what each writes a token at a time by
+    /// itself: whatever each guesses from, wherever each ends, with every
+    /// guess offered carried and under the counted odds, and where the pass
+    /// has room for one guess in all.
+    #[test]
+    fn sequences_read_ahead_together_are_each_a_token_at_a_time() -> CResult<()> {
+        use crate::draft::Drafts;
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        let serve = GgmlDType::Q6K;
+        if !model(&cfg, &weights, Some(serve), true)?.reads_ahead() {
+            eprintln!("skipped: this CPU multiplies no sketch of the head");
+            return Ok(());
+        }
+        // No token is 64: a generation that only its length ends.
+        const NEVER: u32 = 64;
+        let prompts: [Vec<u32>; 3] = [PROMPT.to_vec(), vec![9, 33, 2], (0..7).map(token).collect()];
+        let alone = |prompt: &[u32], eos: u32, most: usize| {
+            a_token_at_a_time(
+                &mut model(&cfg, &weights, Some(serve), true)?,
+                prompt,
+                eos,
+                most,
+            )
+        };
+        let wholes = [
+            alone(&prompts[0], NEVER, 40)?,
+            alone(&prompts[1], NEVER, 40)?,
+            alone(&prompts[2], NEVER, 40)?,
+        ];
+        let remembering = |text: &[u32], prompt: usize| {
+            let mut memory = Drafts::new();
+            memory.learn(text, prompt);
+            memory
+        };
+        let kept = |text: &[u32], prompt: usize| {
+            let mut memory = Drafts::new();
+            memory.keep(&text[..prompt], &text[prompt..]);
+            memory
+        };
+        let garbled = |text: &[u32], prompt: usize| {
+            let mut text = text.to_vec();
+            for token in text[prompt..].iter_mut().skip(2).step_by(3) {
+                *token = (*token + 1) % 64;
+            }
+            text
+        };
+        // What each request's blend wrote before: the first its own text,
+        // the second nothing, the third its answer kept whole; then the
+        // first its text with every third token wrong, the second the
+        // third's text, the third an answer that goes wrong.
+        let helped = [
+            Some(remembering(&wholes[0], prompts[0].len())),
+            None,
+            Some(kept(&wholes[2], prompts[2].len())),
+        ];
+        let misled = [
+            Some(remembering(
+                &garbled(&wholes[0], prompts[0].len()),
+                prompts[0].len(),
+            )),
+            Some(remembering(&wholes[2], prompts[2].len())),
+            Some(kept(
+                &garbled(&wholes[2], prompts[2].len()),
+                prompts[2].len(),
+            )),
+        ];
+        // An end token the first request writes part of the way through.
+        let ending = wholes[0][prompts[0].len() + (wholes[0].len() - prompts[0].len()) / 2];
+        let mut fewer = false;
+        for (what, fars) in [("helped", &helped), ("misled", &misled)] {
+            for (eos, most, rows_most) in [
+                (NEVER, 40usize, 32usize),
+                (ending, 40, 32),
+                (NEVER, 6, 32),
+                (NEVER, 2, 32),
+                (NEVER, 40, 4),
+            ] {
+                let want = [
+                    alone(&prompts[0], eos, most)?,
+                    alone(&prompts[1], eos, most)?,
+                    alone(&prompts[2], eos, most)?,
+                ];
+                for eager in [true, false] {
+                    let mut odds = match eager {
+                        true => ahead::Odds::eager(),
+                        false => ahead::Odds::default(),
+                    };
+                    let mut together = model(&cfg, &weights, Some(serve), true)?;
+                    together.sequences(3);
+                    let mut tokens = prompts.clone();
+                    let mut readings: [ahead::Reading; 3] = Default::default();
+                    let mut ended = [false; 3];
+                    // The pass each request ended in.
+                    let mut ended_in = [0usize; 3];
+                    // Each request is taken in: its prompt, and the first
+                    // token after it.
+                    for sequence in 0..3 {
+                        together.clear_sequence(sequence)?;
+                        let first = together.step_in(sequence, 0, &tokens[sequence], 0, true)?;
+                        let Some(Stepped::First(next)) = first else {
+                            bail!("{what}: sequence {sequence}'s prompt gave no first token")
+                        };
+                        let said = fars[sequence]
+                            .as_ref()
+                            .and_then(|far| far.said(&prompts[sequence]));
+                        readings[sequence].begin(said);
+                        match next == eos {
+                            true => ended[sequence] = true,
+                            false => tokens[sequence].push(next),
+                        }
+                    }
+                    let mut passes = 0;
+                    while ended.iter().any(|ended| !ended) {
+                        let mut who = Vec::new();
+                        let mut seats: Vec<ahead::Seat> = tokens
+                            .iter_mut()
+                            .zip(readings.iter_mut())
+                            .zip(fars.iter())
+                            .enumerate()
+                            .filter(|(sequence, _)| !ended[*sequence])
+                            .map(|(sequence, ((tokens, reading), far))| {
+                                who.push(sequence);
+                                ahead::Seat {
+                                    sequence,
+                                    blend: 0,
+                                    tokens,
+                                    prompt_len: prompts[sequence].len(),
+                                    reading,
+                                    far: far.as_ref(),
+                                }
+                            })
+                            .collect();
+                        let passed = ahead::pass(
+                            &mut together,
+                            &mut seats,
+                            eos,
+                            most,
+                            rows_most,
+                            &mut odds,
+                        )?;
+                        drop(seats);
+                        passes += 1;
+                        for (sequence, done) in who.into_iter().zip(passed.ended) {
+                            if done {
+                                (ended[sequence], ended_in[sequence]) = (true, passes);
+                            }
+                        }
+                        assert!(passes < 200, "{what}: the requests did not end");
+                    }
+                    for sequence in 0..3 {
+                        assert_eq!(
+                            tokens[sequence], want[sequence],
+                            "{what}, request {sequence}, ending at {eos} or {most} tokens, {rows_most} rows a pass, every guess carried: {eager}"
+                        );
+                    }
+                    // Guessed right, a request ends in far fewer passes
+                    // than it has tokens: the one whose answer was kept
+                    // whole in a handful, the one whose text was written
+                    // before in under half.
+                    if what == "helped" && eager && eos == NEVER && most == 40 && rows_most == 32 {
+                        fewer = ended_in[2] <= 5 && ended_in[0] * 2 < 40;
+                        assert!(fewer, "the requests ended in passes {ended_in:?}");
+                    }
+                }
+            }
+        }
+        assert!(fewer, "the helped requests were never read");
         Ok(())
     }
 
