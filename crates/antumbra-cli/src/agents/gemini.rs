@@ -24,13 +24,17 @@
 //! - **Approval of a tool.** It asks before an Antumbra tool runs, and an
 //!   extension's server cannot be marked trusted. A policy file of the user's
 //!   allows them without asking.
+//!
+//! Started by Unity Gateway (`ug gemini`), Gemini CLI has another home, and
+//! loads the extensions there and none of these. So on a machine `ug` is on,
+//! the same directory is written there too.
 
 use std::path::PathBuf;
 
 use serde_json::json;
 
 use super::hook::Event;
-use super::{keep, kept, Agent, Finding, Ground, Kept, Report, Shell};
+use super::{gateway, keep, kept, Agent, Finding, Ground, Kept, Report, Shell};
 
 /// The extension's name, which is also its directory's and its server's.
 pub const EXTENSION: &str = "antumbra";
@@ -48,6 +52,24 @@ pub fn home(ground: &Ground<'_>) -> PathBuf {
 /// The extension's directory.
 pub fn extension(ground: &Ground<'_>) -> PathBuf {
     home(ground).join("extensions").join(EXTENSION)
+}
+
+/// Every directory a Gemini CLI on this machine loads the extension from,
+/// each with what setup calls it: Gemini CLI's own, and, on a machine Unity
+/// Gateway is on, the one in the home `ug gemini` starts it with.
+fn places(ground: &Ground<'_>) -> Vec<(PathBuf, &'static str)> {
+    let own = extension(ground);
+    let theirs = gateway::gemini_home(ground)
+        .join(".gemini")
+        .join("extensions")
+        .join(EXTENSION);
+    let both = gateway::present(ground) && theirs != own;
+    std::iter::once((own, "Gemini CLI: the antumbra extension"))
+        .chain(both.then_some((
+            theirs,
+            "Gemini CLI started by Unity Gateway: the antumbra extension",
+        )))
+        .collect()
 }
 
 /// Gemini CLI runs a hook's command in PowerShell on Windows and in bash
@@ -123,12 +145,15 @@ pub fn files(ground: &Ground<'_>) -> Vec<Kept> {
 }
 
 pub fn connect(ground: &Ground<'_>, report: &dyn Report) -> anyhow::Result<()> {
-    keep(
-        &extension(ground),
-        &files(ground),
-        "Gemini CLI: the antumbra extension (the MCP bridge and three hooks)",
-        report,
-    )?;
+    let files = files(ground);
+    for (dir, what) in places(ground) {
+        keep(
+            &dir,
+            &files,
+            &format!("{what} (the MCP bridge and three hooks)"),
+            report,
+        )?;
+    }
     report.info(
         "Gemini CLI connects no MCP server in a folder you have not trusted, and asks before an Antumbra tool runs.",
     );
@@ -136,11 +161,11 @@ pub fn connect(ground: &Ground<'_>, report: &dyn Report) -> anyhow::Result<()> {
 }
 
 pub fn check(ground: &Ground<'_>) -> Vec<Finding> {
-    kept(
-        &extension(ground),
-        &files(ground),
-        "Gemini CLI: the antumbra extension",
-    )
+    let files = files(ground);
+    places(ground)
+        .into_iter()
+        .flat_map(|(dir, what)| kept(&dir, &files, what))
+        .collect()
 }
 
 #[cfg(test)]
@@ -296,6 +321,125 @@ mod tests {
                 .any(|f| !f.works && f.said.contains("gemini-extension.json missing")),
             "{found:?}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn with_unity_gateway_here_the_extension_is_also_in_the_home_ug_starts_it_with(
+    ) -> anyhow::Result<()> {
+        let home = Scratch::new("gemini-gateway")?;
+        let ug = |name: &str| (name == "ug").then(|| PathBuf::from(name));
+        let ground = Ground {
+            home: home.path(),
+            antumbra: Program::Named,
+            env: &nothing,
+            find: &ug,
+        };
+        let own = home
+            .path()
+            .join(".gemini")
+            .join("extensions")
+            .join("antumbra");
+        let theirs = home
+            .path()
+            .join(".ucode")
+            .join(".gemini-home")
+            .join(".gemini")
+            .join("extensions")
+            .join("antumbra");
+
+        let told = Told::default();
+        connect(&ground, &told)?;
+        let said = told.said.borrow().clone();
+        assert!(
+            said[0].starts_with("ok Gemini CLI: the antumbra extension")
+                && said[0].contains("written to"),
+            "{said:?}"
+        );
+        assert!(
+            said[1].starts_with("ok Gemini CLI started by Unity Gateway")
+                && said[1].contains("written to"),
+            "{said:?}"
+        );
+        // The same files, both places.
+        for file in ["gemini-extension.json", "hooks/hooks.json"] {
+            assert_eq!(
+                std::fs::read_to_string(own.join(file))?,
+                std::fs::read_to_string(theirs.join(file))?,
+                "{file}"
+            );
+        }
+        assert!(check(&ground).iter().all(|f| f.fix.is_none()));
+
+        // ug's copy gone, as after it was installed later than setup ran: the
+        // check says which, and running setup again writes it.
+        std::fs::remove_dir_all(&theirs)?;
+        let found = check(&ground);
+        assert!(
+            found.iter().any(|f| !f.works
+                && f.said.starts_with("Gemini CLI started by Unity Gateway")
+                && f.said.contains("missing")),
+            "{found:?}"
+        );
+        assert!(
+            found
+                .iter()
+                .any(|f| f.fix.is_none() && f.said.starts_with("Gemini CLI: ")),
+            "{found:?}"
+        );
+
+        // Without ug on this machine, its directory is not written to.
+        let plain = Ground {
+            home: home.path(),
+            antumbra: Program::Named,
+            env: &nothing,
+            find: &nowhere,
+        };
+        connect(&plain, &Told::default())?;
+        assert!(!theirs.exists());
+        assert!(check(&plain).iter().all(|f| f.fix.is_none()));
+        Ok(())
+    }
+
+    #[test]
+    fn a_setup_run_from_inside_ug_gemini_writes_both_homes_once() -> anyhow::Result<()> {
+        let home = Scratch::new("gemini-inside")?;
+        // What `ug gemini` gives the session, and so a setup run from it.
+        let theirs = home.path().join(".ucode").join(".gemini-home");
+        let named = theirs.display().to_string();
+        let inside = move |name: &str| (name == "GEMINI_CLI_HOME").then(|| named.clone());
+        let ug = |name: &str| (name == "ug").then(|| PathBuf::from(name));
+
+        // Read as it stands, the variable names ug's home as Gemini CLI's own:
+        // one place, written once.
+        let as_it_stands = Ground {
+            home: home.path(),
+            antumbra: Program::Named,
+            env: &inside,
+            find: &ug,
+        };
+        assert_eq!(places(&as_it_stands).len(), 1);
+
+        // Read as setup reads it, it is ug's: the user's own home is written
+        // as well.
+        let outside = gateway::outside(home.path(), &inside);
+        let ground = Ground {
+            home: home.path(),
+            antumbra: Program::Named,
+            env: &outside,
+            find: &ug,
+        };
+        connect(&ground, &Told::default())?;
+        for dir in [home.path().join(".gemini"), theirs.join(".gemini")] {
+            assert!(
+                dir.join("extensions")
+                    .join("antumbra")
+                    .join("gemini-extension.json")
+                    .is_file(),
+                "{}",
+                dir.display()
+            );
+        }
         Ok(())
     }
 

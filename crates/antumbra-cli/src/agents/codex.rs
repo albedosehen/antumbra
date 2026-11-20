@@ -17,7 +17,7 @@
 //! Codex, under `/hooks`. Until then a session has Antumbra's tools and none
 //! of the three touchpoints, so setup says so.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use super::hook::Event;
@@ -103,6 +103,96 @@ fn registered(config: &str) -> bool {
         .skip(at + 1)
         .take_while(|line| !line.trim_start().starts_with('['))
         .any(|line| line.contains("\"bridge\""))
+}
+
+/// Where an organization's requirements for Codex are on this machine: a
+/// file Codex reads above every config of the user's. `env` gives the value
+/// of an environment variable, or nothing.
+pub fn requirements(env: &dyn Fn(&str) -> Option<String>) -> PathBuf {
+    if cfg!(windows) {
+        env("ProgramData")
+            .map(|dir| dir.trim().to_string())
+            .filter(|dir| !dir.is_empty())
+            .map_or_else(|| PathBuf::from(r"C:\ProgramData"), PathBuf::from)
+            .join("OpenAI")
+            .join("Codex")
+            .join("requirements.toml")
+    } else {
+        PathBuf::from("/etc/codex/requirements.toml")
+    }
+}
+
+/// What `requirements`, the text of an organization's requirements file at
+/// `path`, stops of what setup wrote for Codex. Three things in it do, by
+/// Codex's own pages (read on 2026-11-20): `allow_managed_hooks_only = true`
+/// has Codex ignore every hook but the organization's, `hooks = false` under
+/// `[features]` turns hooks off, and an `mcp_servers` table is the list of
+/// the servers a user may enable, so one it does not name stays disabled.
+///
+/// The file is TOML, read here a line at a time for those three, as
+/// `config.toml` is read for the server's table, and nothing else in it is
+/// judged. A list that mentions the server anywhere is taken to name it: how
+/// an entry is matched against a server's command is Codex's to decide.
+pub fn held_back(requirements: &str, path: &Path) -> Vec<Finding> {
+    let mut table = String::new();
+    let (mut managed_only, mut hooks_off, mut listed) = (false, false, false);
+    let lists = |name: &str| name == "mcp_servers" || name.starts_with("mcp_servers.");
+    for line in requirements.lines() {
+        let line = line.split('#').next().unwrap_or_default().trim();
+        if let Some(header) = line.strip_prefix('[') {
+            table = header
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .trim()
+                .to_string();
+            listed |= lists(&table);
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim().trim_matches('"');
+        let key = if table.is_empty() {
+            key.to_string()
+        } else {
+            format!("{table}.{key}")
+        };
+        match (key.as_str(), value.trim()) {
+            ("allow_managed_hooks_only", value) => managed_only = value == "true",
+            ("features.hooks", value) => hooks_off = value == "false",
+            (key, _) => listed |= lists(key),
+        }
+    }
+    let theirs = "that file is your organization's: ask whoever manages it";
+    let mut found = Vec::new();
+    if managed_only {
+        found.push(Finding::bad(
+            format!(
+                "Codex: {} has it run only your organization's hooks (allow_managed_hooks_only), so Antumbra's three do not run",
+                path.display()
+            ),
+            theirs,
+        ));
+    }
+    if hooks_off {
+        found.push(Finding::bad(
+            format!(
+                "Codex: {} turns hooks off (features.hooks = false), so Antumbra's three do not run",
+                path.display()
+            ),
+            theirs,
+        ));
+    }
+    if listed && !requirements.contains(SERVER) {
+        found.push(Finding::bad(
+            format!(
+                "Codex: {} lists the MCP servers that may be enabled (mcp_servers), and \"{SERVER}\" is not one, so Codex leaves it disabled",
+                path.display()
+            ),
+            format!("{theirs}, to list it as [mcp_servers.{SERVER}]"),
+        ));
+    }
+    found
 }
 
 pub fn connect(ground: &Ground<'_>, report: &dyn Report) -> anyhow::Result<()> {
@@ -264,6 +354,101 @@ mod tests {
 
     fn nowhere(_: &str) -> Option<PathBuf> {
         None
+    }
+
+    #[test]
+    fn an_organizations_requirements_that_stop_the_hooks_or_the_server_are_said() {
+        let path = Path::new("/etc/codex/requirements.toml");
+        let said = |text: &str| -> Vec<String> {
+            held_back(text, path)
+                .into_iter()
+                .map(|found| {
+                    // Each is the organization's to change, and fails the check.
+                    assert!(!found.works, "{found:?}");
+                    assert!(
+                        found
+                            .fix
+                            .as_deref()
+                            .is_some_and(|fix| fix.contains("your organization's")),
+                        "{found:?}"
+                    );
+                    found.said
+                })
+                .collect()
+        };
+        // Nothing of ours in it.
+        assert!(said("").is_empty());
+        assert!(said(
+            "approval_policy = \"on-request\"\n\n[features]\nhooks = true\n\n[hooks]\nmanaged_dir = \"/enterprise/hooks\"\n"
+        )
+        .is_empty());
+        // Only the organization's hooks.
+        let found = said("# policy\nallow_managed_hooks_only = true  # ours alone\n");
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("allow_managed_hooks_only"), "{found:?}");
+        assert!(
+            found[0].contains("requirements.toml"),
+            "the file is named: {found:?}"
+        );
+        // Written out as off, or commented out, or another table's key of
+        // the same name: none of them is the requirement.
+        for not_it in [
+            "allow_managed_hooks_only = false\n",
+            "# allow_managed_hooks_only = true\n",
+            "[tools]\nallow_managed_hooks_only = true\n",
+            "[other]\nhooks = false\n",
+        ] {
+            assert!(said(not_it).is_empty(), "{not_it}");
+        }
+        // Hooks off, under its table or as a dotted key.
+        for off in ["[features]\nhooks = false\n", "features.hooks = false\n"] {
+            let found = said(off);
+            assert_eq!(found.len(), 1, "{off}");
+            assert!(found[0].contains("features.hooks"), "{found:?}");
+        }
+        // A list of servers that does not name ours, in each way TOML writes
+        // one, an empty one included.
+        for list in [
+            "[mcp_servers.docs]\nidentity = { command = \"codex-mcp\" }\n",
+            "[mcp_servers]\n",
+            "mcp_servers = {}\n",
+            "mcp_servers.docs.identity = { url = \"https://example.com/mcp\" }\n",
+        ] {
+            let found = said(list);
+            assert_eq!(found.len(), 1, "{list}");
+            assert!(found[0].contains("mcp_servers"), "{found:?}");
+        }
+        // One that names it is not judged further.
+        assert!(said(
+            "[mcp_servers.docs]\nidentity = { command = \"codex-mcp\" }\n\n[mcp_servers.antumbra]\nidentity = { command = \"antumbra\" }\n"
+        )
+        .is_empty());
+        // All three at once are three things said.
+        assert_eq!(
+            said("allow_managed_hooks_only = true\n[features]\nhooks = false\n[mcp_servers]\n")
+                .len(),
+            3
+        );
+    }
+
+    #[test]
+    fn the_requirements_are_where_codex_reads_them() {
+        let none = |_: &str| None;
+        let path = requirements(&none);
+        assert!(path.ends_with("requirements.toml"));
+        if cfg!(windows) {
+            assert_eq!(
+                path,
+                PathBuf::from(r"C:\ProgramData\OpenAI\Codex\requirements.toml")
+            );
+            let moved = |name: &str| (name == "ProgramData").then(|| r"D:\Data".to_string());
+            assert_eq!(
+                requirements(&moved),
+                PathBuf::from(r"D:\Data\OpenAI\Codex\requirements.toml")
+            );
+        } else {
+            assert_eq!(path, PathBuf::from("/etc/codex/requirements.toml"));
+        }
     }
 
     #[test]

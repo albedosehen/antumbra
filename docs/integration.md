@@ -257,6 +257,39 @@ What goose does read on every turn is a file its config names, `GOOSE_MOIM_MESSA
 - 2.x offers MCP tools to the model through its Code Mode by default, so the model calls Antumbra's as `tools.antumbra.recall_memories(...)` inside `execute`. That is OpenCode's own setting (`codemode`), and the tools are the same.
 - The plugin also runs for the short request OpenCode makes to title a session, which is told what the session is told.
 
+### Agents started through Unity Gateway
+
+Unity Gateway (`ug`, Databricks' launcher: `ug claude`, `ug gemini`, `ug opencode` and the rest) starts a coding agent against a workspace's gateway. It keeps what it writes in `~/.ucode`, and for some agents that is the config directory itself, which it points the agent at for the session. Such an agent reads nothing setup wrote where the agent keeps its config on its own.
+
+So on a machine `ug` is on (its program on the PATH, as `ug` or `ucode`, or a workspace it saved in `~/.ucode/state.json`), `antumbra setup` also writes for each agent as `ug` starts it, and `antumbra setup check` reads both back. Nothing of Unity Gateway's own is edited: what setup adds is a directory or a file that is Antumbra's whole, beside what `ug` keeps.
+
+| Agent | How `ug` starts it | What setup adds |
+| --- | --- | --- |
+| Gemini CLI | with its home moved to `~/.ucode/.gemini-home` (`GEMINI_CLI_HOME`) | the same extension, in `~/.ucode/.gemini-home/.gemini/extensions/antumbra` |
+| OpenCode | with its config home moved to `~/.ucode/opencode-xdg` (`XDG_CONFIG_HOME`) | the same plugin file, `~/.ucode/opencode-xdg/opencode/plugins/antumbra.js` |
+| Claude Code | with `~/.claude/ucode-settings.json` over your own settings, which it still reads | a settings file of Antumbra's own, `~/.antumbra/claude-settings.json`, for the one kind of launch that leaves yours out |
+| Codex | from `~/.codex`, with its own settings as overrides | nothing: the hooks and the server setup wrote there are the ones read |
+| Copilot CLI | from `~/.copilot` | nothing, likewise. `ug` passes `--allow-all-mcp-server-instructions`, so the bridge's instructions are read there |
+
+**Claude Code and a relayed subscription.** One kind of launch does not read your settings. When a workspace relays a Claude subscription, `ug` starts Claude Code with `--setting-sources project,local`, which leaves your own settings out, and Antumbra's hooks with them. The MCP server is still there, because `ug` hands the servers you registered back to that launch. `ug` merges a `--settings` file its caller passes into its own, keeping the hooks of both, so that launch is started with Antumbra's:
+
+```sh
+ug claude --settings ~/.antumbra/claude-settings.json
+```
+
+The file holds what setup wires into Claude Code and nothing else: the hooks, `ANTUMBRA_URL`, `ANTUMBRA_WORKSPACE_ID` and `ANTUMBRA_HOST_ID`, and `autoMemoryEnabled: false` where your own settings have it. Setup and the check tell such a launch by what `ug` wrote for it (no `apiKeyHelper`, and a gateway address that is a relay on this machine), and print the command when they see one. Given to a launch that reads your settings too, the file changes nothing: Claude Code runs a handler it finds in two settings files once.
+
+**A setup run from inside one of these sessions.** An agent `ug` started hands the variables `ug` set for it to the commands it runs, `antumbra setup` among them. Setup reads a `GEMINI_CLI_HOME` or an `XDG_CONFIG_HOME` that names a place inside `~/.ucode` as not set, so the agent's own directory is still the one in your home, and goose's config is not looked for under OpenCode's.
+
+**What an organization's policy stops.** A workspace's configuration can reach an agent as managed policy, and a policy can stop what setup wired with nothing said in the session: the hooks do not run, or the server is gone from the agent's list. `antumbra setup check` reads the policy files, says which one stops what, and whose it is to change.
+
+- **Claude Code's managed settings** (`managed-settings.json`, its `managed-settings.d` drop-ins and `managed-mcp.json`, in `/etc/claude-code`, `/Library/Application Support/ClaudeCode` or `C:\Program Files\ClaudeCode`). For the hooks: `allowManagedHooksOnly`, `disableAllHooks`, and `strictPluginOnlyCustomization` over `hooks`. For the server: a `managed-mcp.json` that does not name it, `strictPluginOnlyCustomization` over `mcp`, a `deniedMcpServers` entry that matches it, and an `allowedMcpServers` list that does not admit it. The check judges the server against the lists as Claude Code's own page says it does: by its address once a list holds one (`serverUrl`, with `*`, and a host written without a port matching the scheme's own port alone), and by its name until then. It prints the entry that would admit it.
+- **Codex's requirements** (`/etc/codex/requirements.toml`, on Windows `%ProgramData%\OpenAI\Codex\requirements.toml`): `allow_managed_hooks_only = true`, `hooks = false` under `[features]`, and an `mcp_servers` list that does not name `antumbra`.
+
+A list in the settings `ug claude` passes is judged for that launch as well, and said as the workspace's to change, since `ug` writes that file again from the workspace's configuration. With the hooks stopped, the memory tools still work when the agent is asked to use them. With the server kept out, the hooks still put what is recalled in front of the agent, and it cannot search or store. Only files are read: a policy delivered by a vendor's console, an MDM profile or the registry is not seen.
+
+**Not covered.** `ug` also starts Kilo, Pi and Google's Antigravity, which setup does not connect. What is said here of Unity Gateway is what its source and README say (read on 2026-11-20). None of it was run against a workspace: what was run is setup and the check in a home laid out as `ug` leaves one, and Claude Code started the way a relayed launch starts it, where a hook from the `--settings` file ran with that file's `env`.
+
 ## Leaving work for another of your machines
 
 A session can leave a note for a session on another of your machines: "rerun this on the GPU box", "check the dashboard after the deploy". The agent calls `leave_handoff` with the text (its first line is the title) and `for_host`, the machine's host name, or nothing for whichever of your machines starts a session next. A session that starts there opens with the count and a line for each handoff waiting for it, ahead of recalled memories, and keeps hearing about one until a session calls `complete_handoff`; after that it is no longer announced but `handoffs` with `include_done` still shows it. The machine's name is `ANTUMBRA_HOST_ID`, the same one the bootstrap prints in its first line, so set it on each machine. Each session start also names the machine to the server (`register_device`), so `devices` lists every one of your machines with when it was last seen. That includes a laptop whose agent talks to a hosted server and runs no server of its own. A machine named that way is a memory node: the server cannot see its hardware, and a machine that trains runs `antumbra-mcp` itself, which registers it with what it can do. Handoffs are yours alone: they live in your own `handoff` compartment, and no other user's session sees them. It is a note, not remote control: nothing runs on the other machine until a session there decides to.
