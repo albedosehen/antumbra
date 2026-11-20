@@ -351,6 +351,79 @@ impl Memories {
     }
 }
 
+/// One request being answered beside others.
+struct Sequence {
+    tokens: Vec<u32>,
+    prompt_len: usize,
+    blend: u16,
+    rng: StdRng,
+    /// The answer, once the request has ended.
+    answer: Option<String>,
+}
+
+/// The requests one model is answering side by side
+/// ([`QwenCausalLm::admit`], [`QwenCausalLm::advance`]): a place for each, a
+/// request's own from the pass it is taken in to the moment its answer is
+/// taken.
+#[derive(Default)]
+pub struct Together {
+    places: Vec<Option<Sequence>>,
+    /// The prompts' tokens and the time they took to read, and the tokens
+    /// decoded after each request's first over the time the shared passes
+    /// took.
+    pub timing: GenTiming,
+}
+
+impl Together {
+    /// Requests one pass takes at most.
+    pub const AT_ONCE: usize = 32;
+
+    /// A place no request holds, if there is one.
+    fn free(&mut self) -> Option<usize> {
+        if let Some(place) = self.places.iter().position(Option::is_none) {
+            return Some(place);
+        }
+        (self.places.len() < Self::AT_ONCE).then(|| {
+            self.places.push(None);
+            self.places.len() - 1
+        })
+    }
+
+    /// Requests still taking tokens.
+    pub fn answering(&self) -> usize {
+        self.places
+            .iter()
+            .flatten()
+            .filter(|s| s.answer.is_none())
+            .count()
+    }
+
+    /// Requests that hold a place: answering, or ended with their answer
+    /// not yet taken.
+    pub fn held(&self) -> usize {
+        self.places.iter().flatten().count()
+    }
+
+    /// Let go of the request at `place`, answered or not: it takes no more
+    /// tokens and its place is free for another, whose prompt is read into
+    /// a cache cleared for it.
+    pub fn leave(&mut self, place: usize) {
+        if let Some(slot) = self.places.get_mut(place) {
+            *slot = None;
+        }
+    }
+
+    /// The answer of the request at `place`, once it has ended, and its
+    /// place with it: free for another request from then on. `None` while
+    /// it is still answering, or when no request is there.
+    pub fn take(&mut self, place: usize) -> Option<String> {
+        let slot = self.places.get_mut(place)?;
+        let answer = slot.as_mut()?.answer.take()?;
+        *slot = None;
+        Some(answer)
+    }
+}
+
 pub struct QwenCausalLm {
     model: QwenLora,
     tokenizer: tokenizers::Tokenizer,
@@ -670,6 +743,21 @@ impl QwenCausalLm {
         crate::compose::set_blend(&vars, specs)
     }
 
+    /// Keep a blend of experts beside the one that is loaded, as blend
+    /// `blend` (one or more): [`QwenCausalLm::generate_each_of`] answers a
+    /// request with it while other requests in the same pass are answered
+    /// with others. The blend is loaded as [`QwenCausalLm::load_blend`]
+    /// loads it and its factors are kept as rows read them; the blend that
+    /// was loaded before is no longer, so load it again, or keep it too.
+    /// `false`, with the blend loaded and nothing kept, where this model
+    /// does not read rows as plain values (a GPU, a dense base, a CPU with
+    /// no tiles): there one blend is served at a time.
+    pub fn keep_blend(&mut self, blend: u16, specs: &[(String, f32)]) -> Result<bool> {
+        self.load_blend(specs)?;
+        self.model.set_grad(false);
+        self.model.keep_blend(blend).map_err(ce)
+    }
+
     /// Wrap a raw prompt in the Qwen chat template for an `-Instruct` base, so
     /// the model is prompted the way it was tuned (a `user` turn, then the open
     /// `assistant` turn it completes). A plain base sees the prompt unchanged.
@@ -842,137 +930,191 @@ impl QwenCausalLm {
     /// they took to read, and the tokens decoded after each sequence's first
     /// over the time the shared passes took.
     pub fn generate_each(&mut self, prompts: &[&str], seed: u64) -> Result<Vec<String>> {
-        // Sequences one pass takes at most; more are answered a run at a time.
-        const AT_ONCE: usize = 32;
-        if prompts.len() > AT_ONCE {
-            let mut answers = Vec::with_capacity(prompts.len());
-            let mut timing = GenTiming::default();
-            for (run, some) in prompts.chunks(AT_ONCE).enumerate() {
-                answers
-                    .extend(self.generate_each(some, seed.wrapping_add((run * AT_ONCE) as u64))?);
-                if let Some(t) = self.timing {
-                    timing.prompt_tokens += t.prompt_tokens;
-                    timing.prompt_secs += t.prompt_secs;
-                    timing.decoded += t.decoded;
-                    timing.decode_secs += t.decode_secs;
-                }
+        let of: Vec<(&str, u16)> = prompts.iter().map(|prompt| (*prompt, 0)).collect();
+        self.generate_each_of(&of, seed)
+    }
+
+    /// [`QwenCausalLm::generate_each`] with a blend of experts for each
+    /// prompt: 0 for the blend that is loaded, or one kept with
+    /// [`QwenCausalLm::keep_blend`]. Each answer is the one its prompt gets
+    /// alone from a model that has that blend loaded. The base's weights
+    /// are read once for every request in a pass whatever their blends;
+    /// each request reads its own blend's factors beside them.
+    pub fn generate_each_of(&mut self, prompts: &[(&str, u16)], seed: u64) -> Result<Vec<String>> {
+        let mut answers = vec![String::new(); prompts.len()];
+        let mut timing = GenTiming::default();
+        // A run of prompts at a time, as many as one pass takes.
+        for (run, some) in prompts.chunks(Together::AT_ONCE).enumerate() {
+            let from = run * Together::AT_ONCE;
+            let mut together = Together::default();
+            let mut places = Vec::with_capacity(some.len());
+            for (i, (prompt, blend)) in some.iter().enumerate() {
+                let own = seed.wrapping_add((from + i) as u64);
+                let Some(place) = self.admit(&mut together, prompt, *blend, own)? else {
+                    // This model reads no rows this way: one prompt after
+                    // another, as it always has.
+                    if prompts.iter().any(|(_, blend)| *blend != 0) {
+                        return Err(AntumbraError::other(
+                            "a kept blend was asked for of a model that keeps none: it reads no rows as plain values",
+                        ));
+                    }
+                    for (i, (prompt, _)) in prompts.iter().enumerate() {
+                        answers[i] = self.sample_one(prompt, seed.wrapping_add(i as u64))?;
+                    }
+                    return Ok(answers);
+                };
+                places.push(place);
             }
-            self.timing = Some(timing);
-            return Ok(answers);
+            while together.answering() > 0 {
+                self.advance(&mut together)?;
+            }
+            for (i, place) in places.into_iter().enumerate() {
+                answers[from + i] = together.take(place).unwrap_or_default();
+            }
+            timing.prompt_tokens += together.timing.prompt_tokens;
+            timing.prompt_secs += together.timing.prompt_secs;
+            timing.decoded += together.timing.decoded;
+            timing.decode_secs += together.timing.decode_secs;
         }
+        self.timing = Some(timing);
+        Ok(answers)
+    }
+
+    /// Take a request in among those `together` is answering: its prompt is
+    /// read into a cache of its own, and it takes its tokens from the passes
+    /// that follow ([`QwenCausalLm::advance`]) beside the requests already
+    /// there, which do not wait for it. `blend` is 0 for the blend that is
+    /// loaded or one kept with [`QwenCausalLm::keep_blend`]. What comes back
+    /// is the request's place, by which its answer is taken when it is done.
+    /// `None`, with nothing read, when there is no room for another or when
+    /// this model does not read rows as plain values.
+    pub fn admit(
+        &mut self,
+        together: &mut Together,
+        prompt: &str,
+        blend: u16,
+        seed: u64,
+    ) -> Result<Option<usize>> {
+        let Some(place) = together.free() else {
+            return Ok(None);
+        };
         self.model.set_grad(false);
-        self.model.sequences(prompts.len());
-        let policy = crate::decode::DecodePolicy {
+        self.model.sequences(Together::AT_ONCE);
+        let policy = self.policy();
+        let first = policy.takes_the_first();
+        let tokens = self.encode(&self.wrap_prompt(prompt))?;
+        let mut sequence = Sequence {
+            prompt_len: tokens.len(),
+            tokens,
+            blend,
+            rng: StdRng::seed_from_u64(seed),
+            answer: None,
+        };
+        self.model.clear_sequence(place).map_err(ce)?;
+        let began = std::time::Instant::now();
+        let stepped = self
+            .model
+            .step_in(place, blend, &sequence.tokens, 0, first)
+            .map_err(ce)?;
+        let next = match stepped {
+            Some(Stepped::First(next)) => next,
+            Some(Stepped::Logits(mut logits)) => {
+                let next =
+                    crate::decode::pick_token_in(&mut logits, &[], &policy, &mut sequence.rng);
+                self.model.keep(logits);
+                next
+            }
+            None => return Ok(None),
+        };
+        together.timing.prompt_tokens += sequence.prompt_len;
+        together.timing.prompt_secs += began.elapsed().as_secs_f64();
+        if self.max_new_tokens == 0 || next == self.eos {
+            sequence.answer = Some(self.answer_of(&sequence)?);
+        } else {
+            sequence.tokens.push(next);
+        }
+        together.places[place] = Some(sequence);
+        Ok(Some(place))
+    }
+
+    /// One pass for every request `together` is still answering: each takes
+    /// its next token, and one that ends there has its answer ready
+    /// ([`Together::take`]). The places of those that ended in this pass are
+    /// what comes back.
+    pub fn advance(&mut self, together: &mut Together) -> Result<Vec<usize>> {
+        let policy = self.policy();
+        let first = policy.takes_the_first();
+        let each: Vec<Next> = together
+            .places
+            .iter()
+            .enumerate()
+            .filter_map(|(place, sequence)| {
+                let sequence = sequence.as_ref().filter(|s| s.answer.is_none())?;
+                sequence.tokens.last().map(|token| Next {
+                    sequence: place,
+                    token: *token,
+                    position: sequence.tokens.len() - 1,
+                    blend: sequence.blend,
+                })
+            })
+            .collect();
+        if each.is_empty() {
+            return Ok(Vec::new());
+        }
+        let began = std::time::Instant::now();
+        let Some(stepped) = self.model.step_each(&each, first).map_err(ce)? else {
+            return Err(AntumbraError::other(
+                "a model that read its prompts as plain rows stopped reading rows that way",
+            ));
+        };
+        together.timing.decoded += each.len();
+        together.timing.decode_secs += began.elapsed().as_secs_f64();
+        let mut ended = Vec::new();
+        for (next, stepped) in each.iter().zip(stepped) {
+            let Some(sequence) = together.places[next.sequence].as_mut() else {
+                continue;
+            };
+            let token = match stepped {
+                Stepped::First(token) => token,
+                Stepped::Logits(mut logits) => crate::decode::pick_token_in(
+                    &mut logits,
+                    &sequence.tokens[sequence.prompt_len..],
+                    &policy,
+                    &mut sequence.rng,
+                ),
+            };
+            let mut done = token == self.eos;
+            if !done {
+                sequence.tokens.push(token);
+                let answered = &sequence.tokens[sequence.prompt_len..];
+                done = answered.len() >= self.max_new_tokens || crate::decode::loops(answered);
+            }
+            if done {
+                let answer = self.answer_of(sequence)?;
+                sequence.answer = Some(answer);
+                ended.push(next.sequence);
+            }
+        }
+        Ok(ended)
+    }
+
+    /// The decode policy this model's settings come to.
+    fn policy(&self) -> crate::decode::DecodePolicy {
+        crate::decode::DecodePolicy {
             temperature: self.temperature,
             top_p: self.top_p,
             repetition_penalty: self.repetition_penalty,
             no_repeat_ngram_size: self.no_repeat_ngram_size,
-        };
-        let first = policy.takes_the_first();
-        struct Sequence {
-            tokens: Vec<u32>,
-            prompt_len: usize,
-            rng: StdRng,
-            done: bool,
         }
-        let mut timing = GenTiming::default();
-        let mut all = Vec::with_capacity(prompts.len());
-        for (i, prompt) in prompts.iter().enumerate() {
-            let tokens = self.encode(&self.wrap_prompt(prompt))?;
-            let mut sequence = Sequence {
-                prompt_len: tokens.len(),
-                tokens,
-                rng: StdRng::seed_from_u64(seed.wrapping_add(i as u64)),
-                done: self.max_new_tokens == 0,
-            };
-            self.model.clear_sequence(i).map_err(ce)?;
-            let began = std::time::Instant::now();
-            let stepped = self
-                .model
-                .step_in(i, &sequence.tokens, 0, first)
-                .map_err(ce)?;
-            let next = match stepped {
-                Some(Stepped::First(next)) => next,
-                Some(Stepped::Logits(mut logits)) => {
-                    let next =
-                        crate::decode::pick_token_in(&mut logits, &[], &policy, &mut sequence.rng);
-                    self.model.keep(logits);
-                    next
-                }
-                None => {
-                    // This model reads no rows this way: one prompt after
-                    // another, as it always has.
-                    let mut answers = Vec::with_capacity(prompts.len());
-                    for (i, prompt) in prompts.iter().enumerate() {
-                        answers.push(self.sample_one(prompt, seed.wrapping_add(i as u64))?);
-                    }
-                    return Ok(answers);
-                }
-            };
-            timing.prompt_tokens += sequence.prompt_len;
-            timing.prompt_secs += began.elapsed().as_secs_f64();
-            if sequence.done || next == self.eos {
-                sequence.done = true;
-            } else {
-                sequence.tokens.push(next);
-            }
-            all.push(sequence);
-        }
-        loop {
-            let each: Vec<Next> = all
-                .iter()
-                .enumerate()
-                .filter(|(_, s)| !s.done)
-                .filter_map(|(i, s)| {
-                    s.tokens.last().map(|token| Next {
-                        sequence: i,
-                        token: *token,
-                        position: s.tokens.len() - 1,
-                    })
-                })
-                .collect();
-            if each.is_empty() {
-                break;
-            }
-            let began = std::time::Instant::now();
-            let Some(stepped) = self.model.step_each(&each, first).map_err(ce)? else {
-                return Err(AntumbraError::other(
-                    "a model that read its prompts as plain rows stopped reading rows that way",
-                ));
-            };
-            timing.decoded += each.len();
-            timing.decode_secs += began.elapsed().as_secs_f64();
-            for (next, stepped) in each.iter().zip(stepped) {
-                let sequence = &mut all[next.sequence];
-                let token = match stepped {
-                    Stepped::First(token) => token,
-                    Stepped::Logits(mut logits) => crate::decode::pick_token_in(
-                        &mut logits,
-                        &sequence.tokens[sequence.prompt_len..],
-                        &policy,
-                        &mut sequence.rng,
-                    ),
-                };
-                if token == self.eos {
-                    sequence.done = true;
-                    continue;
-                }
-                sequence.tokens.push(token);
-                let answered = &sequence.tokens[sequence.prompt_len..];
-                sequence.done =
-                    answered.len() >= self.max_new_tokens || crate::decode::loops(answered);
-            }
-        }
-        self.timing = Some(timing);
-        all.iter()
-            .map(|sequence| {
-                let text = self
-                    .tokenizer
-                    .decode(&sequence.tokens[sequence.prompt_len..], true)
-                    .map_err(|e| AntumbraError::other(format!("decode: {e}")))?;
-                Ok(self.trim(&text))
-            })
-            .collect()
+    }
+
+    /// What a sequence has answered, as text.
+    fn answer_of(&self, sequence: &Sequence) -> Result<String> {
+        let text = self
+            .tokenizer
+            .decode(&sequence.tokens[sequence.prompt_len..], true)
+            .map_err(|e| AntumbraError::other(format!("decode: {e}")))?;
+        Ok(self.trim(&text))
     }
 
     /// Full-sequence logits `(1, seq, vocab)` in f32, LoRA on (the policy) or

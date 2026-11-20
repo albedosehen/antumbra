@@ -113,7 +113,7 @@ const PLAIN: Kernels = Kernels {
 /// The widest kernels this CPU has for heads of `dim` values.
 fn kernels(dim: usize) -> Kernels {
     #[cfg(target_arch = "x86_64")]
-    if super::tiles::available() && super::wide::attends(dim) {
+    if super::tiles::wide() && super::wide::attends(dim) {
         return Kernels {
             scores: super::wide::scores,
             weigh: super::wide::weigh,

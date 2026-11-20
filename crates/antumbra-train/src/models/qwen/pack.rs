@@ -81,6 +81,7 @@ const SIXTEEN: usize = 16;
 /// the factors are read. A rank's sum through `A` is multiplied once by the
 /// adapter's scale and both of the rank's steps ([`Packed::scaled`]), and
 /// what comes of that is what `B`'s whole numbers are multiplied by.
+#[derive(Clone)]
 pub(super) struct Packed {
     /// The ranks that are held: the factors' own, less those at the end
     /// that add nothing.
@@ -313,7 +314,7 @@ fn sixteen_through(
     let (a, x) = (&a[..n * SIXTEEN], &x[..(rows - 1) * stride + n]);
     let out = &mut out[..(rows - 1) * out_stride + SIXTEEN];
     #[cfg(target_arch = "x86_64")]
-    if super::tiles::available() {
+    if super::tiles::wide() {
         // SAFETY: `available` found AVX-512F among the features it names,
         // and the three slices were cut just above to what the kernel reads
         // and writes.
@@ -358,7 +359,7 @@ unsafe fn sixteens_added(
 ) {
     let (b, t) = (&b[..sixteens * rank * SIXTEEN], &t[..rows * rank]);
     #[cfg(target_arch = "x86_64")]
-    if super::tiles::available() {
+    if super::tiles::wide() {
         // `available` found AVX-512F among the features it names, and the
         // two slices were cut just above to what the kernel reads.
         super::wide::add_sixteens(b.as_ptr(), rank, sixteens, t.as_ptr(), rows, out, stride);

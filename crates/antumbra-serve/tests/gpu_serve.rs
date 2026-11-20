@@ -62,6 +62,7 @@ async fn multi_adapter_serve_generates_on_gpu() -> anyhow::Result<()> {
             prompt: "Write a one-line Rust function that adds two i64 values.".into(),
             adapters: vec![expert.clone()],
             weights: Vec::new(),
+            owner: None,
         })
         .await
         .context("real GPU generation succeeds")?;
@@ -84,6 +85,7 @@ async fn multi_adapter_serve_generates_on_gpu() -> anyhow::Result<()> {
             prompt: "Now write one that multiplies them.".into(),
             adapters: vec![expert],
             weights: Vec::new(),
+            owner: None,
         })
         .await
         .context("second generation on the resident base succeeds")?;

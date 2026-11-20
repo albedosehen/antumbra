@@ -305,7 +305,15 @@ use kernels::sixteens_of_each;
 /// Whether this CPU multiplies a sketch of the head: the CPUs that multiply
 /// six-bit tiles, whose instructions cut the sketch's values out as well.
 pub(super) fn available() -> bool {
-    tiles::six_bit()
+    // On x86-64 the sketch's kernels are AVX-512's alone so far.
+    #[cfg(target_arch = "x86_64")]
+    {
+        tiles::wide_six_bit()
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        tiles::six_bit()
+    }
 }
 
 impl Sketch {

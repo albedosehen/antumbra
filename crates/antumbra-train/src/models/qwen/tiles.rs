@@ -123,10 +123,24 @@ pub(super) fn available() -> bool {
     crate::device::tiles()
 }
 
-/// Whether this CPU can multiply through six-bit tiles as well: their values
-/// are unpacked with AVX-512 VBMI, which the first CPUs with VNNI lack.
+/// Whether this CPU can multiply through six-bit tiles as well.
 pub(super) fn six_bit() -> bool {
     crate::device::six_bit_tiles()
+}
+
+/// Whether this CPU multiplies through the AVX-512 kernels, and so has the
+/// plain-row kernels of `wide` as well: the others multiply through AVX2 or
+/// NEON, and take those steps plainly.
+#[cfg(target_arch = "x86_64")]
+pub(super) fn wide() -> bool {
+    crate::device::wide_tiles()
+}
+
+/// Whether this CPU multiplies six-bit tiles, and the head's sketch, through
+/// AVX-512: with VBMI, which the first CPUs with VNNI lack.
+#[cfg(target_arch = "x86_64")]
+pub(super) fn wide_six_bit() -> bool {
+    crate::device::wide_tiles() && is_x86_feature_detected!("avx512vbmi")
 }
 
 /// The 4-bit value `v` of a plain Q4_K block's 128 bytes: the low nibbles of
@@ -690,8 +704,67 @@ mod kernels {
     pub(super) unsafe fn quantize_block(_: *const f32, _: *mut f32, _: *mut i8, _: *mut i32) {}
 }
 
+/// The x86-64 kernels: AVX-512's where the CPU has them for the form a
+/// weight is in, and AVX2's otherwise.
 #[cfg(target_arch = "x86_64")]
 mod kernels {
+    use super::{avx2, avx512, Row, Tiled, Tiles};
+
+    /// Whether `w` is multiplied through AVX-512: six-bit tiles need VBMI as
+    /// well, which the first CPUs with VNNI lack.
+    fn wide(w: &Tiled) -> bool {
+        match &w.tiles {
+            Tiles::Q6K(_) => super::wide_six_bit(),
+            _ => super::wide(),
+        }
+    }
+
+    pub(super) fn multiply(group: &[&Tiled], rows: &[Row], outs: &mut [&mut [f32]]) {
+        match group.iter().all(|w| wide(w)) {
+            true => avx512::multiply(group, rows, outs),
+            false => avx2::multiply(group, rows, outs),
+        }
+    }
+
+    /// SAFETY (for the caller): this CPU tiles ([`super::available`]), and
+    /// the rest as the kernel it is handed to asks.
+    pub(super) unsafe fn sixteens(
+        w: &Tiled,
+        first: usize,
+        last: usize,
+        rows: &[Row],
+        out: *mut f32,
+    ) {
+        match wide(w) {
+            true => avx512::sixteens(w, first, last, rows, out),
+            false => avx2::sixteens(w, first, last, rows, out),
+        }
+    }
+
+    /// SAFETY (for the caller): this CPU tiles ([`super::available`]).
+    pub(super) unsafe fn quantize(x: &[f32], row: &mut Row) {
+        match super::wide() {
+            true => avx512::quantize(x, row),
+            false => avx2::quantize(x, row),
+        }
+    }
+
+    /// SAFETY (for the caller): this CPU tiles ([`super::available`]), and
+    /// the rest as the kernel it is handed to asks.
+    pub(super) unsafe fn quantize_block(xs: *const f32, d: *mut f32, qs: *mut i8, sums: *mut i32) {
+        match super::wide() {
+            true => avx512::quantize_block(xs, d, qs, sums),
+            false => avx2::quantize_block(xs, d, qs, sums),
+        }
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[path = "tiles_avx2.rs"]
+mod avx2;
+
+#[cfg(target_arch = "x86_64")]
+mod avx512 {
     use super::super::phases::{dispatch, Phase};
     use super::{Row, TileQ4K, TileQ6, TileQ8, Tiled, Tiles, QK8_0, QK_K, ROWS};
     use std::arch::x86_64::*;
@@ -1338,12 +1411,16 @@ mod tests {
 
     /// How near candle's own product a form's tiles come on this CPU. candle
     /// quantizes the input as the tiles do, 256 values to a scale, except for
-    /// a Q8_0 weight off x86-64, where it gives every 32 values a scale of
-    /// their own: there the two products are of two roundings of the input,
-    /// a hundredth apart. [`tiles_multiply_what_they_hold`] holds the tiles
-    /// to the bit there.
+    /// a Q8_0 weight on a CPU without AVX-512 VNNI, where it gives every 32
+    /// values a scale of their own: there the two products are of two
+    /// roundings of the input, a hundredth or two apart.
+    /// [`tiles_multiply_what_they_hold`] holds the tiles to the bit there.
     fn as_candle(dtype: GgmlDType) -> f32 {
-        if cfg!(not(target_arch = "x86_64")) && dtype == GgmlDType::Q8_0 {
+        #[cfg(target_arch = "x86_64")]
+        let as_the_tiles = wide();
+        #[cfg(not(target_arch = "x86_64"))]
+        let as_the_tiles = false;
+        if !as_the_tiles && dtype == GgmlDType::Q8_0 {
             3e-2
         } else {
             1e-5

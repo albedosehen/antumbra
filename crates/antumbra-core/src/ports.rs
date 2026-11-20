@@ -29,6 +29,11 @@ pub struct ActRequest {
     /// weighs 1.0.
     #[serde(default)]
     pub weights: Vec<f32>,
+    /// Who asked, where an engine answers several callers: it has them take
+    /// turns, so one caller's burst does not hold up another's request.
+    /// Nothing else is decided by it.
+    #[serde(default)]
+    pub owner: Option<String>,
 }
 
 impl ActRequest {
@@ -43,7 +48,15 @@ impl ActRequest {
             prompt: prompt.into(),
             adapters,
             weights: Vec::new(),
+            owner: None,
         }
+    }
+
+    /// The request as `owner`'s, for an engine that has its callers take
+    /// turns.
+    pub fn owned_by(mut self, owner: impl Into<String>) -> Self {
+        self.owner = Some(owner.into());
+        self
     }
 
     /// The adapters with their weights.
@@ -80,6 +93,15 @@ pub trait Serve: Send + Sync {
     /// Defaults to `true` for engines that pin a single adapter or echo any input.
     fn can_serve(&self, _expert: &ExpertId) -> bool {
         true
+    }
+
+    /// Whether [`Serve::act`] only waits, the generating being done on a
+    /// thread of the engine's own. A caller may then await it on a runtime
+    /// worker, and by dropping the call tell the engine no one waits for the
+    /// answer. `false`, the default, is an engine that computes inside the
+    /// call, which belongs on the blocking pool and runs to its end.
+    fn answers_from_its_own_thread(&self) -> bool {
+        false
     }
 
     /// Register (or replace) an expert's adapter in the live engine, so a route

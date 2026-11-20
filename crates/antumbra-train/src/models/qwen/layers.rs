@@ -100,6 +100,11 @@ pub(super) fn repeat_kv(x: Tensor, n_rep: usize) -> CResult<Tensor> {
 /// `Tiled` is a served weight held as Antumbra's own tiles, on a CPU that can
 /// multiply through them (`tiles`): fewer bytes to read than candle's, and
 /// the one copy of the weight.
+// With the Metal backend candle's quantized tensor is some 300 bytes, far
+// more than the other forms. There is one of these to a projection, a few
+// hundred to a model, and each is read at every token: a box would save
+// kilobytes and add a hop to every read.
+#[cfg_attr(feature = "metal", allow(clippy::large_enum_variant))]
 pub(super) enum BaseWeight {
     Dense(Tensor),
     Quantized(QTensor),
@@ -133,6 +138,11 @@ pub(super) struct LoraLinear {
     /// The factors as plain rows read them (`pack`), made when rows are
     /// first read and let go when the factors are set.
     packed: Option<pack::Packed>,
+    /// The packed factors of other blends of experts, kept so that requests
+    /// answered together may each read its own: blend `n`'s are
+    /// `kept[n - 1]`, and nothing where that blend leaves this projection
+    /// to its base.
+    kept: Vec<Option<pack::Packed>>,
 }
 
 /// The spread a fresh adapter's `lora_a` factors are drawn with; `lora_b`
@@ -207,6 +217,7 @@ impl LoraLinear {
             enabled: true,
             grad: true,
             packed: None,
+            kept: Vec::new(),
         })
     }
 
@@ -255,6 +266,23 @@ impl LoraLinear {
     /// Let the packed copy go: the factors were set.
     pub(super) fn forget_pack(&mut self) {
         self.packed = None;
+    }
+
+    /// Keep the factors as they are packed now as blend `blend`'s (one or
+    /// more; nothing is the blend the factors themselves are): what a row of
+    /// that blend reads from then on, whatever the factors are set to after.
+    /// With the adapter off, that blend reads the base alone here.
+    pub(super) fn keep_pack(&mut self, blend: usize) {
+        if blend == 0 {
+            return;
+        }
+        if self.kept.len() < blend {
+            self.kept.resize_with(blend, || None);
+        }
+        self.kept[blend - 1] = match self.enabled {
+            true => self.packed.clone(),
+            false => None,
+        };
     }
 
     /// The frozen base's product with `x`, before the adapter and the bias.
@@ -697,6 +725,13 @@ impl Attention {
         self.o_proj.forget_pack();
     }
 
+    pub(super) fn keep_packs(&mut self, blend: usize) {
+        self.q_proj.keep_pack(blend);
+        self.k_proj.keep_pack(blend);
+        self.v_proj.keep_pack(blend);
+        self.o_proj.keep_pack(blend);
+    }
+
     pub(super) fn set_lora(&mut self, on: bool) {
         self.q_proj.set_enabled(on);
         self.k_proj.set_enabled(on);
@@ -818,6 +853,12 @@ impl Mlp {
         self.down_proj.forget_pack();
     }
 
+    pub(super) fn keep_packs(&mut self, blend: usize) {
+        self.gate_proj.keep_pack(blend);
+        self.up_proj.keep_pack(blend);
+        self.down_proj.keep_pack(blend);
+    }
+
     pub(super) fn set_grad(&mut self, on: bool) {
         self.gate_proj.set_grad(on);
         self.up_proj.set_grad(on);
@@ -915,6 +956,11 @@ impl DecoderLayer {
     pub(super) fn forget_packs(&mut self) {
         self.self_attn.forget_packs();
         self.mlp.forget_packs();
+    }
+
+    pub(super) fn keep_packs(&mut self, blend: usize) {
+        self.self_attn.keep_packs(blend);
+        self.mlp.keep_packs(blend);
     }
 
     pub(super) fn set_lora(&mut self, on: bool) {
@@ -1058,6 +1104,7 @@ mod tests {
             enabled: true,
             grad: false,
             packed: None,
+            kept: Vec::new(),
         }
     }
 
