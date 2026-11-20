@@ -37,6 +37,9 @@ const SHELL: &str = include_str!("dashboard/shell.js");
 /// loaded in the head without `defer`, by the dashboard and by the relics
 /// pages, so a held theme never shows as the system's first.
 const THEME: &str = include_str!("dashboard/theme.js");
+/// The sidebar every page shares, the relics pages among them: collapsing
+/// it, and who is signed in at its foot.
+const SIDE: &str = include_str!("dashboard/side.js");
 const STYLE: &str = include_str!("dashboard/app.css");
 /// The relics gallery and viewer (`/relics`, `/relic/<slug>`): one script and
 /// one style for both pages, self-contained because the dashboard's script
@@ -64,6 +67,10 @@ pub(super) fn routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
         )
         .route("/dashboard/app.js", get(script))
         .route("/dashboard/behaviors.js", get(behaviors))
+        .route(
+            "/dashboard/side.js",
+            get(|| async { asset("text/javascript; charset=utf-8", SIDE) }),
+        )
         .route(
             "/dashboard/theme.js",
             get(|| async { asset("text/javascript; charset=utf-8", THEME) }),
@@ -135,6 +142,7 @@ mod tests {
             ("/dashboard/behaviors.js", "text/javascript"),
             ("/dashboard/shell.js", "text/javascript"),
             ("/dashboard/theme.js", "text/javascript"),
+            ("/dashboard/side.js", "text/javascript"),
             ("/dashboard/app.css", "text/css"),
             ("/dashboard/relics.js", "text/javascript"),
             ("/dashboard/relics.css", "text/css"),
@@ -205,6 +213,7 @@ mod tests {
             ("relics.js", RELICS_SCRIPT),
             ("shell.js", SHELL),
             ("theme.js", THEME),
+            ("side.js", SIDE),
         ] {
             for sink in [
                 "innerHTML",
