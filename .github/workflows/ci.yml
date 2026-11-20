@@ -31,3 +31,6 @@ jobs:
       - name: pace, second run
         run: |
           cargo test -p antumbra-train --features models --release --lib pace_ -- --ignored --nocapture --test-threads=1
+      - name: pace, third run
+        run: |
+          cargo test -p antumbra-train --features models --release --lib pace_ -- --ignored --nocapture --test-threads=1

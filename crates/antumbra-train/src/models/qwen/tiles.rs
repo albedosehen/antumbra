@@ -742,13 +742,6 @@ mod kernels_old;
 #[path = "tiles_neon_old.rs"]
 mod kernels_old_again;
 
-/// SCRATCH: the release's kernels with the four-row kernel left as it is and
-/// a kernel for two or three rows beside it, called and not folded in.
-#[cfg(all(test, target_arch = "aarch64"))]
-#[allow(dead_code)]
-#[path = "tiles_neon_c.rs"]
-mod kernels_c;
-
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 mod kernels {
     use super::{Row, Tiled};
@@ -1829,25 +1822,22 @@ mod tests {
         Ok(())
     }
 
-    /// SCRATCH, not for merge: rows of a six-bit weight through four sets of
-    /// kernels in one process, on one thread, the best of the rounds kept for
-    /// each and their products compared bit for bit. `release` is the
+    /// SCRATCH, not for merge: rows of a six-bit weight through three sets
+    /// of kernels in one process, on one thread, the best of the rounds kept
+    /// for each and their products compared bit for bit. `release` is the
     /// release branch's file; `again` the same file a second time, which
-    /// says how far apart two copies of one source lie; `folded` the kernel
-    /// that takes two, three or four rows, folded into its caller; `beside`
-    /// the release's four-row kernel as it is with one for two or three rows
-    /// beside it, called and not folded in.
+    /// says how far apart two copies of one source lie; `branch` the file
+    /// as the pull request has it.
     #[cfg(target_arch = "aarch64")]
     #[test]
     #[ignore]
     fn pace_of_rows_old_and_new() -> Result<()> {
         use std::time::Instant;
         type Kernel = unsafe fn(&Tiled, usize, usize, &[Row], *mut f32);
-        let sets: [(&str, Kernel); 4] = [
+        let sets: [(&str, Kernel); 3] = [
             ("release", kernels_old::sixteens),
             ("again", kernels_old_again::sixteens),
-            ("folded", kernels::sixteens),
-            ("beside", kernels_c::sixteens),
+            ("branch", kernels::sixteens),
         ];
         let small = std::env::var("PACE_SMALL").is_ok();
         let weights: &[(usize, usize, &str)] = if small {
@@ -1878,8 +1868,8 @@ mod tests {
                 };
                 let first = (0..sets.len()).map(&mut once).fold(1e-9, f64::max);
                 let reps = ((0.02 / first) as usize).clamp(1, 2000);
-                let mut best = [f64::MAX; 4];
-                for round in 0..(if small { 2 } else { 10 }) {
+                let mut best = [f64::MAX; 3];
+                for round in 0..(if small { 2 } else { 16 }) {
                     // Forwards and backwards by turns, so no set is always
                     // the first to run.
                     let mut order: Vec<usize> = (0..sets.len()).collect();
@@ -1901,11 +1891,10 @@ mod tests {
                     );
                 }
                 eprintln!(
-                    "pace tiles Q6K {rows_w}x{cols} ({what}), {n} rows: release {:.1} us, again {:.3}, folded {:.3}, beside {:.3}",
+                    "pace tiles Q6K {rows_w}x{cols} ({what}), {n} rows: release {:.1} us, again {:.3}, branch {:.3}",
                     best[0] * 1e6,
                     best[1] / best[0],
-                    best[2] / best[0],
-                    best[3] / best[0]
+                    best[2] / best[0]
                 );
             }
         }
