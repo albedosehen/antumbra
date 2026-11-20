@@ -24,7 +24,7 @@ use antumbra_serve::{MultiAdapterServe, RaftConfig, ServeQuant};
 
 const PROMPT: &str = "Write a one-line Rust function that adds two i64 values.";
 
-// MultiAdapterServe generates under block_in_place: a multi-threaded runtime.
+// The engine answers on a thread of its own; any runtime will do.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "live CPU: set ANTUMBRA_CPU_SERVE=1 and ANTUMBRA_CPU_ADAPTER, run with --release --ignored"]
 async fn the_engine_serves_an_expert_on_a_node_with_no_gpu(
