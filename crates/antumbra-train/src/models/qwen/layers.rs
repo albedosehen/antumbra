@@ -1012,6 +1012,26 @@ mod tests {
             .to_scalar::<f32>()
     }
 
+    /// Normals drawn from a seed, the same in every run. A test that holds a
+    /// product to a bound on what quantizing costs draws from here: how far
+    /// a quantized product lies from the dense one is the luck of the draw,
+    /// so a bound on it is a bound on a draw. Drawn afresh each run, a Q4_K
+    /// product lay past its bound about one run in a hundred and twenty.
+    fn drawn<S: Into<candle_core::Shape>>(seed: u64, stdev: f64, shape: S) -> CResult<Tensor> {
+        use rand::RngExt as _;
+        let shape = shape.into();
+        let mut rng = StdRng::seed_from_u64(seed);
+        let values: Vec<f32> = (0..shape.elem_count())
+            .map(|_| {
+                // Box-Muller: two uniforms make one standard normal.
+                let u1: f64 = rng.random::<f64>().max(f64::MIN_POSITIVE);
+                let u2: f64 = rng.random::<f64>();
+                ((-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos() * stdev) as f32
+            })
+            .collect();
+        Tensor::from_vec(values, shape, &Device::Cpu)
+    }
+
     /// Attention as it was computed before: K and V repeated to the query
     /// heads' count, one product per head.
     fn repeated_attention(
@@ -1110,15 +1130,15 @@ mod tests {
 
     /// A base served quantized multiplies close to the dense one, and the
     /// adapter on top of it is added exactly: the LoRA branch never touches
-    /// the quantized weight.
+    /// the quantized weight. The weight, the factors and the rows are drawn
+    /// from seeds, since the bounds are on what quantizing costs these.
     #[test]
     fn a_served_base_tracks_the_dense_one_and_keeps_the_adapter_exact() -> CResult<()> {
-        let dev = Device::Cpu;
         let (out_f, in_f, rank) = (8, 256, 4);
-        let w = Tensor::randn(0f32, 1.0, (out_f, in_f), &dev)?;
-        let a = Tensor::randn(0f32, 0.1, (rank, in_f), &dev)?;
-        let b = Tensor::randn(0f32, 0.1, (out_f, rank), &dev)?;
-        let x = Tensor::randn(0f32, 1.0, (1, 3, in_f), &dev)?;
+        let w = drawn(1, 1.0, (out_f, in_f))?;
+        let a = drawn(2, 0.1, (rank, in_f))?;
+        let b = drawn(3, 0.1, (out_f, rank))?;
+        let x = drawn(4, 1.0, (1, 3, in_f))?;
         let dense = linear(BaseWeight::Dense(w.clone()), &a, &b).forward(&x)?;
         let peak = dense.abs()?.flatten_all()?.max(0)?.to_scalar::<f32>()?;
         for (dtype, bound) in [(GgmlDType::Q8_0, 0.03), (GgmlDType::Q4K, 0.15)] {
