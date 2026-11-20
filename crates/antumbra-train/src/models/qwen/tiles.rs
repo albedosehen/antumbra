@@ -1029,6 +1029,20 @@ mod kernels {
         out
     }
 
+    /// [`q6k_block_of`] for the first `N` of `rows`, their products added
+    /// to the first `N` of `acc`.
+    #[target_feature(enable = "avx512f,avx512bw,avx512vnni,avx512vbmi,f16c")]
+    unsafe fn q6k_block_some<const N: usize>(
+        tile: &TileQ6,
+        rows: &[Row],
+        block: usize,
+        acc: &mut [__m512],
+    ) {
+        let some: [&Row; N] = std::array::from_fn(|i| &rows[i]);
+        let held: [__m512; N] = std::array::from_fn(|i| acc[i]);
+        acc[..N].copy_from_slice(&q6k_block_of(tile, some, block, held));
+    }
+
     /// Sixteen rows' products with one block of 32 input values, added to
     /// `acc`. The weights are stored 128 up, so the input's sum over the
     /// block, 128 times, comes back off.
@@ -1061,6 +1075,11 @@ mod kernels {
     /// Rows whose running sums are kept at once while a sixteen's tiles go
     /// by.
     const TOGETHER: usize = 32;
+
+    /// Rows a six-bit tile is cut once for: each has a sum and a total in
+    /// hand through the block, and eight rows' are what the registers hold
+    /// beside the tile's own vectors.
+    const Q6K_TOGETHER: usize = 8;
 
     /// Sixteen `t` of `w` against the one row `row`.
     #[target_feature(enable = "avx512f,avx512bw,avx512vnni,f16c")]
@@ -1146,25 +1165,36 @@ mod kernels {
             Tiles::Q6K(tiles) => {
                 let kb = w.cols / QK_K;
                 for (b, tile) in tiles[t * kb..(t + 1) * kb].iter().enumerate() {
-                    let mut i = 0;
-                    while i + 4 <= rows.len() {
-                        let four = q6k_block_of::<4>(
-                            tile,
-                            [&rows[i], &rows[i + 1], &rows[i + 2], &rows[i + 3]],
-                            b,
-                            [acc[i], acc[i + 1], acc[i + 2], acc[i + 3]],
-                        );
-                        acc[i..i + 4].copy_from_slice(&four);
-                        i += 4;
-                    }
-                    for (acc, row) in acc[i..].iter_mut().zip(&rows[i..]) {
-                        *acc = q6k_block(
-                            tile,
-                            row.qs.as_ptr().add(b * QK_K),
-                            *row.d.get_unchecked(b),
-                            row.sums.as_ptr().add(b * 16),
-                            *acc,
-                        );
+                    // The rows share the cutting of the tile, as many to a
+                    // cutting as have their sums in hand at once: as few
+                    // cuttings as that allows, the rows spread evenly over
+                    // them (nine rows are five and four, not eight and one
+                    // alone).
+                    let (mut rows, mut acc) = (rows, &mut *acc);
+                    let mut cuttings = rows.len().div_ceil(Q6K_TOGETHER);
+                    while !rows.is_empty() {
+                        let n = rows.len().div_ceil(cuttings);
+                        cuttings -= 1;
+                        match n {
+                            8 => q6k_block_some::<8>(tile, rows, b, acc),
+                            7 => q6k_block_some::<7>(tile, rows, b, acc),
+                            6 => q6k_block_some::<6>(tile, rows, b, acc),
+                            5 => q6k_block_some::<5>(tile, rows, b, acc),
+                            4 => q6k_block_some::<4>(tile, rows, b, acc),
+                            3 => q6k_block_some::<3>(tile, rows, b, acc),
+                            2 => q6k_block_some::<2>(tile, rows, b, acc),
+                            _ => {
+                                acc[0] = q6k_block(
+                                    tile,
+                                    rows[0].qs.as_ptr().add(b * QK_K),
+                                    *rows[0].d.get_unchecked(b),
+                                    rows[0].sums.as_ptr().add(b * 16),
+                                    acc[0],
+                                );
+                            }
+                        }
+                        rows = &rows[n..];
+                        acc = &mut acc[n..];
                     }
                 }
             }
@@ -1540,6 +1570,48 @@ mod tests {
             assert_eq!(parts, whole, "{dtype:?}");
             let mut short = vec![0f32; 48];
             assert!(multiply(&[&tiled], &row, &mut [&mut short]).is_err());
+        }
+        Ok(())
+    }
+
+    /// Rows multiplied together are each row multiplied alone, to the bit,
+    /// at every form and for every number of rows that is taken another way:
+    /// one, the few that share a tile's cutting, what is left over after
+    /// them, and more than are kept together.
+    #[test]
+    fn rows_multiplied_together_are_each_multiplied_alone() -> Result<()> {
+        if !available() {
+            return Ok(());
+        }
+        for dtype in forms() {
+            let (Some(tiled), _) = weight(48, 768, dtype)? else {
+                bail!("{dtype:?} was not tiled")
+            };
+            let most = 2 * 32 + 3;
+            let mut xs: Vec<f32> = Tensor::randn(0f32, 1.0, most * 768, &Device::Cpu)?.to_vec1()?;
+            // A block of nothing in one row, and a row of nothing.
+            xs[5 * 768 + 256..5 * 768 + 512].fill(0.0);
+            xs[9 * 768..10 * 768].fill(0.0);
+            let rows = quantize_rows(&xs, 768);
+            let mut alone = vec![0f32; most * 48];
+            for (row, out) in rows.iter().zip(alone.chunks_exact_mut(48)) {
+                multiply(&[&tiled], row, &mut [out])?;
+            }
+            for n in [
+                1usize, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 15, 16, 17, 19, 20, 23, 24, 27, 31, 32, 33,
+                48, most,
+            ] {
+                let mut together = vec![0f32; n * 48];
+                // SAFETY: each row holds the weight's 768 values, `together`
+                // every row's 48 products, and nothing else writes them.
+                unsafe {
+                    tiled.multiply_sixteens(0, tiled.sixteens(), &rows[..n], together.as_mut_ptr())
+                };
+                assert!(
+                    together == alone[..n * 48],
+                    "{dtype:?}: {n} rows together are not the rows alone"
+                );
+            }
         }
         Ok(())
     }
