@@ -51,6 +51,7 @@ The laptop figures are from one laptop CPU (8 cores, AVX-512 VNNI and VBMI) that
 
 - **Which CPUs decode through Antumbra's kernels, how requests are answered together, what a Metal build serves from, and several tokens a pass** ([#484](https://github.com/albedosehen/antumbra/pull/484), [#492](https://github.com/albedosehen/antumbra/pull/492), [#497](https://github.com/albedosehen/antumbra/pull/497)) are in `docs/running-the-trainer.md`, each with what was measured.
 - **Agents started through Unity Gateway** ([#502](https://github.com/albedosehen/antumbra/pull/502)) has its own section in `docs/integration.md`: how `ug` starts each agent, what setup adds, the relayed launch, and what a policy stops. `docs/agent-setup.md` lists what setup writes there and how to undo it.
+- **The README is rewritten for what the project is now** ([#504](https://github.com/albedosehen/antumbra/pull/504)). It described the project as of mid-2026: a 24 GB GPU as the requirement, eleven tools, a read-only dashboard, twenty crates, experts graduated from scored memories, and nothing of behaviors, relics, the other five agents or serving on a CPU. It now opens with what Antumbra does and how to set it up, then the agents, how it learns, how it serves, what runs where, the builds, the CLI and where each part stands, with every doc linked. Stale lines in four docs it links to are corrected with it: the `agent` tool profile (21 of 38 tools), what a server with no GPU does, the toolchain version, and the hook scripts' note on other agents.
 
 ### Known limits
 

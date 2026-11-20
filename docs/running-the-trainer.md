@@ -5,7 +5,7 @@ The candle RAFT trainer is built and compiles; this is how to run it on a CUDA G
 ## Prerequisites
 
 - An NVIDIA GPU + CUDA toolkit (candle's `cuda` feature links it). On Windows with CUDA 13.x see the dedicated build section below; the toolkit version needs handling.
-- Rust 1.90+.
+- Rust 1.95+.
 - A real `python` on `PATH` _only_ for corpora whose `verify` calls it (the Windows Store alias is not a real Python; see "No Python?" below).
 - Network access for the _first_ run (downloads Qwen2.5-Coder-1.5B, ~3 GB, into the Hugging Face cache; already cached here).
 
