@@ -595,7 +595,7 @@ fn bridge_for(server: &str, agent: &str) -> anyhow::Result<(String, Vec<String>)
 
 /// Register with Codex, by its own command.
 fn with_codex(name: &str, server: Option<&str>) -> anyhow::Result<bool> {
-    let Some(codex) = crate::setup::find_program("codex") else {
+    let Some(codex) = crate::setup::find_running("codex") else {
         return Ok(false);
     };
     let _ = std::process::Command::new(&codex)
