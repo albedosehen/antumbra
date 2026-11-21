@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-auth"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -139,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-control"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "antumbra-auth",
  "antumbra-core",
@@ -152,7 +152,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-control-server"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "antumbra-control",
  "antumbra-core",
@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "antumbra-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -185,10 +185,11 @@ dependencies = [
 
 [[package]]
 name = "antumbra-store"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "antumbra-core",
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "futures",

@@ -262,6 +262,7 @@ fn default_capability() -> String {
 
 mod answer;
 mod behavior;
+mod bring;
 mod candidates;
 mod compartments;
 mod depgraph;
@@ -271,6 +272,7 @@ mod engine;
 mod handoff;
 pub(crate) mod heavy;
 mod listing;
+mod member_profile;
 mod params;
 mod provenance;
 pub(crate) mod pull;

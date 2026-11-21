@@ -75,8 +75,9 @@ mod phases;
 mod rowwise;
 mod sketch;
 mod slices;
+mod tensors;
 mod tiles;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 mod wide;
 use layers::*;
 
@@ -124,6 +125,16 @@ pub struct QwenLora {
     device: Device,
     dtype: DType,
     varmap: VarMap,
+    /// The most positions the generation in hand may come to, where its
+    /// rows are read ahead as tensors ([`tensors`]).
+    room: usize,
+    /// Whether the device keeps a row apart from the rows beside it, once
+    /// it has been asked ([`QwenLora::keeps_rows_apart`]).
+    rows_apart: std::sync::OnceLock<bool>,
+    /// Rows are read ahead as tensors though the model is on the CPU: a
+    /// test's, to read that path where there is no GPU.
+    #[cfg(test)]
+    ahead_as_tensors: bool,
 }
 
 impl QwenLora {
@@ -199,6 +210,10 @@ impl QwenLora {
             device: base.device().clone(),
             dtype: base.dtype(),
             varmap,
+            room: 0,
+            rows_apart: std::sync::OnceLock::new(),
+            #[cfg(test)]
+            ahead_as_tensors: false,
         })
     }
 
@@ -228,6 +243,22 @@ impl QwenLora {
         mask.to_dtype(self.dtype)
     }
 
+    /// [`QwenLora::causal_mask`] over `room` positions in all: the ones
+    /// past the rows are seen by none of them. Attention read against it
+    /// reads `room` positions however many the cache holds
+    /// ([`Attention::forward`]).
+    fn causal_mask_within(&self, seq: usize, offset: usize, room: usize) -> CResult<Tensor> {
+        let mask: Vec<f32> = (0..seq)
+            .flat_map(|i| {
+                (0..room).map(move |j| match j <= offset + i {
+                    true => 0.0,
+                    false => f32::NEG_INFINITY,
+                })
+            })
+            .collect();
+        Tensor::from_slice(&mask, (seq, room), &self.device)?.to_dtype(self.dtype)
+    }
+
     /// Hidden states for every position: `(b, seq, hidden)`.
     fn hidden(&mut self, input_ids: &Tensor, offset: usize, use_cache: bool) -> CResult<Tensor> {
         let (_b, seq) = input_ids.dims2()?;
@@ -236,9 +267,20 @@ impl QwenLora {
         } else {
             Some(self.causal_mask(seq, offset)?)
         };
+        self.hidden_under(input_ids, mask.as_ref(), offset, use_cache)
+    }
+
+    /// [`QwenLora::hidden`] under a mask the caller made.
+    fn hidden_under(
+        &mut self,
+        input_ids: &Tensor,
+        mask: Option<&Tensor>,
+        offset: usize,
+        use_cache: bool,
+    ) -> CResult<Tensor> {
         let mut xs = self.embed_tokens.forward(input_ids)?;
         for layer in self.layers.iter_mut() {
-            xs = layer.forward(&xs, mask.as_ref(), offset, use_cache)?;
+            xs = layer.forward(&xs, mask, offset, use_cache)?;
         }
         self.norm.forward(&xs)
     }
@@ -254,6 +296,7 @@ impl QwenLora {
     fn adapters_changed(&mut self) {
         for l in self.layers.iter_mut() {
             l.forget_packs();
+            l.unjoin();
         }
     }
 

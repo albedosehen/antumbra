@@ -62,6 +62,20 @@ pub struct BehaveArgs {
     /// expert's card.
     #[arg(long, default_value = "auto")]
     pub drift: String,
+    /// Whether the answers admission reads are read ahead, as the server
+    /// that will serve the expert reads them (its `--serve-ahead`): `on` or
+    /// `off`. It changes nothing but time, except on a CUDA device, where
+    /// reading ahead decodes through passes of another width and an answer
+    /// can differ in a word from the one a pass a token writes. Train as the
+    /// server is set.
+    #[arg(
+        long,
+        env = "ANTUMBRA_SERVE_AHEAD",
+        default_value_t = true,
+        action = clap::ArgAction::Set,
+        value_parser = clap::builder::BoolishValueParser::new()
+    )]
+    pub serve_ahead: bool,
 }
 
 /// One behavior in an `--import` file.
@@ -184,6 +198,7 @@ async fn train(url: &str, a: BehaveArgs) -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("--rank/--rounds/--lr/--regression-confidence: {e}"))?;
     let cfg = antumbra_serve::RaftConfig {
         max_new_tokens: a.max_new_tokens,
+        read_ahead: a.serve_ahead,
         ..antumbra_serve::behave::standing_config(&recipe)
     };
     let measure = antumbra_serve::ServeQuant::drift_from_setting(&a.drift)

@@ -271,6 +271,10 @@ pub async fn train(
     // for every training of this expert, and it writes before admission has
     // decided, so that path must never be one an expert's row names.
     let adapter_dir = cfg.adapter_dir.clone();
+    // Whether it reads ahead is the caller's to say (`cfg.read_ahead`), as
+    // the server that will serve the expert does: on a CUDA device a model
+    // that reads ahead decodes through passes of another width, which is
+    // another rounding, and admission reads the answers that will be served.
     let cfg = RaftConfig {
         temperature: 0.0,
         samples_per_task: 1,

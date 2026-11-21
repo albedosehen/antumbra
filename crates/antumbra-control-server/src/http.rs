@@ -20,7 +20,11 @@ use axum::{Json, Router};
 use chrono::Utc;
 use serde_json::json;
 
-use antumbra_control::{authenticate, Issuer, MagicLink, Mailer};
+use antumbra_control::{
+    ask_to_join, ask_to_sign_in, collect_join, collect_signin, follow, Collected, Followed, Issuer,
+    JoinAsk, MagicLink, Mailer, SignedIn, SigninAsk,
+};
+use antumbra_core::join::Answer;
 use antumbra_core::limit::{Limiter, Rate};
 use antumbra_core::AntumbraError;
 use antumbra_store::repo::invite;
@@ -39,6 +43,16 @@ pub const LINKS_EVERYONE: Rate = Rate {
     burst: 50,
     per_minute: 100,
 };
+/// What one client may ask of `/join/collect`: a machine waiting on an admin
+/// asks every few seconds, and a guess at a request's secret is one of these.
+pub const COLLECTS_PER_CLIENT: Rate = Rate {
+    burst: 20,
+    per_minute: 60,
+};
+pub const COLLECTS_EVERYONE: Rate = Rate {
+    burst: 200,
+    per_minute: 600,
+};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -52,6 +66,9 @@ pub struct AppState {
     /// The per-client and server-wide budgets for link requests, in front of
     /// the per-address cooldown.
     pub limits: Arc<Limiter>,
+    /// The budget for asking how a request to join stands. It sends no
+    /// email, and a machine waiting on an admin asks every few seconds.
+    pub collects: Arc<Limiter>,
 }
 
 /// The address as the cooldown keys it: trimmed, lowercased, and without a
@@ -236,8 +253,239 @@ async fn verify_handler(State(st): State<AppState>, Query(q): Query<VerifyQuery>
         &st.base_url,
         st.mailer.as_ref(),
     );
-    match authenticate(&st.store, &ml, &q.token, &st.issuer).await {
-        Ok(token) => Json(json!({ "token": token })).into_response(),
+    match follow(&st.store, &ml, &q.token, &st.issuer).await {
+        Ok(Followed::Token(token)) => Json(json!({ "token": token })).into_response(),
+        Ok(Followed::Asked {
+            request,
+            workspace,
+            handle,
+            standing,
+        }) => Json(json!({
+            "asked": true,
+            "request": request,
+            "workspace": workspace,
+            "handle": handle,
+            "standing": standing,
+            "next": "Your address is verified and the workspace's admins have your request. Run `antumbra join --status` on the machine you asked from.",
+        }))
+        .into_response(),
+        Ok(Followed::SigningIn { request }) => Json(json!({
+            "signing_in": true,
+            "request": request,
+            "next": "Your address is verified. The machine that asked can collect its token now: run `antumbra login --status` there.",
+        }))
+        .into_response(),
+        Err(e) => fail(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct SigninReq {
+    email: String,
+    /// The SHA-256, in hex, of the secret the token will be collected with.
+    secret_digest: String,
+    #[serde(default)]
+    workspace: Option<String>,
+}
+
+/// Ask to sign a machine in to an account. A link is sent whether or not the
+/// address has one; the id is told now, so the machine can collect with it.
+async fn signin_request_handler(
+    State(st): State<AppState>,
+    peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>,
+    Json(req): Json<SigninReq>,
+) -> Response {
+    if !st.limits.allow(&client_of(peer)) {
+        return too_many("too many sign-in requests from here; try again in a minute");
+    }
+    if !st.cooldown.try_acquire(&normalized(&req.email)) {
+        return too_many("a link was sent for this address moments ago; try again shortly");
+    }
+    let request = antumbra_control::new_request_id();
+    let ask = SigninAsk {
+        request: request.clone(),
+        secret_digest: req.secret_digest,
+        workspace: req.workspace,
+    };
+    let (mailer, secret, base, ttl, email) = (
+        st.mailer.clone(),
+        st.magic_secret.clone(),
+        st.base_url.clone(),
+        st.magic_ttl,
+        req.email,
+    );
+    let sent = tokio::task::spawn_blocking(move || {
+        let ml = MagicLink::new(&secret, ttl, &base, mailer.as_ref());
+        ask_to_sign_in(&ml, &email, ask)
+    })
+    .await;
+    match sent {
+        Ok(Ok(())) => Json(json!({ "request": request, "standing": "unverified" })).into_response(),
+        Ok(Err(e)) => fail(e),
+        Err(e) => internal(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct SigninCollectReq {
+    request: String,
+    secret: String,
+    #[serde(default)]
+    workspace: Option<String>,
+}
+
+/// How a sign-in stands; followed, its token, once; and for an account in
+/// several workspaces with none named, which they are.
+async fn signin_collect_handler(
+    State(st): State<AppState>,
+    peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>,
+    Json(req): Json<SigninCollectReq>,
+) -> Response {
+    if !st.collects.allow(&client_of(peer)) {
+        return too_many("too many requests from here; try again in a minute");
+    }
+    let standing = |standing: &str| Json(json!({ "standing": standing })).into_response();
+    match collect_signin(
+        &st.store,
+        &req.request,
+        &req.secret,
+        req.workspace.as_deref(),
+        &st.issuer,
+    )
+    .await
+    {
+        Ok(SignedIn::Unverified) => standing("unverified"),
+        Ok(SignedIn::Collected) => standing("collected"),
+        Ok(SignedIn::Expired) => standing("expired"),
+        Ok(SignedIn::Choose(offered)) => Json(json!({
+            "standing": "choose",
+            "workspaces": offered
+                .iter()
+                .map(|m| json!({ "workspace": m.tenant, "user": m.user }))
+                .collect::<Vec<_>>(),
+        }))
+        .into_response(),
+        Ok(SignedIn::Token {
+            workspace,
+            user,
+            token,
+        }) => Json(json!({
+            "standing": "approved",
+            "workspace": workspace,
+            "user": user,
+            "token": token,
+        }))
+        .into_response(),
+        Err(e) => fail(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct JoinReq {
+    email: String,
+    code: String,
+    handle: String,
+    #[serde(default)]
+    display: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+    #[serde(default)]
+    host: Option<String>,
+    /// The SHA-256, in hex, of the secret the token will be collected with.
+    secret_digest: String,
+}
+
+/// Ask to join a workspace with an address this server verifies. The request
+/// is made when the emailed link is followed; its id is told now, so the
+/// machine that asked can collect with it.
+async fn join_request_handler(
+    State(st): State<AppState>,
+    peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>,
+    Json(req): Json<JoinReq>,
+) -> Response {
+    if !st.limits.allow(&client_of(peer)) {
+        return too_many("too many requests from here; try again in a minute");
+    }
+    if !st.cooldown.try_acquire(&normalized(&req.email)) {
+        return too_many("a link was sent for this address moments ago; try again shortly");
+    }
+    let request = antumbra_control::new_request_id();
+    let ask = JoinAsk {
+        request: request.clone(),
+        code: req.code,
+        handle: req.handle,
+        display: req.display,
+        note: req.note,
+        host: req.host,
+        secret_digest: req.secret_digest,
+    };
+    let (store, mailer, secret, base, ttl, email) = (
+        st.store.clone(),
+        st.mailer.clone(),
+        st.magic_secret.clone(),
+        st.base_url.clone(),
+        st.magic_ttl,
+        req.email,
+    );
+    // The mailer may block (SMTP), so the send runs off the async runtime.
+    let handle = tokio::runtime::Handle::current();
+    let sent = tokio::task::spawn_blocking(move || {
+        let ml = MagicLink::new(&secret, ttl, &base, mailer.as_ref());
+        handle.block_on(ask_to_join(&store, &ml, &email, ask))
+    })
+    .await;
+    match sent {
+        Ok(Ok(())) => Json(json!({
+            "request": request,
+            "standing": "unverified",
+            "next": "Follow the link sent to your address; the workspace's admins see your request once you have.",
+        }))
+        .into_response(),
+        Ok(Err(e)) => fail(e),
+        Err(e) => internal(e),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct CollectReq {
+    request: String,
+    secret: String,
+}
+
+/// How a request made through a link stands, and, approved, its token: once.
+async fn join_collect_handler(
+    State(st): State<AppState>,
+    peer: Result<ConnectInfo<SocketAddr>, ExtensionRejection>,
+    Json(req): Json<CollectReq>,
+) -> Response {
+    if !st.collects.allow(&client_of(peer)) {
+        return too_many("too many requests from here; try again in a minute");
+    }
+    let standing = |standing: &str| Json(json!({ "standing": standing })).into_response();
+    match collect_join(&st.store, &req.request, &req.secret, &st.issuer).await {
+        Ok(Collected::Unverified) => standing("unverified"),
+        Ok(Collected::Standing(Answer::Pending)) => standing("pending"),
+        Ok(Collected::Standing(Answer::Expired)) => standing("expired"),
+        Ok(Collected::Standing(Answer::AlreadyCollected)) => standing("collected"),
+        Ok(Collected::Standing(Answer::Denied { reason })) => {
+            Json(json!({ "standing": "denied", "reason": reason })).into_response()
+        }
+        // The store admits; `collect_join` turns that into a token.
+        Ok(Collected::Standing(Answer::Admitted { .. })) => internal("an admission with no token"),
+        Ok(Collected::Admitted {
+            workspace,
+            user,
+            token,
+        }) => {
+            eprintln!("antumbra-control-server: {user} joined {workspace}");
+            Json(json!({
+                "standing": "approved",
+                "workspace": workspace,
+                "user": user,
+                "token": token,
+            }))
+            .into_response()
+        }
         Err(e) => fail(e),
     }
 }
@@ -259,6 +507,10 @@ pub fn router(state: AppState) -> Router {
         .route("/signup", post(signup_handler))
         .route("/login", post(login_handler))
         .route("/magic/verify", get(verify_handler))
+        .route("/login/request", post(signin_request_handler))
+        .route("/login/collect", post(signin_collect_handler))
+        .route("/join/request", post(join_request_handler))
+        .route("/join/collect", post(join_collect_handler))
         .route("/healthz", get(healthz_handler))
         .with_state(state)
 }
@@ -315,6 +567,7 @@ mod tests {
             mailer: capture,
             cooldown: Arc::new(Cooldown::new(cooldown)),
             limits: Arc::new(Limiter::new(LINKS_PER_CLIENT, LINKS_EVERYONE)),
+            collects: Arc::new(Limiter::new(COLLECTS_PER_CLIENT, COLLECTS_EVERYONE)),
         }
     }
 
@@ -379,6 +632,194 @@ mod tests {
                 .is_some_and(|e| e.contains("already used")),
             "{v}"
         );
+        Ok(())
+    }
+
+    /// Joining over the routes: a bad code is refused and nothing is sent;
+    /// a good one sends a link and tells the request's id; collecting says
+    /// unverified until the link is followed, pending until an admin decides,
+    /// then gives the token once.
+    #[tokio::test]
+    async fn a_request_to_join_is_verified_by_its_link_and_collected_once() -> Result<()> {
+        use antumbra_core::join::{digest, JoinCode};
+        use antumbra_core::{TenantId, UserId};
+        use antumbra_store::repo::join as store_join;
+        let store = mem_store().await?;
+        let (crew, ada, now) = (
+            TenantId::new("ws:crew"),
+            UserId::new("user:ada"),
+            Utc::now(),
+        );
+        store_join::make_code(
+            &store,
+            &JoinCode {
+                key: digest("crew-code"),
+                tenant: crew.clone(),
+                label: None,
+                created_by: ada.clone(),
+                created_at: now,
+                expires_at: now + chrono::Duration::days(14),
+                uses_left: 1,
+                needs_approval: true,
+                revoked: false,
+            },
+        )
+        .await?;
+        let capture = Arc::new(Capture(Mutex::new(Vec::new())));
+        let app = router(state_with(store.clone(), capture.clone(), Duration::ZERO));
+        let asking = |code: &str| {
+            json!({ "email": "bodil@example.com", "code": code, "handle": "Bodil", "secret_digest": digest("my-secret") }).to_string()
+        };
+
+        let resp = app
+            .clone()
+            .oneshot(post_json("/join/request", &asking("nope"))?)
+            .await?;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            capture.sent().is_empty(),
+            "a link was sent for a code that admits no one"
+        );
+
+        let resp = app
+            .clone()
+            .oneshot(post_json("/join/request", &asking("crew-code"))?)
+            .await?;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let asked = body_json(resp).await?;
+        assert_eq!(asked["standing"], "unverified");
+        let request = asked["request"]
+            .as_str()
+            .context("no request id")?
+            .to_string();
+        let collecting = json!({ "request": request, "secret": "my-secret" }).to_string();
+        let collect = || async {
+            let resp = app
+                .clone()
+                .oneshot(post_json("/join/collect", &collecting)?)
+                .await?;
+            assert_eq!(resp.status(), StatusCode::OK);
+            body_json(resp).await
+        };
+        assert_eq!(collect().await?["standing"], "unverified");
+        assert!(store_join::requests(&store, &crew).await?.is_empty());
+
+        let token = capture.sent()[0]
+            .split("token=")
+            .nth(1)
+            .context("the link carries no token")?
+            .to_string();
+        let resp = app
+            .clone()
+            .oneshot(Request::get(format!("/magic/verify?token={token}")).body(Body::empty())?)
+            .await?;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let followed = body_json(resp).await?;
+        assert_eq!(
+            (
+                followed["asked"].clone(),
+                followed["request"].clone(),
+                followed["workspace"].clone()
+            ),
+            (json!(true), json!(request), json!("ws:crew"))
+        );
+        assert!(
+            followed.get("token").is_none(),
+            "following a link that asks to join signed someone in"
+        );
+
+        assert_eq!(collect().await?["standing"], "pending");
+        store_join::decide(&store, &crew, &ada, &request, true, None, Utc::now()).await?;
+        let got = collect().await?;
+        assert_eq!(
+            (
+                got["standing"].clone(),
+                got["workspace"].clone(),
+                got["user"].clone()
+            ),
+            (json!("approved"), json!("ws:crew"), json!("user:bodil"))
+        );
+        assert!(got["token"].as_str().unwrap_or_default().starts_with("ey"));
+        let again = collect().await?;
+        assert_eq!(again["standing"], "collected");
+        assert!(again.get("token").is_none());
+        Ok(())
+    }
+
+    /// A machine signs in over the routes: the link's follower is given no
+    /// token, and the machine collects one, once.
+    #[tokio::test]
+    async fn a_machine_signs_in_over_the_routes() -> Result<()> {
+        use antumbra_core::join::digest;
+        let store = mem_store().await?;
+        antumbra_store::repo::invite::mint(&store, "inv", None).await?;
+        let capture = Arc::new(Capture(Mutex::new(Vec::new())));
+        let app = router(state_with(store, capture.clone(), Duration::ZERO));
+        let follow = |n: usize| {
+            let (app, capture) = (app.clone(), capture.clone());
+            async move {
+                let token = capture.sent()[n]
+                    .split("token=")
+                    .nth(1)
+                    .context("the link carries no token")?
+                    .to_string();
+                let resp = app
+                    .oneshot(
+                        Request::get(format!("/magic/verify?token={token}")).body(Body::empty())?,
+                    )
+                    .await?;
+                assert_eq!(resp.status(), StatusCode::OK);
+                body_json(resp).await
+            }
+        };
+        let resp = app
+            .clone()
+            .oneshot(post_json(
+                "/signup",
+                r#"{"email":"dana@example.com","invite":"inv"}"#,
+            )?)
+            .await?;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(follow(0).await?["token"].is_string());
+
+        let asking =
+            json!({ "email": "dana@example.com", "secret_digest": digest("machine-secret") })
+                .to_string();
+        let resp = app
+            .clone()
+            .oneshot(post_json("/login/request", &asking)?)
+            .await?;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let request = body_json(resp).await?["request"]
+            .as_str()
+            .context("no request id")?
+            .to_string();
+        let collecting = json!({ "request": request, "secret": "machine-secret" }).to_string();
+        let collect = || async {
+            let resp = app
+                .clone()
+                .oneshot(post_json("/login/collect", &collecting)?)
+                .await?;
+            assert_eq!(resp.status(), StatusCode::OK);
+            body_json(resp).await
+        };
+        assert_eq!(collect().await?["standing"], "unverified");
+        let followed = follow(1).await?;
+        assert_eq!(followed["signing_in"], true);
+        assert!(
+            followed.get("token").is_none(),
+            "the link's follower was given a token"
+        );
+        let got = collect().await?;
+        assert_eq!(got["standing"], "approved");
+        assert!(got["token"].as_str().unwrap_or_default().starts_with("ey"));
+        assert!(got["workspace"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("ws:"));
+        let again = collect().await?;
+        assert_eq!(again["standing"], "collected");
+        assert!(again.get("token").is_none());
         Ok(())
     }
 

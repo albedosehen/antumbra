@@ -165,8 +165,8 @@ struct Cli {
     /// dense anywhere. Experts are never quantized.
     #[arg(long, env = "ANTUMBRA_SERVE_QUANT", default_value = "auto")]
     serve_quant: String,
-    /// Whether an expert's answer is decoded several tokens a pass on a CPU:
-    /// `on` or `off`. On, a pass over the weights carries, after the token in
+    /// Whether an expert's answer is decoded several tokens a pass: `on` or
+    /// `off`. On, a pass over the weights carries, after the token in
     /// hand, the tokens guessed to follow it, and keeps each that is the
     /// model's own next token: the answer is the one a token at a time
     /// writes, in fewer passes. The guesses come from what the model wrote
@@ -176,8 +176,15 @@ struct Cli {
     /// through the same experts, and several times faster where the very
     /// prompt was answered before; a caller who can time answers through
     /// those experts can tell that it was. `off` remembers nothing and
-    /// decodes a token a pass. It is only read ahead where the base is
-    /// served quantized on a CPU with the fast kernels.
+    /// decodes a token a pass. It is read ahead where the base is served
+    /// quantized on a CPU with the fast kernels, and from the dense base on
+    /// a CUDA GPU whose library computes a row the same way whatever is
+    /// beside it, which is asked of it at the first answer. On such a GPU
+    /// reading ahead decodes through passes of sixteen rows, which the GPU
+    /// rounds otherwise than a pass of one: what is guessed still decides
+    /// nothing, but an answer can differ in a word from the one `off`
+    /// writes, where two tokens were all but tied. Experts are trained and
+    /// audited here decoding as this is set.
     #[arg(
         long,
         env = "ANTUMBRA_SERVE_AHEAD",
@@ -191,6 +198,23 @@ struct Cli {
     /// varies. 0, the default, is the stream every training has used.
     #[arg(long, env = "ANTUMBRA_GENERATION_SEED", default_value_t = 0)]
     generation_seed: u64,
+    /// Serve only a workspace's members (HTTP transport only): a signed token
+    /// for a (workspace, user) the workspace does not hold is refused, where
+    /// it was provisioned on its first call. People are let in by a join code
+    /// one of the workspace's admins makes. Turn it on once the workspaces
+    /// here have their owners; a workspace nobody has called yet is still
+    /// opened by its first caller.
+    #[arg(long, env = "ANTUMBRA_MEMBERS_ONLY")]
+    members_only: bool,
+
+    /// The address of the control plane that signs this server's tokens
+    /// (HTTP transport only, with `--jwt-public-key`). With it, a workspace's
+    /// admins make join codes here, and someone who asks to join is sent
+    /// there: it verifies their address by a link and signs their token once
+    /// an admin approved. Both read this server's store.
+    #[arg(long, env = "ANTUMBRA_CONTROL_PLANE", value_name = "URL")]
+    control_plane: Option<String>,
+
     /// Print a long-lived hook token for `--tenant`/`--user`, signed with
     /// `--jwt-secret` (HS256), and exit -- the credential a non-interactive
     /// lifecycle hook presents on the offline / self-hosted tier (the server
@@ -539,7 +563,7 @@ pub(crate) async fn build_serve(
         hardware::backend(),
         quant.map_or("dense", ServeQuant::name),
         match serve_ahead {
-            true => "several tokens a pass where the CPU reads ahead",
+            true => "several tokens a pass where the device reads ahead",
             false => "a token a pass",
         }
     );
@@ -977,6 +1001,14 @@ async fn run() -> Result<()> {
             &cli.serve_quant,
             cli.serve_ahead,
             sync,
+            // A server that verifies with a public key holds nothing to sign
+            // with.
+            jwt_secret
+                .as_deref()
+                .filter(|_| cli.jwt_public_key.is_none())
+                .map(|secret| secret.as_bytes().to_vec()),
+            cli.members_only,
+            cli.control_plane.clone(),
         )
         .await;
     }

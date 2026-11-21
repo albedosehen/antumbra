@@ -1982,3 +1982,464 @@ button.icon-button:hover {
 .crumbs + .actions {
   margin-left: auto;
 }
+
+/* Writing: the forms a user changes things with. */
+
+.compose {
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+}
+
+.compose summary {
+  padding: 12px 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.compose[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.write {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+
+.write.padded {
+  padding: 20px 24px;
+}
+
+.write label {
+  font-size: var(--t-s);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+textarea,
+select,
+input[type="text"] {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.write-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+button.link.danger {
+  color: var(--danger);
+}
+
+[role="status"].error {
+  color: var(--danger);
+}
+
+.memory .actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.rules > li {
+  display: block;
+  padding: 14px 16px;
+}
+
+.rule-row p {
+  margin: 0;
+}
+
+.rule-row .meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+/* A member's image, where their initials were. */
+.avatar.has-image {
+  background: none;
+  overflow: hidden;
+}
+
+.avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.profile + .profile-edit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  border-top: 0;
+  border-radius: 0;
+}
+
+.profile-edit .write p {
+  margin: 0;
+}
+
+.profile-actions {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 16px 16px;
+}
+
+.profile-edit + .facts {
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+input[type="file"] {
+  font: inherit;
+  font-size: var(--t-s);
+  color: var(--ink-2);
+}
+
+/* Members */
+
+.member {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.member-text {
+  display: grid;
+  line-height: 1.3;
+}
+
+select.role {
+  width: auto;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 0.9rem;
+}
+
+#members-status {
+  margin: 12px 4px 0;
+}
+
+/* Letting people in */
+
+.asking > li {
+  display: block;
+  padding: 16px;
+}
+
+.ask p {
+  margin: 0;
+}
+
+.asking-who {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ask .content {
+  margin-top: 10px;
+  white-space: pre-wrap;
+}
+
+.ask .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 8px;
+}
+
+.ask .write-row input {
+  flex: 1 1 240px;
+}
+
+.code-fields {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 16px;
+}
+
+.code-fields .write {
+  padding: 0;
+}
+
+.code-fields input[type="number"] {
+  width: 100%;
+  text-align: left;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 0.9rem !important;
+  font-weight: 400 !important;
+  color: var(--ink) !important;
+}
+
+.made {
+  margin-top: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+.made p {
+  margin: 0;
+}
+
+.shown {
+  font-size: 1rem;
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+
+.codes-list {
+  margin-top: 16px;
+}
+
+@media (max-width: 700px) {
+  .code-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Bring: choosing among many */
+
+.bring-filter {
+  display: grid;
+  gap: 16px;
+  padding: 16px 20px;
+}
+
+.bring-facets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px 16px;
+}
+
+.bring-facets .write {
+  padding: 0;
+}
+
+.bring-filter .write-row {
+  margin: 0;
+  gap: 8px 24px;
+}
+
+.bring-filter .check {
+  margin: 0;
+}
+
+.bring-bar {
+  position: sticky;
+  top: 60px;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin: 16px 0 8px;
+  padding: 10px 12px 10px 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-l);
+  background: var(--raised);
+}
+
+.bring-total {
+  margin: 0;
+  font-weight: 600;
+}
+
+#bring-status {
+  min-height: 1.4em;
+  margin: 0 4px 8px;
+}
+
+.bring-list > li {
+  display: block;
+  padding: 14px 16px;
+}
+
+.bring-row p {
+  margin: 0;
+}
+
+.bring-row .content {
+  max-width: 96ch;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.bring-row .meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin-top: 8px;
+}
+
+.bring-row .actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 18px;
+  margin-top: 8px;
+}
+
+button.link.strong {
+  font-weight: 700;
+}
+
+.held {
+  color: var(--danger);
+}
+
+/* The shared pool */
+
+.asking .asking-who .tag {
+  margin-left: auto;
+}
+
+.ask .content.small {
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line-strong);
+  color: var(--ink-2);
+}
+
+#pool-status {
+  min-height: 1.4em;
+  margin: 8px 4px 0;
+}
+
+/* A memory's text, with its code as code. */
+
+.content.rich > p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.content.rich > * + * {
+  margin-top: 8px;
+}
+
+.content.rich code {
+  padding: 1px 5px;
+  border-radius: var(--radius-s);
+  background: var(--accent-soft);
+  font-size: 0.86em;
+}
+
+pre.code {
+  position: relative;
+  max-width: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.content.rich pre.code code {
+  padding: 0;
+  background: none;
+  font-size: inherit;
+}
+
+pre.code[data-lang]::after {
+  content: attr(data-lang);
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+:root {
+  --tok-key: #5c55a8;
+  --tok-str: #2f6f4f;
+  --tok-num: #9a5a12;
+  --tok-kw: #9c4636;
+  --tok-com: rgb(27 26 46 / 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --tok-key: #a9a4e0;
+    --tok-str: #8fcfa9;
+    --tok-num: #e0b070;
+    --tok-kw: #e39a88;
+    --tok-com: rgb(239 231 216 / 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  --tok-key: #a9a4e0;
+  --tok-str: #8fcfa9;
+  --tok-num: #e0b070;
+  --tok-kw: #e39a88;
+  --tok-com: rgb(239 231 216 / 0.5);
+}
+
+.tok-key { color: var(--tok-key); }
+.tok-str { color: var(--tok-str); }
+.tok-num { color: var(--tok-num); }
+.tok-kw { color: var(--tok-kw); font-weight: 600; }
+.tok-com { color: var(--tok-com); font-style: italic; }
+
+/* A memory in the list is clipped until it is opened; a block is not a line. */
+.memory .content.rich {
+  display: block;
+  max-height: 9.5em;
+  -webkit-line-clamp: unset;
+  line-clamp: none;
+  white-space: normal;
+}
+
+.memory.open .content.rich {
+  max-height: none;
+}
+
+/* The unit beside a policy field: the same room on every row. */
+.knob-field .unit {
+  flex: none;
+  width: 3.2em;
+  text-align: left;
+}

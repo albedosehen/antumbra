@@ -13,6 +13,8 @@
 <script src="dashboard/app.js" defer></script>
 <script src="dashboard/behaviors.js" defer></script>
 <script src="dashboard/shell.js" defer></script>
+<script src="dashboard/manage.js" defer></script>
+<script src="dashboard/bring.js" defer></script>
 </head>
 <body>
 
@@ -56,7 +58,10 @@
       <p class="nav-group">You</p>
         <a class="nav-item" href="#/account" data-nav="account" title="Account"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="6.5" r="1.8"/><path d="M4.6 12.2c.7-1.5 1.900-2.2 3.400-2.2s2.7.7 3.400 2.2"/></svg><span>Account</span></a>
         <a class="nav-item" href="#/devices" data-nav="devices" title="Devices"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v7h-11zM6 13.5h4M8 10.5v3"/></svg><span>Devices</span><span id="nav-handoffs" class="count" hidden></span></a>
+        <a class="nav-item" href="#/agent" data-nav="agent" title="Agent"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5V5a4 4 0 0 1 8 0v1.5M3 6.5h10v5.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 12zM6.2 9.500h.01M9.8 9.500h.01"/></svg><span>Agent</span></a>
+        <a class="nav-item" href="#/share" data-nav="share" title="Share with a workspace"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 9.5v3h11v-3M8 2.5v7.5M5 5.5l3-3 3 3"/></svg><span>Share</span><span id="nav-chosen" class="count" hidden></span></a>
       <p class="nav-group">Workspace settings</p>
+        <a class="nav-item" href="#/members" data-nav="members" title="Members"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5.5" r="2.2"/><path d="M2 13c.5-2.2 2-3.3 4-3.3s3.5 1.1 4 3.3"/><circle cx="11.5" cy="6" r="1.7"/><path d="M11.2 9.8c1.5.1 2.5 1 2.8 2.7"/></svg><span>Members</span><span id="nav-asking" class="count" hidden></span></a>
         <a class="nav-item" href="#/settings" data-nav="settings" title="Policy"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/></svg><span>Policy</span></a>
     </nav>
     <a class="side-user" href="#/account" title="Account">
@@ -153,6 +158,23 @@
         <h3 id="h-memory">Recall and browse</h3>
         <p id="memory-summary" class="muted small" aria-live="polite"></p>
       </div>
+      <details class="compose">
+        <summary>Write a memory</summary>
+        <form id="memory-new" class="write">
+          <label for="memory-content">What to remember</label>
+          <textarea id="memory-content" name="content" rows="3" required></textarea>
+          <div class="write-row">
+            <fieldset class="segmented">
+              <legend class="visually-hidden">Network</legend>
+              <input id="new-world" type="radio" name="network" value="world" checked><label for="new-world">Fact</label>
+              <input id="new-bank" type="radio" name="network" value="bank"><label for="new-bank">Experience</label>
+              <input id="new-opinion" type="radio" name="network" value="opinion"><label for="new-opinion">Judgment</label>
+            </fieldset>
+            <button type="submit">Store</button>
+            <span class="small muted" role="status"></span>
+          </div>
+        </form>
+      </details>
       <form id="recall" class="recall" role="search">
         <input id="query" name="query" type="search" placeholder="Recall by meaning" aria-label="What to recall">
         <fieldset class="segmented">
@@ -174,7 +196,7 @@
       <div class="view" data-view="behaviors" hidden>
         <header class="view-head">
           <h2 class="view-title">Behaviors</h2>
-          <p class="view-lede">How you told an agent to act. Accept one and your expert is taught it; retire one and it trains nothing.</p>
+          <p class="view-lede">How you told your agents to act.</p>
         </header>
         <section aria-labelledby="h-behaviors">
       <div class="section-head">
@@ -283,6 +305,21 @@
         </header>
         <div class="row even">
         <section aria-labelledby="h-documents">
+          <details class="compose">
+            <summary>Add a document</summary>
+            <form id="document-new" class="write">
+              <label for="document-title">Title</label>
+              <input id="document-title" name="title" type="text" required>
+              <label for="document-source">Where it is from (optional)</label>
+              <input id="document-source" name="source" type="text">
+              <label for="document-content">Its text</label>
+              <textarea id="document-content" name="content" rows="6" required></textarea>
+              <div class="write-row">
+                <button type="submit">Add</button>
+                <span class="small muted" role="status"></span>
+              </div>
+            </form>
+          </details>
           <div class="section-head">
             <h3 id="h-documents">Documents</h3>
             <p id="documents-summary" class="muted small"></p>
@@ -293,6 +330,17 @@
           <button id="documents-more" type="button" class="link more" hidden></button>
         </section>
         <section aria-labelledby="h-compartments">
+          <details class="compose">
+            <summary>New compartment</summary>
+            <form id="compartment-new" class="write">
+              <label for="compartment-name">Name</label>
+              <input id="compartment-name" name="name" type="text" required>
+              <div class="write-row">
+                <button type="submit">Make it</button>
+                <span class="small muted" role="status"></span>
+              </div>
+            </form>
+          </details>
           <div class="section-head">
             <h3 id="h-compartments">Compartments</h3>
           </div>
@@ -301,6 +349,27 @@
           </div>
         </section>
         </div>
+        <section aria-labelledby="h-pool">
+          <div class="section-head">
+            <h3 id="h-pool">Shared with the workspace</h3>
+            <p id="pool-summary" class="muted small" aria-live="polite"></p>
+          </div>
+          <p class="note small">A compartment is yours alone until you share it. Offered here and accepted by one of the workspace's admins, everyone in the workspace reads it; you can take it back at any time.</p>
+          <div id="pool-switches" class="panel prefs"></div>
+          <p id="pool-status" class="small muted" role="status"></p>
+          <div class="section-head section-next">
+            <h3 id="h-pool-yours">Your compartments</h3>
+          </div>
+          <div class="panel">
+            <ul id="pool-yours" class="list"></ul>
+          </div>
+          <div class="section-head section-next">
+            <h3 id="h-pool-offers">Offered</h3>
+          </div>
+          <div class="panel">
+            <ul id="pool-offers" class="list asking"></ul>
+          </div>
+        </section>
       </div>
 
       <div class="view" data-view="account" hidden>
@@ -320,6 +389,23 @@
               <p id="role" class="tags"></p>
             </div>
           </div>
+          <form id="profile" class="panel profile-edit">
+            <div class="write">
+              <label for="profile-display">The name you go by</label>
+              <input id="profile-display" name="display" type="text" maxlength="64" autocomplete="name">
+              <p class="small muted">Shown to this workspace's members in place of your user id. Leave it empty to show the id.</p>
+            </div>
+            <div class="write">
+              <label for="profile-image">Your image</label>
+              <input id="profile-image" name="image" type="file" accept="image/png,image/jpeg,image/webp">
+              <p class="small muted">A PNG, JPEG or WebP. It is cut square and made 256 pixels across here, before it is sent.</p>
+            </div>
+            <div class="write-row profile-actions">
+              <button type="submit">Save profile</button>
+              <button id="profile-image-clear" type="button" class="quiet" hidden>Remove image</button>
+              <span class="small muted" role="status"></span>
+            </div>
+          </form>
           <dl id="identity" class="facts panel"></dl>
         </section>
         <section aria-labelledby="h-token">
@@ -380,6 +466,92 @@
         </section>
       </div>
 
+      <div class="view" data-view="agent" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Agent</h2>
+          <p class="view-lede">The skills your coding agent uses and the rules it is given.</p>
+        </header>
+        <section aria-labelledby="h-skills">
+          <div class="section-head">
+            <h3 id="h-skills">Skills</h3>
+            <p id="skills-summary" class="muted small" aria-live="polite"></p>
+          </div>
+          <div class="panel">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Skill</th>
+                    <th scope="col" class="num">Uses</th>
+                    <th scope="col">Last used</th>
+                  </tr>
+                </thead>
+                <tbody id="skills"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+        <section aria-labelledby="h-rules">
+          <div class="section-head">
+            <h3 id="h-rules">Rules</h3>
+            <p id="rules-summary" class="muted small"></p>
+          </div>
+          <div class="panel">
+            <ul id="rules" class="list rules"></ul>
+          </div>
+        </section>
+      </div>
+
+      <div class="view" data-view="share" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Share with a workspace</h2>
+          <p class="view-lede">Choose which of your memories to share with a workspace you joined.</p>
+        </header>
+        <section aria-labelledby="h-bring">
+          <div class="section-head">
+            <h3 id="h-bring">Your memories</h3>
+            <p id="bring-states" class="muted small" aria-live="polite"></p>
+          </div>
+          <form id="bring-filter" class="panel bring-filter">
+            <fieldset class="segmented">
+              <legend class="visually-hidden">Which</legend>
+              <input id="bring-undecided" type="radio" name="state" value="undecided" checked><label for="bring-undecided">To decide</label>
+              <input id="bring-suggested" type="radio" name="state" value="suggested"><label for="bring-suggested" title="Like what you shared before">Suggested</label>
+              <input id="bring-chosen" type="radio" name="state" value="chosen"><label for="bring-chosen">Chosen</label>
+              <input id="bring-declined" type="radio" name="state" value="declined"><label for="bring-declined">Left out</label>
+              <input id="bring-never" type="radio" name="state" value="never"><label for="bring-never">Never</label>
+              <input id="bring-brought" type="radio" name="state" value="brought"><label for="bring-brought">Brought</label>
+            </fieldset>
+            <div class="bring-facets">
+              <div class="write"><label for="bring-network">Kind</label><select id="bring-network" name="network"></select></div>
+              <div class="write"><label for="bring-repo">Repository</label><select id="bring-repo" name="repo"></select></div>
+              <div class="write"><label for="bring-compartment">Compartment</label><select id="bring-compartment" name="compartment"></select></div>
+              <div class="write"><label for="bring-host">Written on</label><select id="bring-host" name="host"></select></div>
+              <div class="write"><label for="bring-month">Month</label><select id="bring-month" name="month"></select></div>
+              <div class="write"><label for="bring-contains">Says</label><input id="bring-contains" name="contains" type="text" placeholder="words it holds"></div>
+            </div>
+            <div class="write-row">
+              <label class="check"><input id="bring-used" name="used" type="checkbox"> Only what has been used since it was written</label>
+              <label class="check"><input id="bring-held" name="include_held" type="checkbox"> Show what is held back <span id="bring-held-count" class="muted"></span></label>
+              <button id="bring-reset" type="button" class="link">Clear the filters</button>
+            </div>
+          </form>
+          <div class="bring-bar">
+            <p id="bring-total" class="bring-total" aria-live="polite"></p>
+            <div class="save-actions">
+              <button id="bring-all-second" type="button" class="quiet"></button>
+              <button id="bring-all" type="button"></button>
+            </div>
+          </div>
+          <p id="bring-status" class="small muted" role="status"></p>
+          <p id="bring-send" class="note small" hidden>Run <code>antumbra bring</code> on a machine that joined the workspace to send what you chose.</p>
+          <div class="panel">
+            <ul id="bring-list" class="list bring-list"></ul>
+          </div>
+          <button id="bring-more" type="button" class="quiet more" hidden></button>
+        </section>
+      </div>
+
       <div class="view" data-view="devices" hidden>
         <header class="view-head">
           <h2 class="view-title">Devices and handoffs</h2>
@@ -406,6 +578,22 @@
             </div>
           </div>
         </section>
+        <section aria-labelledby="h-handoff-new">
+          <div class="section-head">
+            <h3 id="h-handoff-new">Tell an agent</h3>
+            <p class="muted small">A note for the agent on one of your machines. It is told when it next starts a session, and it can answer with a handoff of its own.</p>
+          </div>
+          <form id="handoff-new" class="panel write padded">
+            <label for="handoff-for">For</label>
+            <select id="handoff-for" name="for_host"></select>
+            <label for="handoff-content">The note. Its first line is its title.</label>
+            <textarea id="handoff-content" name="content" rows="4" required></textarea>
+            <div class="write-row">
+              <button type="submit">Leave it</button>
+              <span class="small muted" role="status"></span>
+            </div>
+          </form>
+        </section>
         <section aria-labelledby="h-handoffs">
           <div class="section-head">
             <h3 id="h-handoffs">Handoffs</h3>
@@ -417,10 +605,91 @@
         </section>
       </div>
 
+      <div class="view" data-view="members" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Members</h2>
+          <p class="view-lede">Who is in this workspace, and as what.</p>
+        </header>
+        <section aria-labelledby="h-members">
+          <div class="section-head">
+            <h3 id="h-members">In this workspace</h3>
+            <p id="members-summary" class="muted small" aria-live="polite"></p>
+          </div>
+          <div class="panel">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Member</th>
+                    <th scope="col">Role</th>
+                    <th scope="col">Joined</th>
+                    <th scope="col"><span class="visually-hidden">Changes</span></th>
+                  </tr>
+                </thead>
+                <tbody id="members"></tbody>
+              </table>
+            </div>
+          </div>
+          <p id="members-status" class="small muted" role="status"></p>
+        </section>
+        <section id="asking-section" aria-labelledby="h-asking" hidden>
+          <div class="section-head">
+            <h3 id="h-asking">Asking to join</h3>
+            <p id="asking-summary" class="muted small" aria-live="polite"></p>
+          </div>
+          <div class="panel">
+            <ul id="asking" class="list asking"></ul>
+          </div>
+        </section>
+        <section id="codes-section" aria-labelledby="h-codes" hidden>
+          <div class="section-head">
+            <h3 id="h-codes">Join codes</h3>
+            <p class="muted small">Give a code to someone and they ask with it: <code>antumbra join &lt;this server&gt; --code &lt;code&gt; --handle &lt;theirs&gt;</code>. Their request comes here for you to decide.</p>
+          </div>
+          <form id="code-new" class="panel write padded">
+            <div class="code-fields">
+              <div class="write">
+                <label for="code-label">For (optional)</label>
+                <input id="code-label" name="label" type="text" maxlength="64" placeholder="the platform team">
+              </div>
+              <div class="write">
+                <label for="code-uses">People it admits</label>
+                <input id="code-uses" name="uses" type="number" min="1" max="100" value="1" required>
+              </div>
+              <div class="write">
+                <label for="code-days">Days it lasts</label>
+                <input id="code-days" name="days" type="number" min="1" max="90" value="14" required>
+              </div>
+            </div>
+            <label class="check"><input id="code-open" name="open" type="checkbox"> Let in whoever holds it, without asking me</label>
+            <div class="write-row">
+              <button type="submit">Make a code</button>
+              <span class="small muted" role="status"></span>
+            </div>
+            <div id="code-made" class="made" hidden>
+              <p class="small muted">This is the only time the code is shown. Send it to the person yourself.</p>
+              <p><code id="code-shown" class="shown"></code> <button id="code-copy" type="button" class="link">Copy</button></p>
+            </div>
+          </form>
+          <div class="panel codes-list">
+            <ul id="codes" class="list"></ul>
+          </div>
+        </section>
+        <section id="removed-section" aria-labelledby="h-removed" hidden>
+          <div class="section-head">
+            <h3 id="h-removed">Removed</h3>
+            <p class="muted small">Their tokens are refused. What they wrote stays.</p>
+          </div>
+          <div class="panel">
+            <ul id="removed" class="list"></ul>
+          </div>
+        </section>
+      </div>
+
       <div class="view" data-view="settings" hidden>
         <header class="view-head">
           <h2 class="view-title">Policy</h2>
-          <p class="view-lede">How this workspace keeps, links and teaches what it remembers. An operator changes it here or in the console.</p>
+          <p class="view-lede">How this workspace keeps, links and teaches what it remembers.</p>
         </header>
         <section aria-labelledby="h-policy">
           <div class="section-head">

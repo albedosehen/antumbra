@@ -1,12 +1,14 @@
 [package]
 name = "antumbra-store"
-version = "0.5.0"
+version = "0.5.1"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 description = "SurrealDB persistence for Antumbra via surql-rs: schema-as-code, migrations, repositories, and HNSW recall."
 
 [dependencies]
+# A profile's image is bytes and a row is JSON.
+base64 = "0.22"
 antumbra-core = { path = "../antumbra-core" }
 oneiriq-surql.workspace = true
 # Direct dep purely to light up the embedded in-memory engine (additive

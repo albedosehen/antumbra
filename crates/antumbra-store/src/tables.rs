@@ -5,11 +5,16 @@
 //! schema is held to: every table it defines is here, and nothing else is.
 
 pub const ACCOUNT: &str = "account";
+pub const ACCOUNT_MEMBERSHIP: &str = "account_membership";
 pub const BEHAVIOR_TUNING: &str = "behavior_tuning";
 pub const COMPARTMENT: &str = "compartment";
 pub const CONTRIBUTION: &str = "contribution";
 pub const DEVICE_PROFILE: &str = "device_profile";
 pub const DOCUMENT_CHUNK: &str = "document_chunk";
+/// What a person decided about bringing a memory to a workspace.
+pub const MEMORY_CHOICE: &str = "memory_choice";
+/// A member's name and image.
+pub const MEMBER_PROFILE: &str = "member_profile";
 pub const EMBEDDER_CONFIG: &str = "embedder_config";
 pub const EVALUATION_RUN: &str = "evaluation_run";
 pub const EXPERT: &str = "expert";
@@ -23,9 +28,14 @@ pub const HIVE: &str = "hive";
 pub const HIVE_MEMBERSHIP: &str = "hive_membership";
 pub const HIVE_OFFER: &str = "hive_offer";
 pub const INVITE_CODE: &str = "invite_code";
+/// A way into a workspace, made by one of its admins.
+pub const JOIN_CODE: &str = "join_code";
+/// One person's request to join one workspace.
+pub const JOIN_REQUEST: &str = "join_request";
 pub const LEARNED_ROUTER: &str = "learned_router";
 pub const LOOP_CONTROL: &str = "loop_control";
 pub const MAGIC_LINK_USE: &str = "magic_link_use";
+pub const SIGNIN: &str = "signin";
 pub const MANIFEST_SET: &str = "manifest_set";
 pub const MEMORY: &str = "memory";
 pub const MEMORY_CHUNK: &str = "memory_chunk";
@@ -49,6 +59,7 @@ pub const VERIFIER_TRANSITION: &str = "verifier_transition";
 /// Every table the schema defines, in the schema's order.
 pub const ALL: &[&str] = &[
     ACCOUNT,
+    ACCOUNT_MEMBERSHIP,
     BEHAVIOR_TUNING,
     COMPARTMENT,
     CONTRIBUTION,
@@ -67,10 +78,15 @@ pub const ALL: &[&str] = &[
     HIVE_MEMBERSHIP,
     HIVE_OFFER,
     INVITE_CODE,
+    JOIN_CODE,
+    JOIN_REQUEST,
     LEARNED_ROUTER,
     LOOP_CONTROL,
     MAGIC_LINK_USE,
+    SIGNIN,
     MANIFEST_SET,
+    MEMBER_PROFILE,
+    MEMORY_CHOICE,
     MEMORY,
     MEMORY_CHUNK,
     MEMORY_EDGE,
@@ -107,6 +123,6 @@ mod tests {
         let mut named: Vec<String> = ALL.iter().map(|n| (*n).to_owned()).collect();
         named.sort();
         assert_eq!(named, defined);
-        assert_eq!(ALL.len(), 41, "every name is distinct");
+        assert_eq!(ALL.len(), 47, "every name is distinct");
     }
 }

@@ -30,6 +30,8 @@ if [ -n "${CURL_HANG:-}" ]; then
   for a in "$@"; do [ "$prev" = "--max-time" ] && limit="$a"; prev="$a"; done
   sleep "$limit"; exit 28
 fi
+# A call to a workspace's address is answered with the workspace's file.
+case "$*" in *team.example*) [ -n "${FAKE_WS_RESPONSE:-}" ] && { cat "$FAKE_WS_RESPONSE"; exit 0; } ;; esac
 cat "$FAKE_RESPONSE"
 STUB
 # `claude reanchor` writes its arguments, and whether it was handed the token,
@@ -99,6 +101,42 @@ echo "a small recall"
 ctx=$(run "$work/small.json" | context)
 check "keeps everything" grep -q 'second small' <<<"$ctx"
 check "mentions no omission" bash -c '! grep -q "left out" <<<"$1"' _ "$ctx"
+
+echo "a machine that joined workspaces"
+joined="$work/workspaces"
+mkdir -p "$joined/a__ws_crew" "$joined/b__ws_lab" "$joined/c__ws_ask"
+printf '%s' '{"url":"https://team.example","workspace":"ws:crew","user":"user:bodil","token_file":"/nowhere","write":"workspace","server":"antumbra-crew"}' > "$joined/a__ws_crew/workspace.json"
+printf '%s' '{"url":"https://lab.example","workspace":"ws:lab","user":"user:bodil","token_file":"/nowhere","write":"workspace"}' > "$joined/b__ws_lab/workspace.json"
+printf '%s' '{"url":"https://ask.example","workspace":"ws:ask","token_file":"/nowhere","write":"ask"}' > "$joined/c__ws_ask/workspace.json"
+ctx=$(run "$work/small.json" ANTUMBRA_WORKSPACES_DIR="$joined" | context)
+check "names each" grep -q -- '- ws:crew at https://team.example, as user:bodil' <<<"$ctx"
+check "says which has tools, and by what name" grep -q 'Its tools are the MCP server `antumbra-crew`' <<<"$ctx"
+check "sends the team's to a workspace it can write to" grep -q "ws:crew.*Store what you learn about this team's work there" <<<"$ctx"
+check "and not to one it has no tools for" grep -q 'ws:lab.*You have no tools for it.*New memories go to your own store. Write to the workspace only when the user asks' <<<"$ctx"
+check "asks where it was told to ask" grep -q 'ws:ask.*ask the user whether to store it in the workspace too' <<<"$ctx"
+check "before any memory" test "$(grep -n 'Workspaces this machine joined' <<<"$ctx" | cut -d: -f1)" -lt "$(grep -n 'first small' <<<"$ctx" | cut -d: -f1)"
+ctx=$(run "$work/small.json" ANTUMBRA_WORKSPACES_DIR="$work/none" | context)
+check "says nothing of workspaces when it joined none" bash -c '! grep -q "Workspaces this machine joined" <<<"$1"' _ "$ctx"
+
+echo "a session opened with what a joined workspace holds"
+printf 'the-workspaces-token' > "$work/ws-token.txt"
+printf '%s' "{\"url\":\"https://team.example/\",\"workspace\":\"ws:crew\",\"token_file\":\"$work/ws-token.txt\",\"write\":\"private\"}" > "$joined/a__ws_crew/workspace.json"
+jq -nc '{memories: [{id: "memory:t", content: "the team deploys on Tuesdays", provenance: {repo: "github.com/acme/orders", commit: "abc1234", branch: "main"}}]}' >"$work/team.json"
+calls="$work/ws-calls.txt"; stdin="$work/ws-stdin.txt"; : >"$calls"; : >"$stdin"
+ctx=$(run "$work/small.json" ANTUMBRA_WORKSPACES_DIR="$joined" FAKE_WS_RESPONSE="$work/team.json" CURL_LOG="$calls" CURL_STDIN="$stdin" | context)
+check "holds the workspace's, marked as not your own" grep -q '^\[workspace ws:crew, not your own store\] the team deploys on Tuesdays' <<<"$ctx"
+check "with where it was learned" grep -q 'learned at github.com/acme/orders@abc1234#main' <<<"$ctx"
+check "after your own" test "$(grep -n 'first small' <<<"$ctx" | cut -d: -f1)" -lt "$(grep -n 'the team deploys' <<<"$ctx" | cut -d: -f1)"
+check "asks the workspace's address once" test "$(grep -c 'https://team.example/mcp/call' "$calls")" = 1
+check "with the workspace's token" grep -q 'Bearer the-workspaces-token' "$stdin"
+check "and no token on any command line" bash -c '! grep -q "the-workspaces-token\|test-token" "$1"' _ "$calls"
+check "does not ask one whose token it cannot read" bash -c '! grep -q "lab.example\|ask.example" "$1"' _ "$calls"
+: >"$calls"
+ctx=$(run "$work/small.json" ANTUMBRA_WORKSPACES_DIR="$joined" FAKE_WS_RESPONSE="$work/team.json" CURL_LOG="$calls" ANTUMBRA_RECALL_WORKSPACES=0 | context)
+check "asks only your own when told to" bash -c '! grep -q "team.example" "$1" && ! grep -q "the team deploys" <<<"$2"' _ "$calls" "$ctx"
+: >"$calls"
+ctx=$(run "$work/small.json" ANTUMBRA_WORKSPACES_DIR="$joined" ANTUMBRA_URL=https://team.example CURL_LOG="$calls" | context)
+check "does not ask twice a workspace it already points at" bash -c '! grep -q "workspace ws:crew, not your own" <<<"$1"' _ "$ctx"
 
 echo "a handoff waiting for this machine"
 jq -nc '{memories: [{id: "memory:a", content: "first small"}],

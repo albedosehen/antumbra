@@ -10,14 +10,22 @@
 //! twin it is held to.
 //!
 //! A CPU that multiplies through tiles with AVX2 alone takes the same steps
-//! in 256-bit vectors (`wide_avx2.rs`): each kernel there is its twin here
-//! with every vector of sixteen as two of eight, and gives its values to the
-//! bit.
+//! in 256-bit vectors (`wide_avx2.rs`), and an aarch64 CPU in 128-bit ones
+//! (`wide_neon.rs`): each kernel there is its twin here with every vector of
+//! sixteen as two of eight, or four of four, and gives its values to the
+//! bit. So a row's values do not depend on which of the three a CPU has
+//! (`marks`, below, holds each to one number).
 
+#[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
+#[cfg(target_arch = "x86_64")]
 #[path = "wide_avx2.rs"]
 pub(super) mod avx2;
+
+#[cfg(target_arch = "aarch64")]
+#[path = "wide_neon.rs"]
+pub(super) mod neon;
 
 const LOG2_E: f32 = std::f32::consts::LOG2_E;
 /// ln 2 in two parts, the first exact in few bits, so `x - n · ln 2` loses
@@ -31,6 +39,7 @@ const EXP_LEAST: f32 = -87.3;
 /// `e` to each of sixteen values, to within two units in the last place: the
 /// power of two nearest is taken off, what is left is a polynomial's, and the
 /// power is put back (Cephes' `expf`, sixteen at a time).
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn exp(x: __m512) -> __m512 {
     // The bound is the first operand, so a value that is not a number comes
@@ -60,6 +69,7 @@ unsafe fn exp(x: __m512) -> __m512 {
 /// `silu(gate) · up` into `out`, over as many values as the three share.
 ///
 /// SAFETY (for the caller): the CPU has AVX-512F.
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 pub(super) unsafe fn silu_times(gate: &[f32], up: &[f32], out: &mut [f32]) {
     let n = gate.len().min(up.len()).min(out.len());
@@ -86,6 +96,7 @@ pub(super) fn attends(dim: usize) -> bool {
     matches!(dim, 32 | 64 | 128)
 }
 
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn scores_of<const N: usize>(
     q: &[f32],
@@ -127,6 +138,7 @@ unsafe fn scores_of<const N: usize>(
 /// SAFETY (for the caller): the CPU has AVX-512F, [`attends`] holds of
 /// `dim`, `most` has a value for each head in `q`, and `out` has room at
 /// every place named above with no other thread writing there.
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 pub(super) unsafe fn scores(
     q: &[f32],
@@ -147,6 +159,7 @@ pub(super) unsafe fn scores(
 /// Positions whose weights are worked out at a time.
 const SPAN: usize = 128;
 
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn weigh_of<const N: usize>(
     scores: *const f32,
@@ -210,6 +223,7 @@ unsafe fn weigh_of<const N: usize>(
 /// SAFETY (for the caller): the CPU has AVX-512F, [`attends`] holds of
 /// `dim`, `acc` has `dim` values and `sums` one for each head, and `scores`
 /// holds a score for every head and position at `r * stride + p`.
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 pub(super) unsafe fn weigh(
     scores: *const f32,
@@ -228,6 +242,7 @@ pub(super) unsafe fn weigh(
 }
 
 /// Sixteen factors at `a`, whole numbers of eight bits, as floats.
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn eights(a: *const i8) -> __m512 {
     _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(_mm_loadu_si128(a as *const __m128i)))
@@ -240,6 +255,7 @@ const SUMS: usize = 8;
 /// Rows of input whose running sums are kept at once.
 const TOGETHER: usize = 8;
 
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 unsafe fn summed(sums: &[__m512; SUMS]) -> __m512 {
     _mm512_add_ps(
@@ -269,6 +285,7 @@ unsafe fn summed(sums: &[__m512; SUMS]) -> __m512 {
 /// SAFETY (for the caller): the CPU has AVX-512F; `a` holds `16 * n`
 /// factors; each row of `x` holds `n` values; and each place in `out` is
 /// room for sixteen.
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 pub(super) unsafe fn through_cols(
     a: *const i8,
@@ -351,6 +368,7 @@ pub(super) unsafe fn through_cols(
 /// `16 * rank * sixteens` factors; `t` holds `rank` values for every row; and
 /// each row's place in `out` holds `16 * sixteens` values that nothing else
 /// reads or writes meanwhile.
+#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f")]
 pub(super) unsafe fn add_sixteens(
     b: *const i8,
@@ -393,7 +411,254 @@ pub(super) unsafe fn add_sixteens(
     }
 }
 
+/// What every set of these kernels is held to, since no CPU runs all three:
+/// a kernel's values over inputs drawn from a seed, folded into one number,
+/// which each set a CPU has must give. The numbers are the AVX-512 kernels'.
+/// A set that gave another value anywhere, by a bit, would give another
+/// number.
 #[cfg(test)]
+mod marks {
+    /// Attention's two passes, and an adapter's two products.
+    type Scoring = unsafe fn(&[f32], &[f32], usize, f32, *mut f32, usize, &mut [f32]);
+    type Weighing = unsafe fn(*const f32, usize, &[f32], &[f32], usize, &mut [f32], &mut [f32]);
+    type Through = unsafe fn(*const i8, usize, *const f32, usize, usize, *mut f32, usize);
+    type Adding = unsafe fn(*const i8, usize, usize, *const f32, usize, *mut f32, usize);
+
+    /// One set of the kernels.
+    struct Set {
+        name: &'static str,
+        silu_times: unsafe fn(&[f32], &[f32], &mut [f32]),
+        scores: Scoring,
+        weigh: Weighing,
+        through_cols: Through,
+        add_sixteens: Adding,
+    }
+
+    /// Every set this CPU can run.
+    #[cfg(target_arch = "x86_64")]
+    fn sets() -> Vec<Set> {
+        let mut sets = Vec::new();
+        if is_x86_feature_detected!("avx512f") {
+            sets.push(Set {
+                name: "AVX-512",
+                silu_times: super::silu_times,
+                scores: super::scores,
+                weigh: super::weigh,
+                through_cols: super::through_cols,
+                add_sixteens: super::add_sixteens,
+            });
+        }
+        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+            sets.push(Set {
+                name: "AVX2",
+                silu_times: super::avx2::silu_times,
+                scores: super::avx2::scores,
+                weigh: super::avx2::weigh,
+                through_cols: super::avx2::through_cols,
+                add_sixteens: super::avx2::add_sixteens,
+            });
+        }
+        sets
+    }
+
+    /// Every set this CPU can run: every aarch64 CPU has NEON.
+    #[cfg(target_arch = "aarch64")]
+    fn sets() -> Vec<Set> {
+        vec![Set {
+            name: "NEON",
+            silu_times: super::neon::silu_times,
+            scores: super::neon::scores,
+            weigh: super::neon::weigh,
+            through_cols: super::neon::through_cols,
+            add_sixteens: super::neon::add_sixteens,
+        }]
+    }
+
+    /// Values from a seed, the same in every run, between -1 and 1.
+    fn values(seed: u64, n: usize) -> Vec<f32> {
+        let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+        (0..n)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                (state >> 40) as f32 / (1u64 << 23) as f32 - 1.0
+            })
+            .collect()
+    }
+
+    fn factors(seed: u64, n: usize) -> Vec<i8> {
+        values(seed, n).iter().map(|v| (v * 127.0) as i8).collect()
+    }
+
+    const START: u64 = 0xcbf2_9ce4_8422_2325;
+
+    /// `mark` with the bits of `values` folded in. What is not a number is
+    /// folded in as one value, since which of them a CPU makes is its own.
+    fn folded(mark: u64, values: &[f32]) -> u64 {
+        values
+            .iter()
+            .map(|v| match v.is_nan() {
+                true => f32::NAN.to_bits(),
+                false => v.to_bits(),
+            })
+            .flat_map(u32::to_le_bytes)
+            .fold(mark, |mark, byte| {
+                (mark ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+            })
+    }
+
+    /// The gate across the exponential's whole range and past both ends of
+    /// it, over a length that leaves every set a last step short of a
+    /// vector.
+    #[test]
+    fn every_set_gives_the_gate_one_value() {
+        let mut gate: Vec<f32> = (0..6000).map(|i| -90.0 + i as f32 * 0.030_3).collect();
+        gate.extend([
+            -1000.0,
+            1000.0,
+            0.0,
+            -0.0,
+            f32::NEG_INFINITY,
+            f32::INFINITY,
+            88.7,
+            -88.7,
+            87.3,
+            -87.3,
+            1e-30,
+            -1e-30,
+            0.5,
+        ]);
+        let up: Vec<f32> = values(29, gate.len()).iter().map(|v| v * 3.0).collect();
+        for set in sets() {
+            let mut out = vec![0f32; gate.len()];
+            // SAFETY: `sets` names only the kernels this CPU has.
+            unsafe { (set.silu_times)(&gate, &up, &mut out) };
+            assert_eq!(folded(START, &out), GATE, "the gate through {}", set.name);
+        }
+    }
+
+    /// Attention's two passes: every width of head, one query head and
+    /// several, and runs of positions on and off the vectors' multiple and
+    /// longer than a span.
+    #[test]
+    fn every_set_gives_attention_one_value() {
+        for set in sets() {
+            let mut mark = START;
+            for dim in [32usize, 64, 128] {
+                for (rep, positions) in [(1usize, 1usize), (6, 7), (2, 16), (6, 129), (3, 300)] {
+                    let q = values(dim as u64 + rep as u64, rep * dim);
+                    let keys = values(7 + positions as u64, positions * dim);
+                    let vals = values(11 + dim as u64, positions * dim);
+                    let scale = 1.0 / (dim as f32).sqrt();
+                    let mut scored = vec![0f32; rep * positions];
+                    let mut most = vec![f32::NEG_INFINITY; rep];
+                    let mut acc = vec![0.25f32; rep * dim];
+                    let mut sums = vec![0.5f32; rep];
+                    // SAFETY: `sets` names only the kernels this CPU has,
+                    // and every place has the room the kernels are told of.
+                    unsafe {
+                        (set.scores)(
+                            &q,
+                            &keys,
+                            dim,
+                            scale,
+                            scored.as_mut_ptr(),
+                            positions,
+                            &mut most,
+                        );
+                        (set.weigh)(
+                            scored.as_ptr(),
+                            positions,
+                            &most,
+                            &vals,
+                            dim,
+                            &mut acc,
+                            &mut sums,
+                        );
+                    }
+                    for part in [&scored, &most, &acc, &sums] {
+                        mark = folded(mark, part);
+                    }
+                }
+            }
+            assert_eq!(mark, ATTENTION, "attention through {}", set.name);
+        }
+    }
+
+    /// An adapter's two products: one row and more than are kept together,
+    /// columns on and off the running sums' multiple, and ranks on and off
+    /// sixteen.
+    #[test]
+    fn every_set_gives_an_adapters_products_one_value() {
+        for set in sets() {
+            let mut mark = START;
+            for (n, rows) in [
+                (1usize, 1usize),
+                (8, 1),
+                (1536, 1),
+                (13, 3),
+                (64, 8),
+                (100, 9),
+                (256, 19),
+            ] {
+                let a = factors(3 + n as u64, 16 * n);
+                let stride = n + 5;
+                let x = values(5 + rows as u64, rows * stride);
+                let out_stride = 16 + 3;
+                let mut out = vec![9f32; rows * out_stride];
+                // SAFETY: `sets` names only the kernels this CPU has, and
+                // the slices hold what the kernel is told of.
+                unsafe {
+                    (set.through_cols)(
+                        a.as_ptr(),
+                        n,
+                        x.as_ptr(),
+                        stride,
+                        rows,
+                        out.as_mut_ptr(),
+                        out_stride,
+                    );
+                }
+                mark = folded(mark, &out);
+            }
+            for (rank, sixteens, rows) in [
+                (1usize, 1usize, 1usize),
+                (16, 3, 1),
+                (17, 2, 1),
+                (48, 2, 1),
+                (16, 2, 3),
+                (17, 3, 2),
+                (48, 2, 5),
+            ] {
+                let b = factors(17 + rank as u64, 16 * rank * sixteens);
+                let t = values(19 + rows as u64, rows * rank);
+                let stride = 16 * sixteens + 2;
+                let mut out = vec![0.5f32; rows * stride];
+                // SAFETY: as above.
+                unsafe {
+                    (set.add_sixteens)(
+                        b.as_ptr(),
+                        rank,
+                        sixteens,
+                        t.as_ptr(),
+                        rows,
+                        out.as_mut_ptr(),
+                        stride,
+                    );
+                }
+                mark = folded(mark, &out);
+            }
+            assert_eq!(mark, ADAPTER, "an adapter's products through {}", set.name);
+        }
+    }
+
+    const GATE: u64 = 0x2e40_9c27_14f7_debb;
+    const ATTENTION: u64 = 0x6702_f0c5_3153_87da;
+    const ADAPTER: u64 = 0x03bd_9e20_c782_41c6;
+}
+
+#[cfg(all(test, target_arch = "x86_64"))]
 mod tests {
     use super::*;
 

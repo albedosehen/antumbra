@@ -347,6 +347,21 @@ fn sixteen_through(
         };
         return;
     }
+    // SAFETY: every aarch64 CPU has NEON, and the three slices were cut just
+    // above to what the kernel reads and writes.
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        super::wide::neon::through_cols(
+            a.as_ptr(),
+            n,
+            x.as_ptr(),
+            stride,
+            rows,
+            out.as_mut_ptr(),
+            out_stride,
+        )
+    };
+    #[cfg(not(target_arch = "aarch64"))]
     for i in 0..rows {
         let sums = &mut out[i * out_stride..i * out_stride + SIXTEEN];
         sums.fill(0.0);
@@ -386,6 +401,11 @@ unsafe fn sixteens_added(
         super::wide::avx2::add_sixteens(b.as_ptr(), rank, sixteens, t.as_ptr(), rows, out, stride);
         return;
     }
+    // Every aarch64 CPU has NEON, and the two slices were cut just above to
+    // what the kernel reads.
+    #[cfg(target_arch = "aarch64")]
+    super::wide::neon::add_sixteens(b.as_ptr(), rank, sixteens, t.as_ptr(), rows, out, stride);
+    #[cfg(not(target_arch = "aarch64"))]
     for (i, t) in t.chunks_exact(rank).enumerate() {
         for (s, b) in b.chunks_exact(rank * SIXTEEN).enumerate() {
             let products =

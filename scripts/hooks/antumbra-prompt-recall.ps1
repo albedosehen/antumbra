@@ -75,67 +75,122 @@ if ($cwd -and (Test-Path $cwd)) {
     } catch { } finally { Pop-Location }
 }
 
-$memories = @()
-try {
-    $arguments = @{ query = $query; top_k = 3 }
-    if ($sessionId) { $arguments['session'] = $sessionId }
-    if ($repo) { $arguments['repo'] = [string]$repo }
-    if ($branch -and $branch -ne 'HEAD') { $arguments['branch'] = [string]$branch }
-    $body = @{ tool = 'recall_memories'; arguments = $arguments } | ConvertTo-Json -Compress -Depth 6
+$arguments = @{ query = $query; top_k = 3 }
+if ($sessionId) { $arguments['session'] = $sessionId }
+if ($repo) { $arguments['repo'] = [string]$repo }
+if ($branch -and $branch -ne 'HEAD') { $arguments['branch'] = [string]$branch }
+$body = @{ tool = 'recall_memories'; arguments = $arguments } | ConvertTo-Json -Compress -Depth 6
 
-    # Whatever the budget has left, less a margin to format and print.
-    $remainingMs = ($budgetSec * 1000) - $clock.ElapsedMilliseconds - 500
-    if ($remainingMs -lt 1000) { exit 0 }
-
-    # HttpClient rather than Invoke-RestMethod, for two reasons. Its Timeout
-    # bounds the whole exchange (connect, send, and reading the body). And the
-    # body is decoded as UTF-8 here: the server sends application/json with no
-    # charset, which Windows PowerShell's Invoke-RestMethod decodes as
-    # ISO-8859-1, so every em dash in a memory arrived as mojibake. The proxy is
-    # bypassed because the engine is a LAN address and proxy discovery only
-    # spends the budget.
-    $handler = New-Object System.Net.Http.HttpClientHandler
-    $handler.UseProxy = $false
-    $client = New-Object System.Net.Http.HttpClient($handler)
+# This machine's own store, and beside it each workspace it has joined
+# (`antumbra join`): a workspace is read with the token kept for it, and what
+# it holds is said apart from what is yours. ANTUMBRA_RECALL_WORKSPACES=0 asks
+# only your own.
+$targets = @(@{ url = $apiUrl.TrimEnd('/'); token = $token; name = '' })
+if ($env:ANTUMBRA_RECALL_WORKSPACES -ne '0') {
+    $joinedDir = if ($env:ANTUMBRA_WORKSPACES_DIR) { $env:ANTUMBRA_WORKSPACES_DIR }
+                 else { Join-Path $HOME '.antumbra/workspaces' }
     try {
-        $client.Timeout = [TimeSpan]::FromMilliseconds($remainingMs)
-        $client.DefaultRequestHeaders.Authorization =
-            New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Bearer', $token)
-        $content = New-Object System.Net.Http.StringContent($body, [System.Text.Encoding]::UTF8, 'application/json')
-        $response = $client.PostAsync("$apiUrl/mcp/call", $content).GetAwaiter().GetResult()
-        if (-not $response.IsSuccessStatusCode) { exit 0 }
-        $bytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
-        $resp = [System.Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json
-    } finally { $client.Dispose() }
-    # recall_memories answers {"memories":[...]} at the TOP LEVEL -- there is no
-    # `result` wrapper. Reading $resp.result.memories yields one $null element and
-    # then throws on .content, which looks like a server fault and is not one.
-    # Both shapes are accepted so a future wrapper would not silently empty this.
-    if ($resp.memories) { $memories = @($resp.memories) }
-    elseif ($resp.result.memories) { $memories = @($resp.result.memories) }
-} catch { exit 0 }
-
-if ($memories.Count -eq 0) { exit 0 }
-
-$lines = foreach ($m in $memories) {
-    $content = [string]$m.content
-    if (-not $content) { continue }
-    if ($content.Length -gt 900) {
-        $content = $content.Substring(0, 900) + " [truncated]"
-    }
-    # The scope tag says whether this was learned here: in_scope, other_branch,
-    # other_repo, or absent when the caller gave no git context. The id lets the
-    # agent judge the memory itself when its work proves it right or wrong.
-    $tag = if ($m.scope) { " [$($m.scope)]" } else { '' }
-    "- ($($m.network))$tag $($m.id): $content"
+        if (Test-Path $joinedDir) {
+            foreach ($dir in (Get-ChildItem -Path $joinedDir -Directory)) {
+                # A few, so a machine in many workspaces still answers inside the budget.
+                if ($targets.Count -ge 4) { break }
+                $file = Join-Path $dir.FullName 'workspace.json'
+                if (-not (Test-Path $file)) { continue }
+                $joined = Get-Content $file -Raw | ConvertFrom-Json
+                $joinedUrl = ([string]$joined.url).TrimEnd('/')
+                $tokenFile = [string]$joined.token_file
+                # One this machine already points at is the first ask, not a second.
+                if (-not $joinedUrl -or $joinedUrl -eq $targets[0].url) { continue }
+                if (-not $tokenFile -or -not (Test-Path $tokenFile)) { continue }
+                $joinedToken = (Get-Content $tokenFile -Raw).Trim()
+                if (-not $joinedToken) { continue }
+                $targets += @{ url = $joinedUrl; token = $joinedToken; name = [string]$joined.workspace }
+            }
+        }
+    } catch { }
 }
 
-if (-not $lines) { exit 0 }
+# Whatever the budget has left, less a margin to format and print.
+$remainingMs = ($budgetSec * 1000) - $clock.ElapsedMilliseconds - 500
+if ($remainingMs -lt 1000) { exit 0 }
 
-$context = "## Antumbra recall (top matches for this prompt)`n`n" +
-    ($lines -join "`n`n") +
-    "`n`nThese are automatic; call recall_memories for a deeper or differently-phrased search. " +
-    "The system notes which of these your answer draws on; when your own work proves one right or wrong, you may reinforce_memory or penalize_memory it by id."
+# HttpClient rather than Invoke-RestMethod, for two reasons. Its Timeout
+# bounds the whole exchange (connect, send, and reading the body). And the
+# body is decoded as UTF-8 here: the server sends application/json with no
+# charset, which Windows PowerShell's Invoke-RestMethod decodes as
+# ISO-8859-1, so every em dash in a memory arrived as mojibake. The proxy is
+# bypassed because the engine is a LAN address and proxy discovery only
+# spends the budget. Every store is asked at once, inside the one budget.
+$asked = @()
+foreach ($target in $targets) {
+    try {
+        $handler = New-Object System.Net.Http.HttpClientHandler
+        $handler.UseProxy = $false
+        $client = New-Object System.Net.Http.HttpClient($handler)
+        $client.Timeout = [TimeSpan]::FromMilliseconds($remainingMs)
+        $client.DefaultRequestHeaders.Authorization =
+            New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Bearer', $target.token)
+        $content = New-Object System.Net.Http.StringContent($body, [System.Text.Encoding]::UTF8, 'application/json')
+        $asked += @{ target = $target; client = $client; task = $client.PostAsync("$($target.url)/mcp/call", $content) }
+    } catch { }
+}
+
+# The memories one store answered with, or none: a store that is slow, down or
+# refuses is left out, and the others still speak.
+function Get-Recalled($Ask) {
+    try {
+        $response = $Ask.task.GetAwaiter().GetResult()
+        if (-not $response.IsSuccessStatusCode) { return @() }
+        $bytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+        $resp = [System.Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json
+        # recall_memories answers {"memories":[...]} at the TOP LEVEL -- there is no
+        # `result` wrapper. Reading $resp.result.memories yields one $null element and
+        # then throws on .content, which looks like a server fault and is not one.
+        # Both shapes are accepted so a future wrapper would not silently empty this.
+        if ($resp.memories) { return @($resp.memories) }
+        if ($resp.result.memories) { return @($resp.result.memories) }
+        return @()
+    } catch { return @() } finally { try { $Ask.client.Dispose() } catch { } }
+}
+
+function Format-Recalled($Memories) {
+    $lines = foreach ($m in $Memories) {
+        $content = [string]$m.content
+        if (-not $content) { continue }
+        if ($content.Length -gt 900) {
+            $content = $content.Substring(0, 900) + " [truncated]"
+        }
+        # The scope tag says whether this was learned here: in_scope, other_branch,
+        # other_repo, or absent when the caller gave no git context. The id lets the
+        # agent judge the memory itself when its work proves it right or wrong.
+        $tag = if ($m.scope) { " [$($m.scope)]" } else { '' }
+        "- ($($m.network))$tag $($m.id): $content"
+    }
+    return @($lines)
+}
+
+$own = @()
+$shared = ''
+foreach ($ask in $asked) {
+    $lines = Format-Recalled (Get-Recalled $ask)
+    if ($lines.Count -eq 0) { continue }
+    if (-not $ask.target.name) { $own = $lines; continue }
+    $shared += "`n`n## From the workspace $($ask.target.name) (your team's, not your own store)`n`n" + ($lines -join "`n`n")
+}
+
+if ($own.Count -eq 0 -and -not $shared) { exit 0 }
+
+$context = ''
+if ($own.Count -gt 0) {
+    $context = "## Antumbra recall (top matches for this prompt)`n`n" +
+        ($own -join "`n`n") +
+        "`n`nThese are automatic; call recall_memories for a deeper or differently-phrased search. " +
+        "The system notes which of these your answer draws on; when your own work proves one right or wrong, you may reinforce_memory or penalize_memory it by id."
+}
+if ($shared) {
+    $context += $shared +
+        "`n`nA workspace's memories are read here and are not in your own store: your tools reach your own, so do not reinforce or penalize these by id."
+}
 
 $json = @{
     hookSpecificOutput = @{

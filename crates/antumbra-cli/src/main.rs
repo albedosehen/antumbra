@@ -18,6 +18,7 @@ use clap::Parser;
 
 mod agents;
 mod behave;
+mod bring;
 mod capture_args;
 mod claude;
 mod cli;
@@ -30,8 +31,10 @@ mod gate_sweep;
 mod generation_report;
 mod gitctx;
 mod gitfacts;
+mod join;
 #[cfg(feature = "models")]
 mod learned_gate;
+mod login;
 mod machine;
 mod models;
 mod ops;
@@ -163,6 +166,17 @@ async fn run() -> anyhow::Result<()> {
         Command::Setup { mode } => {
             // Files, Docker, HTTP and prompts: all blocking, so off the runtime.
             tokio::task::spawn_blocking(move || setup::run(mode)).await??;
+        }
+        Command::Bring(args) => {
+            // Files and HTTP: blocking, so off the runtime.
+            tokio::task::spawn_blocking(move || bring::run(args)).await??;
+        }
+        Command::Join(args) => {
+            // Files and HTTP: blocking, so off the runtime.
+            tokio::task::spawn_blocking(move || join::run(args)).await??;
+        }
+        Command::Login(args) => {
+            tokio::task::spawn_blocking(move || login::run(args)).await??;
         }
         Command::Claude { action } => {
             // Blocking work (files, git, an HTTP surface): keep it off the runtime.
@@ -738,10 +752,11 @@ mod tests {
         "skills",
         "reanchor",
     ];
-    const SURFACE_HELP: &str = "The Antumbra MCP surface, as the hooks know it";
-    const TOKEN_HELP: &str =
-        "The bearer token for that surface. Prefer the environment variable: a \
-                              flag ends up in the shell's history";
+    const SURFACE_HELP: &str = "The Antumbra MCP surface. Without it, the one `antumbra setup` \
+                                recorded, else this machine's own";
+    const TOKEN_HELP: &str = "The bearer token for that surface. Without it, the one in the \
+                              token file `antumbra setup` keeps. Prefer the environment variable \
+                              to the flag: a flag ends up in the shell's history";
 
     /// The surface pair as a `claude` command parsed it.
     fn surface_of(argv: &[&str]) -> anyhow::Result<claude::surface_args::SurfaceArgs> {
@@ -768,9 +783,10 @@ mod tests {
     {
         use clap::CommandFactory;
         // `--surface` reads ANTUMBRA_URL and `--token` ANTUMBRA_TOKEN, so a
-        // shell that sets them parses its own values.
-        let surface =
-            std::env::var("ANTUMBRA_URL").unwrap_or_else(|_| "http://127.0.0.1:8081".to_owned());
+        // shell that sets them parses its own values. Neither has a default:
+        // what stands in for one not given is what setup recorded, which the
+        // command finds when it runs (#512).
+        let surface = std::env::var("ANTUMBRA_URL").ok();
         let token = std::env::var("ANTUMBRA_TOKEN").ok();
         for sub in SURFACE_CALLERS {
             let got = surface_of(&["antumbra", "claude", sub])?;
@@ -786,7 +802,7 @@ mod tests {
                 "t",
             ];
             let got = surface_of(&given)?;
-            assert_eq!(got.surface, "http://surface.test", "{sub}");
+            assert_eq!(got.surface.as_deref(), Some("http://surface.test"), "{sub}");
             assert_eq!(got.token.as_deref(), Some("t"), "{sub}");
         }
         let cli = Cli::command();
@@ -805,15 +821,7 @@ mod tests {
             let env = |a: &clap::Arg| a.get_env().map(|e| e.to_string_lossy().into_owned());
             let help = |a: &clap::Arg| a.get_help().map(ToString::to_string);
             let surface = flag("surface")?;
-            assert_eq!(
-                surface
-                    .get_default_values()
-                    .iter()
-                    .map(|v| v.to_string_lossy().into_owned())
-                    .collect::<Vec<_>>(),
-                vec!["http://127.0.0.1:8081".to_owned()],
-                "{sub}"
-            );
+            assert!(surface.get_default_values().is_empty(), "{sub}");
             assert_eq!(env(surface), Some("ANTUMBRA_URL".to_owned()), "{sub}");
             assert_eq!(help(surface), Some(SURFACE_HELP.to_owned()), "{sub}");
             let token = flag("token")?;

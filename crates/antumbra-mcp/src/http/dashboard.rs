@@ -1,7 +1,10 @@
 //! The web dashboard: a browser surface over the same tools an agent calls.
-//! It reads, but for the decisions that are a user's own: a behavior drawn
-//! from their memories is accepted, so their expert learns it, or retired; and
-//! a handoff one of their machines left for another is marked done; and an
+//! It reads, and it does what is a user's own to do, each through the tool an
+//! agent would call: a behavior drawn from their memories is accepted, so
+//! their expert learns it, or retired; a memory is written, reinforced, judged
+//! wrong or forgotten; a document is added and a compartment made; a handoff
+//! is left for the agent on one of their machines, and one left for another
+//! is marked done; and an
 //! operator saves their workspace's policy, through the console's own action.
 //!
 //! It is one page with several views, the address's fragment naming the one
@@ -40,6 +43,11 @@ const THEME: &str = include_str!("dashboard/theme.js");
 /// The sidebar every page shares, the relics pages among them: collapsing
 /// it, and who is signed in at its foot.
 const SIDE: &str = include_str!("dashboard/side.js");
+/// What the dashboard changes (a memory, a handoff, a document, a
+/// compartment) and the Agent page.
+const MANAGE: &str = include_str!("dashboard/manage.js");
+/// The Share page: choosing which of your own memories go to a workspace.
+const BRING: &str = include_str!("dashboard/bring.js");
 const STYLE: &str = include_str!("dashboard/app.css");
 /// The relics gallery and viewer (`/relics`, `/relic/<slug>`): one script and
 /// one style for both pages, self-contained because the dashboard's script
@@ -67,6 +75,14 @@ pub(super) fn routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
         )
         .route("/dashboard/app.js", get(script))
         .route("/dashboard/behaviors.js", get(behaviors))
+        .route(
+            "/dashboard/manage.js",
+            get(|| async { asset("text/javascript; charset=utf-8", MANAGE) }),
+        )
+        .route(
+            "/dashboard/bring.js",
+            get(|| async { asset("text/javascript; charset=utf-8", BRING) }),
+        )
         .route(
             "/dashboard/side.js",
             get(|| async { asset("text/javascript; charset=utf-8", SIDE) }),
@@ -143,6 +159,8 @@ mod tests {
             ("/dashboard/shell.js", "text/javascript"),
             ("/dashboard/theme.js", "text/javascript"),
             ("/dashboard/side.js", "text/javascript"),
+            ("/dashboard/manage.js", "text/javascript"),
+            ("/dashboard/bring.js", "text/javascript"),
             ("/dashboard/app.css", "text/css"),
             ("/dashboard/relics.js", "text/javascript"),
             ("/dashboard/relics.css", "text/css"),
@@ -214,6 +232,8 @@ mod tests {
             ("shell.js", SHELL),
             ("theme.js", THEME),
             ("side.js", SIDE),
+            ("manage.js", MANAGE),
+            ("bring.js", BRING),
         ] {
             for sink in [
                 "innerHTML",

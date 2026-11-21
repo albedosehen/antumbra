@@ -50,6 +50,32 @@ function showSideUser(who) {
   for (const node of document.querySelectorAll("[data-initials]")) node.textContent = user ? initialsOf(user) : "";
 }
 
+/** Draw the signed-in member as their profile has them: the name they go
+ *  by in place of their user id, and their image in place of their initials.
+ *  `image` is a `data:` URL the server made from bytes it checked; it is set
+ *  as an image's source and nothing else. Either may be absent. */
+function showSideProfile(display, image) {
+  if (display) {
+    for (const node of document.querySelectorAll("[data-user-name]")) node.textContent = display;
+  }
+  for (const node of document.querySelectorAll("[data-initials]")) {
+    const held = node.querySelector("img");
+    if (!image) {
+      // No image: the initials, of the name shown.
+      if (held) held.remove();
+      node.classList.remove("has-image");
+      if (display) node.textContent = initialsOf(display);
+      continue;
+    }
+    const picture = held || document.createElement("img");
+    picture.alt = "";
+    picture.src = image;
+    node.textContent = "";
+    node.append(picture);
+    node.classList.add("has-image");
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const toggle = document.getElementById("side-toggle");
   if (!toggle) return;

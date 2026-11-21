@@ -433,11 +433,28 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // to a tenant and must never be tenant-readable).
         table_schema(tables::INVITE_CODE).with_mode(TableMode::Schemaless),
         table_schema(tables::ACCOUNT).with_mode(TableMode::Schemaless),
+        // The workspaces an account is in, a row for each. Owner-only like
+        // the account itself: it says which logins reach which workspaces.
+        table_schema(tables::ACCOUNT_MEMBERSHIP)
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([index("account_membership_subject_idx", ["subject"])]),
+        // Join codes and join requests: a way into a workspace, and the digest
+        // of the secret a request's token is collected with. Owner-only like
+        // the two above; the server reads them for an admin it has checked.
+        table_schema(tables::JOIN_CODE)
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([index("join_code_tenant_idx", ["tenant"])]),
+        table_schema(tables::JOIN_REQUEST)
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([index("join_request_tenant_idx", ["tenant"])]),
         // Consumed magic-link ids (keyed by `jti`): the single-use ledger a
         // verify writes through, with an `expires_at` matching the link's so
         // rows self-expire out at the next sweep. Owner-only, like the rest of
         // the control-plane tables.
         table_schema(tables::MAGIC_LINK_USE).with_mode(TableMode::Schemaless),
+        // A sign-in a machine is waiting to collect, made when its link was
+        // followed. Owner-only like the rest of the control plane's tables.
+        table_schema(tables::SIGNIN).with_mode(TableMode::Schemaless),
         // Revoked token ids (keyed by `jti`), each kept until the token it
         // names would have expired: the denylist every networked server reads
         // in the owner view. Owner-only, like the rest of the control-plane
@@ -516,6 +533,18 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("device_host_idx", ["host", "backend"]),
                 index("device_user_idx", ["user", "role"]),
             ]),
+        // What a person decided about bringing each of their memories to a
+        // workspace: their own to write, by the rule a device's row has.
+        table_schema(tables::MEMORY_CHOICE)
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(DEVICE_PERMS)
+            .with_indexes([index("memory_choice_user_idx", ["tenant_id", "user"])]),
+        // A member's name and image: read by the workspace's members, written
+        // by its own user, which is the rule a device's row has.
+        table_schema(tables::MEMBER_PROFILE)
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(DEVICE_PERMS)
+            .with_indexes([index("member_profile_tenant_idx", ["tenant_id"])]),
         // The tenant hive: two gates and an offer ledger. One hive
         // row per tenant, so the gate cannot be ambiguous.
         table_schema(tables::HIVE)
@@ -772,7 +801,11 @@ pub fn tenant_access() -> AccessDefinition {
     record_access(
         "tenant",
         RecordAccessConfig::new()
-            .with_signin("SELECT * FROM principal WHERE tenant = $tenant AND user = $user"),
+            // A removed member's row stays, marked, and does not sign in.
+            .with_signin(
+                "SELECT * FROM principal WHERE tenant = $tenant AND user = $user \
+                 AND (status IS NONE OR status IS NULL OR status != 'removed')",
+            ),
     )
     .with_session(format!("{}s", TENANT_SESSION.as_secs()))
 }

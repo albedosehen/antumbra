@@ -33,6 +33,41 @@ struct MagicClaims {
     jti: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     inv: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    join: Option<JoinAsk>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    signin: Option<SigninAsk>,
+}
+
+/// What a link carries when a machine asked to sign in and will collect the
+/// token itself: the sign-in is kept when the link is followed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SigninAsk {
+    /// The id the sign-in will have, told to the machine when the link is sent.
+    pub request: String,
+    /// The SHA-256 of the secret the token will be collected with.
+    pub secret_digest: String,
+    /// The workspace asked for, when the account is in more than one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
+}
+
+/// What a link that asks to join a workspace carries: the request that is
+/// made when the link is followed, and not before.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JoinAsk {
+    /// The id the request will have, told to the asker when the link is sent.
+    pub request: String,
+    pub code: String,
+    pub handle: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    /// The SHA-256 of the secret the token will be collected with.
+    pub secret_digest: String,
 }
 
 /// A deliberately-conservative shape check (not full RFC 5322): exactly one `@`,
@@ -54,12 +89,21 @@ fn is_plausible_email(email: &str) -> bool {
         && !domain.ends_with('.')
 }
 
-fn mint_token(secret: &[u8], email: &str, invite: Option<&str>, ttl: Duration) -> Result<String> {
+fn mint_token(
+    secret: &[u8],
+    email: &str,
+    invite: Option<&str>,
+    join: Option<&JoinAsk>,
+    signin: Option<&SigninAsk>,
+    ttl: Duration,
+) -> Result<String> {
     let claims = MagicClaims {
         sub: email.to_string(),
         exp: get_current_timestamp() + ttl.as_secs(),
         jti: uuid::Uuid::new_v4().simple().to_string(),
         inv: invite.map(str::to_string),
+        join: join.cloned(),
+        signin: signin.cloned(),
     };
     encode(
         &Header::new(Algorithm::HS256),
@@ -85,6 +129,10 @@ fn verify_token(secret: &[u8], token: &str) -> Result<MagicClaims> {
 pub struct VerifiedLink {
     pub identity: VerifiedIdentity,
     pub invite: Option<String>,
+    /// The request a link that asks to join carries.
+    pub join: Option<JoinAsk>,
+    /// The sign-in a machine is waiting to collect, when the link is one.
+    pub signin: Option<SigninAsk>,
     pub jti: String,
     pub expires_at: chrono::DateTime<chrono::Utc>,
 }
@@ -111,19 +159,38 @@ impl<'a> MagicLink<'a> {
 
     /// Email a one-time LOGIN link (no invite) for an existing account.
     pub fn request(&self, email: &str) -> Result<()> {
-        self.send(email, None)
+        self.send(email, None, None, None)
+    }
+
+    /// Email a one-time link that, followed, lets the machine that asked
+    /// collect a token for the account: the browser that follows it is given
+    /// none.
+    pub fn request_signin(&self, email: &str, ask: &SigninAsk) -> Result<()> {
+        self.send(email, None, None, Some(ask))
+    }
+
+    /// Email a one-time link that, followed, asks to join a workspace as
+    /// `ask` says: the address is verified by the following.
+    pub fn request_join(&self, email: &str, ask: &JoinAsk) -> Result<()> {
+        self.send(email, None, Some(ask), None)
     }
 
     /// Email a one-time SIGNUP link carrying `invite`, for a new account.
     pub fn request_signup(&self, email: &str, invite: &str) -> Result<()> {
-        self.send(email, Some(invite))
+        self.send(email, Some(invite), None, None)
     }
 
-    fn send(&self, email: &str, invite: Option<&str>) -> Result<()> {
+    fn send(
+        &self,
+        email: &str,
+        invite: Option<&str>,
+        join: Option<&JoinAsk>,
+        signin: Option<&SigninAsk>,
+    ) -> Result<()> {
         if !is_plausible_email(email) {
             return Err(AntumbraError::rejected("not a valid email address"));
         }
-        let token = mint_token(self.secret, email, invite, self.ttl)?;
+        let token = mint_token(self.secret, email, invite, join, signin, self.ttl)?;
         let link = format!(
             "{}/magic/verify?token={token}",
             self.base_url.trim_end_matches('/')
@@ -143,6 +210,8 @@ impl<'a> MagicLink<'a> {
             identity: VerifiedIdentity::new(format!("email:{}", claims.sub))
                 .with(Some(claims.sub), None),
             invite: claims.inv,
+            join: claims.join,
+            signin: claims.signin,
             jti: claims.jti,
             expires_at,
         })

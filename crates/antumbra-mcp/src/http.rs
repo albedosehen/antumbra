@@ -76,6 +76,9 @@ mod console;
 mod dashboard;
 mod experts;
 mod github;
+mod join;
+mod members;
+mod pool;
 mod relics;
 mod revocation;
 pub(crate) mod sync;
@@ -220,6 +223,11 @@ struct HttpState {
     /// with the models feature.
     #[cfg_attr(not(feature = "models"), allow(dead_code))]
     recipe: antumbra_core::behavior::Recipe,
+    /// Whether answers are read ahead (`--serve-ahead`): the keeper trains
+    /// and audits decoding as the serving engine does, so that admission
+    /// reads the answers that will be served.
+    #[cfg_attr(not(feature = "models"), allow(dead_code))]
+    serve_ahead: bool,
     /// Whether the keeper tunes the recipe's regression confidence, per
     /// workspace, from the audits of the experts it admitted.
     #[cfg_attr(not(feature = "models"), allow(dead_code))]
@@ -265,6 +273,24 @@ struct HttpState {
     /// The ids of the tokens revoked before their expiry, as the store's
     /// `revoked_token` table had them at the last refresh ([`revocation`]).
     revoked: std::sync::RwLock<std::collections::HashSet<String>>,
+    /// The (workspace, user) pairs whose member was removed, as the store had
+    /// them at the last refresh, and as this server's own removals made them
+    /// since ([`members`]). A token for one is refused like a revoked one.
+    removed: std::sync::RwLock<std::collections::HashSet<(String, String)>>,
+    /// The secret this server signs a new member's token with, where it
+    /// holds one ([`join`]). A server that verifies RS256 holds a public key
+    /// and can let no one in by itself.
+    issuer: Option<Vec<u8>>,
+    /// Whether only members are served: a signed token for a pair the
+    /// workspace does not hold is refused, where it was provisioned.
+    members_only: bool,
+    /// The control plane that signs this server's tokens, by its address,
+    /// where there is one: who asks to join here is sent there, to have an
+    /// address verified and a token signed.
+    control_plane: Option<String>,
+    /// The minute the public join routes are counted in, and how many
+    /// requests it has had ([`join::PUBLIC_PER_MINUTE`]).
+    join_minute: std::sync::Mutex<(std::time::Instant, u32)>,
     /// What one identity, one session and one connection may hold open.
     limits: Limits,
     /// One MCP service per identity (provisioned once), all sharing `store`,
@@ -313,6 +339,11 @@ pub async fn serve(
     serve_quant: &str,
     serve_ahead: bool,
     sync: Option<sync::Settings>,
+    // The HS256 secret, where the server verifies with one: what lets it mint
+    // a token for someone its admins let in. None where it verifies RS256.
+    issuer: Option<Vec<u8>>,
+    members_only: bool,
+    control_plane: Option<String>,
 ) -> Result<()> {
     let mut store = crate::connect(&url, &db).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
@@ -350,6 +381,7 @@ pub async fn serve(
         auth: Arc::new(Mutex::new(())),
         auto_propose,
         recipe,
+        serve_ahead,
         tune_confidence,
         behave_drift,
         serve,
@@ -363,6 +395,13 @@ pub async fn serve(
         profile,
         github: github.map(Arc::new),
         revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
+        removed: std::sync::RwLock::new(std::collections::HashSet::new()),
+        issuer,
+        members_only,
+        control_plane: control_plane
+            .map(|url| url.trim().trim_end_matches('/').to_string())
+            .filter(|url| !url.is_empty()),
+        join_minute: std::sync::Mutex::new((std::time::Instant::now(), 0)),
         limits: Limits::default(),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
@@ -596,6 +635,9 @@ fn router(state: Arc<HttpState>) -> Router {
         .route("/mcp/call", post(handle_call))
         .route("/github/webhook", post(github::handle))
         .merge(console::routes())
+        .merge(members::routes())
+        .merge(join::routes())
+        .merge(pool::routes())
         .merge(dashboard::routes())
         .merge(relics::routes())
         .merge(experts::routes())
@@ -700,7 +742,32 @@ impl HttpState {
                 return Err(AuthError::Invalid("token revoked".into()));
             }
         }
+        // A member removed from their workspace holds a token that is still
+        // signed and unexpired: it is refused here, on every route.
+        let removed = self
+            .removed
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let pair = (access.identity.tenant.clone(), access.identity.user.clone());
+        if removed.contains(&pair) {
+            return Err(AuthError::Invalid("removed from this workspace".into()));
+        }
+        drop(removed);
         Ok(access)
+    }
+
+    /// Note on this server, at once, that a member was removed (`gone`) or
+    /// let back in: the next refresh reads the same from the store.
+    fn forget_member(&self, pair: (String, String), gone: bool) {
+        let mut removed = self
+            .removed
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if gone {
+            removed.insert(pair);
+        } else {
+            removed.remove(&pair);
+        }
     }
 
     /// [`Self::access_of`], as the identity alone.
@@ -781,6 +848,17 @@ impl HttpState {
                 .await;
             async {
                 self.store.signin_root().await?;
+                // A server that serves only members provisions no one: a
+                // signed token is not a membership there.
+                if self.members_only
+                    && !antumbra_store::repo::principal::is_member(&self.store, &tenant, &user)
+                        .await?
+                {
+                    return Err(antumbra_core::AntumbraError::rejected(
+                        "you are not a member of this workspace; ask one of its admins for a join code",
+                    )
+                    .into());
+                }
                 let dc = crate::provision_identity(&self.store, &tenant, &user).await?;
                 // This machine is a node in that user's fabric. A hosted server is
                 // not "nobody's machine": the agent's recall and store really are

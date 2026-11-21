@@ -77,14 +77,20 @@ $url = "http://127.0.0.1:$port"
 # a thread left waiting for a call would keep the process from ever exiting.
 $listener = [System.Net.HttpListener]::new()
 $listener.Prefixes.Add("$url/")
+# The same surface under a second name, to stand for a workspace's server; the
+# token each call presented goes to a file of its own, with the name it came to.
+$listener.Prefixes.Add("http://localhost:$port/")
+$auths = Join-Path $work 'auths.txt'
+Set-Content -Path $auths -Value ''
 $listener.Start()
-$null = Start-ThreadJob -ArgumentList $listener, $response, $calls -ScriptBlock {
-    param($listener, $responseFile, $callsFile)
+$null = Start-ThreadJob -ArgumentList $listener, $response, $calls, $auths -ScriptBlock {
+    param($listener, $responseFile, $callsFile, $authsFile)
     try {
         while ($listener.IsListening) {
             $call = $listener.GetContext()
             $body = [System.IO.StreamReader]::new($call.Request.InputStream).ReadToEnd()
             [System.IO.File]::AppendAllText($callsFile, ($body -replace '\s+', ' ') + "`n")
+            [System.IO.File]::AppendAllText($authsFile, "$($call.Request.Url.Host) $($call.Request.Headers['Authorization'])`n")
             $bytes = [System.IO.File]::ReadAllBytes($responseFile)
             $call.Response.ContentType = 'application/json'
             $call.Response.OutputStream.Write($bytes, 0, $bytes.Length)
@@ -176,6 +182,55 @@ Write-Output 'a small recall'
 $ctx = Get-Context $small $stub
 Check 'keeps everything' $ctx.Contains('second small')
 Check 'mentions no omission' (-not $ctx.Contains('left out'))
+
+Write-Output 'a machine that joined workspaces'
+$joinedDir = Join-Path $work 'workspaces'
+foreach ($ws in @(
+    @{ dir = 'a__ws_crew'; json = @{ url = 'https://team.example'; workspace = 'ws:crew'; user = 'user:bodil'; token_file = '/nowhere'; write = 'workspace'; server = 'antumbra-crew' } },
+    @{ dir = 'b__ws_lab'; json = @{ url = 'https://lab.example'; workspace = 'ws:lab'; user = 'user:bodil'; token_file = '/nowhere'; write = 'workspace' } },
+    @{ dir = 'c__ws_ask'; json = @{ url = 'https://ask.example'; workspace = 'ws:ask'; token_file = '/nowhere'; write = 'ask' } }
+)) {
+    $at = Join-Path $joinedDir $ws.dir
+    New-Item -ItemType Directory -Force -Path $at | Out-Null
+    $ws.json | ConvertTo-Json -Compress | Set-Content -Path (Join-Path $at 'workspace.json')
+}
+$env:ANTUMBRA_WORKSPACES_DIR = $joinedDir
+$ctx = Get-Context $small $stub
+$line = { param($name) ($ctx -split "`n" | Where-Object { $_.StartsWith("- $name ") } | Select-Object -First 1) }
+Check 'names each' $ctx.Contains('- ws:crew at https://team.example, as user:bodil')
+Check 'says which has tools, and by what name' (& $line 'ws:crew').Contains('Its tools are the MCP server `antumbra-crew`')
+Check "sends the team's to a workspace it can write to" (& $line 'ws:crew').Contains("Store what you learn about this team's work there")
+Check 'and not to one it has no tools for' ((& $line 'ws:lab').Contains('You have no tools for it') -and (& $line 'ws:lab').Contains('Write to the workspace only when the user asks'))
+Check 'asks where it was told to ask' (& $line 'ws:ask').Contains('ask the user whether to store it in the workspace too')
+Check 'before any memory' ($ctx.IndexOf('Workspaces this machine joined') -lt $ctx.IndexOf('first small'))
+$env:ANTUMBRA_WORKSPACES_DIR = Join-Path $work 'none'
+$ctx = Get-Context $small $stub
+Check 'says nothing of workspaces when it joined none' (-not $ctx.Contains('Workspaces this machine joined'))
+Remove-Item Env:ANTUMBRA_WORKSPACES_DIR
+
+Write-Output 'a session opened with what a joined workspace holds'
+$wsToken = Join-Path $work 'ws-token.txt'
+Set-Content -Path $wsToken -Value 'the-workspaces-token'
+@{ url = "http://localhost:$port/"; workspace = 'ws:crew'; token_file = $wsToken; write = 'private' } |
+    ConvertTo-Json -Compress | Set-Content -Path (Join-Path $joinedDir 'a__ws_crew/workspace.json')
+$env:ANTUMBRA_WORKSPACES_DIR = $joinedDir
+$tokenBefore = $env:ANTUMBRA_TOKEN
+$env:ANTUMBRA_TOKEN = 'this-machines-own-token'
+Set-Content -Path $auths -Value ''
+$ctx = Get-Context $small $stub
+$presented = @(Get-Content $auths | Where-Object { $_ })
+Check "holds the workspace's, marked as not your own" $ctx.Contains('[workspace ws:crew, not your own store] first small')
+Check 'after your own' ($ctx.IndexOf('first small') -lt $ctx.IndexOf('[workspace ws:crew'))
+Check "asks the workspace once, with the workspace's token" (@($presented | Where-Object { $_ -eq 'localhost Bearer the-workspaces-token' }).Count -eq 1)
+Check "and never with this machine's own" (@($presented | Where-Object { $_.StartsWith('localhost') -and $_.Contains('this-machines-own-token') }).Count -eq 0)
+Check "nor its own server with the workspace's" (@($presented | Where-Object { $_.StartsWith('127.0.0.1') -and $_.Contains('the-workspaces-token') }).Count -eq 0)
+$env:ANTUMBRA_RECALL_WORKSPACES = '0'
+Set-Content -Path $auths -Value ''
+$ctx = Get-Context $small $stub
+Check 'asks only your own when told to' ((-not $ctx.Contains('[workspace ws:crew')) -and (@(Get-Content $auths | Where-Object { $_ -and $_.StartsWith('localhost') }).Count -eq 0))
+Remove-Item Env:ANTUMBRA_RECALL_WORKSPACES
+Remove-Item Env:ANTUMBRA_WORKSPACES_DIR
+$env:ANTUMBRA_TOKEN = $tokenBefore
 
 Write-Output 'a handoff waiting for this machine'
 $handoff = @{

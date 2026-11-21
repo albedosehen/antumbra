@@ -15,7 +15,10 @@ const VIEWS = {
   dependencies: "Dependencies",
   knowledge: "Knowledge",
   account: "Account",
+  agent: "Agent",
+  share: "Share",
   devices: "Devices and handoffs",
+  members: "Members",
   settings: "Policy",
 };
 
@@ -235,6 +238,7 @@ async function loadDevices() {
   const out = await call("devices");
   const devices = out.devices ?? [];
   state.shell.devices = devices;
+  offerDevices();
   byId("devices-summary").textContent = devices.length
     ? `${numbers.format(devices.length)} registered`
     : "";
@@ -291,7 +295,7 @@ function handoffItem(note) {
     "li",
     { class: "handoff" },
     h("p", { class: "handoff-title" }, title || "Untitled"),
-    body ? h("p", { class: "content" }, body) : null,
+    body ? rich(body) : null,
     h(
       "p",
       { class: "meta small muted" },
@@ -470,7 +474,9 @@ function knobRow([key, label, says, unit], stored, knob, operator) {
     control = h(
       "div",
       { class: "knob-input" },
-      h("div", { class: "knob-field" }, input, unit ? h("span", { class: "small muted" }, unit) : null),
+      // The unit's room is the same on every row, named or not, so the
+      // fields line up down the page.
+      h("div", { class: "knob-field" }, input, h("span", { class: "unit small muted" }, unit || "")),
       h("p", { class: "small muted" }, `${numbers.format(knob.min)} to ${numbers.format(knob.max)}`),
     );
   }
@@ -517,7 +523,7 @@ async function loadRecent() {
           h(
             "li",
             { class: "recent" },
-            h("p", { class: "recent-text" }, m.content),
+            h("p", { class: "recent-text" }, plain(m.content)),
             h(
               "p",
               { class: "meta small muted" },
@@ -545,6 +551,7 @@ function showCounts() {
   };
   badge("nav-proposed", proposedCount());
   badge("nav-handoffs", state.shell.handoffs);
+  badge("nav-asking", state.shell.asking || 0);
 }
 
 function attentionItem(text, detail, href) {
@@ -563,6 +570,15 @@ function renderAttention() {
   if (handoffs) {
     items.push(attentionItem(`${numbers.format(handoffs)} ${handoffs === 1 ? "handoff" : "handoffs"} waiting`, "Read and mark done", "#/devices"));
   }
+  const offered = state.shell.offered || 0;
+  const rulesPool = state.shell.pool && ["owner", "admin"].includes(state.shell.pool.your_role);
+  if (offered && rulesPool) {
+    items.push(attentionItem(`${numbers.format(offered)} offered to the workspace`, "Accept or decline", "#/knowledge"));
+  }
+  const asking = state.shell.asking || 0;
+  if (asking) {
+    items.push(attentionItem(`${numbers.format(asking)} asking to join`, "Approve or refuse", "#/members"));
+  }
   const left = state.shell.tokenDaysLeft;
   if (left !== null && left <= EXPIRING_DAYS) {
     items.push(attentionItem(left === 0 ? "Your token expires today" : `Your token expires in ${left} ${left === 1 ? "day" : "days"}`, "Mint a new one", "#/account"));
@@ -574,6 +590,14 @@ function renderAttention() {
 function shellLoads() {
   return [
     section(byId("devices"), loadDevices),
+    section(byId("members"), loadMembers),
+    section(byId("pool-offers"), loadPool),
+    // The member's name and image (manage.js), drawn after the identity the
+    // token gave, which it then stands in for. A server from before profiles
+    // does not have the tool: the initials stay.
+    loadProfile().catch((error) => {
+      if (error instanceof SignedOut || error instanceof Superseded) throw error;
+    }),
     section(byId("policy"), loadPolicy),
     section(byId("recent"), loadRecent),
   ];

@@ -11,6 +11,11 @@ use super::*;
 mod step;
 pub(super) use step::{Next, Scratch, Stepped};
 
+/// What a pass read ahead as tensors says where nothing joined its
+/// adapters for it: never the plain steps in their place, which round
+/// otherwise.
+const NOT_JOINED: &str = "a pass read ahead as tensors found its adapters not joined";
+
 // --- linear-algebra helpers ------------------------------------------------
 
 /// `x · Wᵀ` with candle's broadcast-over-batch-dims convention (mirrors
@@ -317,6 +322,14 @@ impl LoraLinear {
         group.iter().map(|l| l.base_product(x)).collect()
     }
 
+    /// The frozen base as a dense tensor, where it is held as one.
+    fn dense_base(&self) -> Option<&Tensor> {
+        match &self.base {
+            BaseWeight::Dense(w) => Some(w),
+            _ => None,
+        }
+    }
+
     fn with_bias(&self, out: Tensor) -> CResult<Tensor> {
         match &self.base_b {
             Some(bias) => out.broadcast_add(bias),
@@ -366,6 +379,33 @@ impl LoraLinear {
         } else {
             group.iter().map(|l| l.delta(x)).collect::<CResult<_>>()?
         };
+        let outs: Vec<Tensor> = group
+            .iter()
+            .zip(bases)
+            .zip(deltas)
+            .map(|((l, base), delta)| {
+                l.with_bias(match delta {
+                    Some(delta) => (base + delta)?,
+                    None => base,
+                })
+            })
+            .collect::<CResult<_>>()?;
+        outs.try_into()
+            .map_err(|_| candle_core::Error::msg("a projection group lost an output"))
+    }
+
+    /// Every projection in `group` applied to the same `x` in a pass read
+    /// ahead as tensors ([`tensors`]): each base's product, and every
+    /// adapter's delta from the group's factors joined ([`Joined`]). What
+    /// [`LoraLinear::forward_group`] gives each, by fewer and other steps,
+    /// so not to the bit: such a pass is its own arithmetic throughout.
+    pub(super) fn forward_joined<const N: usize>(
+        x: &Tensor,
+        group: [&LoraLinear; N],
+        joined: &Joined,
+    ) -> CResult<[Tensor; N]> {
+        let bases = Self::base_products(x, group)?;
+        let deltas = joined.deltas(x, N)?;
         let outs: Vec<Tensor> = group
             .iter()
             .zip(bases)
@@ -457,11 +497,113 @@ impl LoraLinear {
     }
 }
 
+/// The adapters of projections that read one input, joined for the passes of
+/// one generation read ahead as tensors ([`tensors`]).
+///
+/// Alone, a projection's delta is two small products, a scaling and an add,
+/// and on a GPU each of those is a launch that costs what it costs however
+/// little it multiplies: the deltas were a third of a pass. Joined, the
+/// group's first factors lie one under another and are multiplied once, and
+/// its second factors, with the scale already in them, lie each in its own
+/// columns of one matrix that is nothing elsewhere and are multiplied once:
+/// two products for the group, and each projection's delta a part of what
+/// comes out.
+///
+/// It is made when a generation begins and used only by that generation's
+/// passes: the factors it was made from can be set or trained between
+/// generations, never within one.
+pub(super) struct Joined {
+    /// `(members * rank, in)` and `(sum of outs, members * rank)`; nothing
+    /// where the adapters are off.
+    factors: Option<(Tensor, Tensor)>,
+    /// Where each member's part of the second product begins, and how wide
+    /// it is.
+    places: Vec<(usize, usize)>,
+}
+
+impl Joined {
+    /// The adapters of `group`, joined as they are now.
+    fn of(group: &[&LoraLinear]) -> CResult<Self> {
+        let mut places = Vec::with_capacity(group.len());
+        let (mut outs, mut ranks) = (0, 0);
+        for l in group {
+            let (out, rank) = l.b.dims2()?;
+            places.push((outs, out));
+            outs += out;
+            ranks += rank;
+        }
+        if !group.iter().all(|l| l.enabled) {
+            return Ok(Self {
+                factors: None,
+                places,
+            });
+        }
+        let firsts: Vec<Tensor> = group.iter().map(|l| l.a.detach()).collect();
+        let a = Tensor::cat(&firsts, 0)?;
+        let mut rows = Vec::with_capacity(group.len());
+        let mut before = 0;
+        for l in group {
+            let (out, rank) = l.b.dims2()?;
+            let scaled = l.b.detach().affine(l.scale, 0.0)?;
+            let none = |width: usize| Tensor::zeros((out, width), scaled.dtype(), scaled.device());
+            let mut parts = Vec::with_capacity(3);
+            if before > 0 {
+                parts.push(none(before)?);
+            }
+            parts.push(scaled.clone());
+            if ranks > before + rank {
+                parts.push(none(ranks - before - rank)?);
+            }
+            rows.push(match parts.len() {
+                1 => scaled,
+                _ => Tensor::cat(&parts, 1)?,
+            });
+            before += rank;
+        }
+        let b = match rows.len() {
+            1 => rows.remove(0),
+            _ => Tensor::cat(&rows, 0)?,
+        };
+        Ok(Self {
+            factors: Some((a, b)),
+            places,
+        })
+    }
+
+    /// Each member's delta for `x`, of `members` members: nothing for any
+    /// where the adapters are off.
+    fn deltas(&self, x: &Tensor, members: usize) -> CResult<Vec<Option<Tensor>>> {
+        if self.places.len() != members {
+            candle_core::bail!(
+                "adapters joined for {} projections were asked for {members}",
+                self.places.len()
+            )
+        }
+        let Some((a, b)) = &self.factors else {
+            return Ok(vec![None; members]);
+        };
+        let all = matmul_t(&matmul_t(x, a)?, b)?;
+        self.places
+            .iter()
+            .map(|(from, out)| match members {
+                1 => Ok(Some(all.clone())),
+                _ => all.narrow(D::Minus1, *from, *out).map(Some),
+            })
+            .collect()
+    }
+}
+
 // --- RMSNorm (frozen) ------------------------------------------------------
 
 pub(super) struct RmsNorm {
     weight: Tensor,
     eps: f64,
+    /// In a pass read ahead as tensors: the steps up to the first rounding
+    /// in one kernel.
+    fused: bool,
+    /// A weight of ones in f32, for that kernel: made the first time a pass
+    /// is read that way.
+    unit: Option<Tensor>,
 }
 
 impl RmsNorm {
@@ -469,7 +611,18 @@ impl RmsNorm {
         Ok(Self {
             weight: vb.get(size, "weight")?,
             eps,
+            fused: false,
+            unit: None,
         })
+    }
+
+    /// Whether the passes that follow are read ahead as tensors.
+    pub(super) fn set_fused(&mut self, on: bool) {
+        self.fused = on;
+        if on && self.unit.is_none() {
+            // Without it the norm is its plain steps, which is no error.
+            self.unit = Tensor::ones(self.weight.dims(), DType::F32, self.weight.device()).ok();
+        }
     }
 
     pub(super) fn forward(&self, x: &Tensor) -> CResult<Tensor> {
@@ -480,6 +633,26 @@ impl RmsNorm {
             && !x.track_op()
         {
             return rowwise::rms_norm(x, &self.weight, self.eps);
+        }
+        // In a pass read ahead as tensors, the steps below as far as their
+        // first rounding are candle's one kernel: a row's mean square and
+        // its scaling in f32, by one block of the device's threads to a
+        // row. On a GPU the steps are nine launches and a pass's norms were
+        // a sixth of it; this is four. The rounding to the model's
+        // precision and the weight after it are the steps' own, so a value
+        // comes out as they give it but for a last place of the f32 scale.
+        // (The kernel can also take the weight and round once. That is the
+        // more exact norm and half a millisecond less of a pass, and it is
+        // not the arithmetic the experts were trained through: tried, it
+        // reworded half again as many answers.)
+        if let (true, Some(unit)) = (self.fused, &self.unit) {
+            let in_dtype = x.dtype();
+            let scaled = candle_nn::ops::rms_norm(
+                &x.to_dtype(DType::F32)?.contiguous()?,
+                unit,
+                self.eps as f32,
+            )?;
+            return scaled.to_dtype(in_dtype)?.broadcast_mul(&self.weight);
         }
         let in_dtype = x.dtype();
         let x = x.to_dtype(DType::F32)?;
@@ -496,15 +669,38 @@ pub(super) struct RotaryEmbedding {
     cos: Tensor,
 }
 
+/// The sine and the cosine of every position's angle in each pair of a
+/// head's dimensions, and how many pairs there are: position `p`'s values
+/// for pair `i` are at `p * pairs + i`.
+///
+/// The angle is worked out in f32, as it always was, and its sine and cosine
+/// by `libm`, which is the same Rust wherever it is compiled, where they
+/// were each platform's own. Those round a last bit their own way: a table
+/// made on Windows and one made on Linux disagreed at about one entry in a
+/// hundred. That is enough to send a nearly tied token the other way, and
+/// the same model wrote different answers under the two.
+fn rotary_tables(theta: f64, dim: usize, positions: usize) -> (Vec<f32>, Vec<f32>, usize) {
+    let inv_freq: Vec<f32> = (0..dim)
+        .step_by(2)
+        .map(|i| 1f32 / libm::pow(theta, i as f64 / dim as f64) as f32)
+        .collect();
+    let pairs = inv_freq.len();
+    let mut sin = Vec::with_capacity(positions * pairs);
+    let mut cos = Vec::with_capacity(positions * pairs);
+    for p in 0..positions {
+        for f in &inv_freq {
+            let (s, c) = libm::sincos(f64::from(p as f32 * f));
+            sin.push(s as f32);
+            cos.push(c as f32);
+        }
+    }
+    (sin, cos, pairs)
+}
+
 impl RotaryEmbedding {
     pub(super) fn new(dtype: DType, cfg: &Config, dev: &Device) -> CResult<Self> {
         let dim = cfg.hidden_size / cfg.num_attention_heads;
         let max_seq_len = cfg.max_position_embeddings;
-        let inv_freq: Vec<_> = (0..dim)
-            .step_by(2)
-            .map(|i| 1f32 / cfg.rope_theta.powf(i as f64 / dim as f64) as f32)
-            .collect();
-        let inv_freq_len = inv_freq.len();
         // Positions and angles are computed in f32 whatever the model computes
         // in, and only the finished sin/cos tables take the model's dtype. bf16
         // carries 8 bits of mantissa: position 257 is 256 in it, and past 512
@@ -514,15 +710,24 @@ impl RotaryEmbedding {
         // dimensions got sin and cos of the wrong angle. On the GPU that showed
         // up as duplicated tokens under greedy decoding ("than than", "+= +=")
         // that an f32 run of the same prompt did not produce.
-        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?;
-        let t = Tensor::arange(0u32, max_seq_len as u32, dev)?
-            .to_dtype(DType::F32)?
-            .reshape((max_seq_len, 1))?;
-        let freqs = t.matmul(&inv_freq)?;
+        //
+        // The tables are made on the host, whatever device the model is on,
+        // so that they are the same tables everywhere ([`rotary_tables`]).
+        let (sin, cos, pairs) = rotary_tables(cfg.rope_theta, dim, max_seq_len);
+        let table = |values: Vec<f32>| {
+            Tensor::from_vec(values, (max_seq_len, pairs), &Device::Cpu)?
+                .to_device(dev)?
+                .to_dtype(dtype)
+        };
         Ok(Self {
-            sin: freqs.sin()?.to_dtype(dtype)?,
-            cos: freqs.cos()?.to_dtype(dtype)?,
+            sin: table(sin)?,
+            cos: table(cos)?,
         })
+    }
+
+    /// How many positions the table turns.
+    fn positions(&self) -> usize {
+        self.sin.dims().first().copied().unwrap_or(0)
     }
 
     pub(super) fn apply(&self, q: &Tensor, k: &Tensor, offset: usize) -> CResult<(Tensor, Tensor)> {
@@ -537,6 +742,45 @@ impl RotaryEmbedding {
 
 // --- attention -------------------------------------------------------------
 
+/// One sequence's keys and values as tensors with room for all it may come
+/// to: `(1, kv_heads, room, head_dim)` each, of which the first `len`
+/// positions hold what was read. A pass writes its rows where they belong
+/// and reads the whole of it under a mask as wide ([`Attention::forward`]);
+/// nothing is joined and nothing copied but the rows themselves, and what
+/// lies past `len` is seen by no row.
+struct Roomy {
+    k: Tensor,
+    v: Tensor,
+    len: usize,
+}
+
+impl Roomy {
+    /// Room for `room` positions, holding the `held` keys and values that
+    /// were cached before it, if any.
+    fn of(room: usize, like: &Tensor, held: Option<(Tensor, Tensor)>) -> CResult<Self> {
+        let (b, kv_heads, _, head_dim) = like.dims4()?;
+        let none = || Tensor::zeros((b, kv_heads, room, head_dim), like.dtype(), like.device());
+        let (k, v) = (none()?, none()?);
+        let len = match held {
+            Some((held_k, held_v)) => {
+                k.slice_set(&held_k.contiguous()?, 2, 0)?;
+                v.slice_set(&held_v.contiguous()?, 2, 0)?;
+                held_k.dim(2)?
+            }
+            None => 0,
+        };
+        Ok(Self { k, v, len })
+    }
+
+    /// What is held, as tensors of its own length.
+    fn held(&self) -> CResult<Option<(Tensor, Tensor)>> {
+        Ok(match self.len {
+            0 => None,
+            len => Some((self.k.narrow(2, 0, len)?, self.v.narrow(2, 0, len)?)),
+        })
+    }
+}
+
 pub(super) struct Attention {
     q_proj: LoraLinear,
     k_proj: LoraLinear,
@@ -548,7 +792,15 @@ pub(super) struct Attention {
     head_dim: usize,
     hidden_size: usize,
     rotary: Arc<RotaryEmbedding>,
+    /// Its adapters joined for the generation in hand, where that is read
+    /// ahead as tensors: q, k and v's, which read one input, and o's.
+    joined: Option<(Joined, Joined)>,
+    /// Whether the pass in hand is one read ahead as tensors.
+    fused: bool,
     kv_cache: Option<(Tensor, Tensor)>,
+    /// The cache as tensors with room, in place of `kv_cache`, from the
+    /// first pass read under a mask wider than what it holds.
+    kv_room: Option<Roomy>,
     /// In f32 on the CPU, one generating sequence's cache as plain rows: a
     /// decoded token's keys and values are written onto the end of it, where
     /// joining them to the cache copied every position so far in every layer
@@ -615,7 +867,10 @@ impl Attention {
             head_dim,
             hidden_size: h,
             rotary,
+            joined: None,
+            fused: false,
             kv_cache: None,
+            kv_room: None,
             kv_store: (base.device().is_cpu() && base.dtype() == DType::F32)
                 .then(|| kv::KvStore::new(num_kv_heads, head_dim)),
             others: Vec::new(),
@@ -630,7 +885,12 @@ impl Attention {
         use_cache: bool,
     ) -> CResult<Tensor> {
         let (b, q_len, _) = xs.dims3()?;
-        let [q, k, v] = LoraLinear::forward_group(xs, [&self.q_proj, &self.k_proj, &self.v_proj])?;
+        let qkv = [&self.q_proj, &self.k_proj, &self.v_proj];
+        let [q, k, v] = match (self.fused, &self.joined) {
+            (false, _) => LoraLinear::forward_group(xs, qkv)?,
+            (true, Some((joined, _))) => LoraLinear::forward_joined(xs, qkv, joined)?,
+            (true, None) => candle_core::bail!("{NOT_JOINED}"),
+        };
 
         let q = q
             .reshape((b, q_len, self.num_heads, self.head_dim))?
@@ -665,6 +925,14 @@ impl Attention {
                         true => (k, v),
                         false => store.tensors()?,
                     };
+                    // A mask with room past the cache is read against a
+                    // cache of tensors kept with that room, which a cache of
+                    // plain rows is not: nothing on a CPU reads that way.
+                    if mask.is_some_and(|m| m.dims().last() != Some(&store.len())) {
+                        candle_core::bail!(
+                            "a mask wider than the cache was read against a cache of plain rows"
+                        )
+                    }
                     grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?
                 }
             }
@@ -674,35 +942,111 @@ impl Attention {
                         "a sequence cached as plain rows cannot go on as a batch or with a gradient"
                     )
                 }
-                let (k, v) = match &self.kv_cache {
-                    Some((pk, pv)) if use_cache => {
-                        (Tensor::cat(&[pk, &k], 2)?, Tensor::cat(&[pv, &v], 2)?)
-                    }
-                    _ => (k, v),
-                };
-                if use_cache {
-                    self.kv_cache = Some((k.clone(), v.clone()));
+                // Under a mask wider than the cache and these rows, the
+                // cache is kept with that much room and the rows written
+                // into it where they belong.
+                let room = match mask {
+                    Some(mask) if use_cache => Some(mask.dim(D::Minus1)?),
+                    _ => None,
                 }
-                grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?
+                .filter(|room| *room > offset + q_len);
+                if let Some(room) = room {
+                    let cache = match self.kv_room.take() {
+                        Some(cache) if cache.k.dim(2)? == room => cache,
+                        other => {
+                            let held = match other {
+                                Some(cache) => cache.held()?,
+                                None => self.kv_cache.take(),
+                            };
+                            Roomy::of(room, &k, held)?
+                        }
+                    };
+                    self.kv_cache = None;
+                    if cache.len < offset {
+                        candle_core::bail!(
+                            "rows at {offset} do not follow a cache of {} positions",
+                            cache.len
+                        )
+                    }
+                    cache.k.slice_set(&k.contiguous()?, 2, offset)?;
+                    cache.v.slice_set(&v.contiguous()?, 2, offset)?;
+                    let cache = Roomy {
+                        len: offset + q_len,
+                        ..cache
+                    };
+                    let out = grouped_attention(&q, &cache.k, &cache.v, mask, self.num_kv_groups)?;
+                    self.kv_room = Some(cache);
+                    out
+                } else {
+                    // A cache with room goes on as one of its own length.
+                    if use_cache {
+                        if let Some(cache) = self.kv_room.take() {
+                            self.kv_cache = cache.held()?;
+                        }
+                    }
+                    let (k, v) = match &self.kv_cache {
+                        Some((pk, pv)) if use_cache => {
+                            (Tensor::cat(&[pk, &k], 2)?, Tensor::cat(&[pv, &v], 2)?)
+                        }
+                        _ => (k, v),
+                    };
+                    if use_cache {
+                        self.kv_cache = Some((k.clone(), v.clone()));
+                    }
+                    grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?
+                }
             }
         };
         let out = out.transpose(1, 2)?.reshape((b, q_len, self.hidden_size))?;
-        let [out] = LoraLinear::forward_group(&out, [&self.o_proj])?;
+        let [out] = match (self.fused, &self.joined) {
+            (false, _) => LoraLinear::forward_group(&out, [&self.o_proj])?,
+            (true, Some((_, joined))) => LoraLinear::forward_joined(&out, [&self.o_proj], joined)?,
+            (true, None) => candle_core::bail!("{NOT_JOINED}"),
+        };
         Ok(out)
+    }
+
+    /// Join its adapters as they are now, for the generation about to be
+    /// read ahead as tensors.
+    fn join(&mut self) -> CResult<()> {
+        self.joined = Some((
+            Joined::of(&[&self.q_proj, &self.k_proj, &self.v_proj])?,
+            Joined::of(&[&self.o_proj])?,
+        ));
+        Ok(())
     }
 
     pub(super) fn clear_cache(&mut self) {
         self.kv_cache = None;
+        self.kv_room = None;
         if let Some(store) = &mut self.kv_store {
             store.reset();
         }
     }
 
-    /// Forget the positions from `len` on in the cache of plain rows.
-    pub(super) fn truncate(&mut self, len: usize) {
+    /// Forget the positions from `len` on in the cache, as plain rows and
+    /// as tensors. A cache of tensors is cut back as a view of itself: the
+    /// next token's keys and values are joined to what is left of it. One
+    /// kept with room only holds less: the rows cut off stay where they
+    /// lie, seen by no row, until others are written over them.
+    pub(super) fn truncate(&mut self, len: usize) -> CResult<()> {
         if let Some(store) = &mut self.kv_store {
             store.truncate(len);
         }
+        if let Some(cache) = &mut self.kv_room {
+            cache.len = cache.len.min(len);
+        }
+        let cut = match &self.kv_cache {
+            Some((k, v)) if len < k.dim(2)? => Some(match len {
+                0 => None,
+                _ => Some((k.narrow(2, 0, len)?, v.narrow(2, 0, len)?)),
+            }),
+            _ => None,
+        };
+        if let Some(cache) = cut {
+            self.kv_cache = cache;
+        }
+        Ok(())
     }
 
     pub(super) fn packs(&self) -> bool {
@@ -768,6 +1112,12 @@ pub(super) struct Mlp {
     up_proj: LoraLinear,
     down_proj: LoraLinear,
     act: Activation,
+    /// Its adapters joined for the generation in hand, where that is read
+    /// ahead as tensors: the gate's and the way up's, which read one input,
+    /// and the way down's.
+    joined: Option<(Joined, Joined)>,
+    /// Whether the pass in hand is one read ahead as tensors.
+    fused: bool,
 }
 
 impl Mlp {
@@ -808,11 +1158,18 @@ impl Mlp {
                 scale,
             )?,
             act: cfg.hidden_act,
+            joined: None,
+            fused: false,
         })
     }
 
     pub(super) fn forward(&self, xs: &Tensor) -> CResult<Tensor> {
-        let [gate, up] = LoraLinear::forward_group(xs, [&self.gate_proj, &self.up_proj])?;
+        let wide = [&self.gate_proj, &self.up_proj];
+        let [gate, up] = match (self.fused, &self.joined) {
+            (false, _) => LoraLinear::forward_group(xs, wide)?,
+            (true, Some((joined, _))) => LoraLinear::forward_joined(xs, wide, joined)?,
+            (true, None) => candle_core::bail!("{NOT_JOINED}"),
+        };
         // In f32 on the CPU with nothing to differentiate, the gate is one
         // pass over both sides.
         let one_pass = matches!(self.act, Activation::Silu)
@@ -825,8 +1182,24 @@ impl Mlp {
         } else {
             (self.act.forward(&gate)? * up)?
         };
-        let [out] = LoraLinear::forward_group(&gated, [&self.down_proj])?;
+        let [out] = match (self.fused, &self.joined) {
+            (false, _) => LoraLinear::forward_group(&gated, [&self.down_proj])?,
+            (true, Some((_, joined))) => {
+                LoraLinear::forward_joined(&gated, [&self.down_proj], joined)?
+            }
+            (true, None) => candle_core::bail!("{NOT_JOINED}"),
+        };
         Ok(out)
+    }
+
+    /// Join its adapters as they are now, for the generation about to be
+    /// read ahead as tensors.
+    fn join(&mut self) -> CResult<()> {
+        self.joined = Some((
+            Joined::of(&[&self.gate_proj, &self.up_proj])?,
+            Joined::of(&[&self.down_proj])?,
+        ));
+        Ok(())
     }
 
     pub(super) fn set_lora(&mut self, on: bool) {
@@ -939,8 +1312,60 @@ impl DecoderLayer {
         self.self_attn.clear_cache();
     }
 
-    pub(super) fn truncate(&mut self, len: usize) {
-        self.self_attn.truncate(len);
+    pub(super) fn truncate(&mut self, len: usize) -> CResult<()> {
+        self.self_attn.truncate(len)
+    }
+
+    /// Join the layer's adapters as they are now: what the passes of the
+    /// generation about to be read ahead as tensors multiply
+    /// ([`Joined`]).
+    pub(super) fn join(&mut self) -> CResult<()> {
+        self.self_attn.join()?;
+        self.mlp.join()
+    }
+
+    /// Let go of the joined adapters: their factors are about to change.
+    pub(super) fn unjoin(&mut self) {
+        self.self_attn.joined = None;
+        self.mlp.joined = None;
+    }
+
+    /// Whether the pass about to go through the layer is one read ahead as
+    /// tensors: its norms in one kernel, its adapters as they were joined.
+    pub(super) fn set_fused(&mut self, on: bool) {
+        self.self_attn.fused = on;
+        self.mlp.fused = on;
+        self.input_ln.set_fused(on);
+        self.post_attn_ln.set_fused(on);
+    }
+
+    /// The most positions a sequence read through this layer may come to.
+    pub(super) fn positions_most(&self) -> usize {
+        self.self_attn.rotary.positions()
+    }
+
+    /// Its attention's query heads, key and value heads, and a head's width.
+    pub(super) fn attention_shape(&self) -> (usize, usize, usize) {
+        let attn = &self.self_attn;
+        (attn.num_heads, attn.num_kv_heads, attn.head_dim)
+    }
+
+    /// The frozen bases of its projections that are held dense: all seven
+    /// in a model that is not served quantized.
+    pub(super) fn dense_bases(&self) -> Vec<&Tensor> {
+        let (attn, mlp) = (&self.self_attn, &self.mlp);
+        [
+            &attn.q_proj,
+            &attn.k_proj,
+            &attn.v_proj,
+            &attn.o_proj,
+            &mlp.gate_proj,
+            &mlp.up_proj,
+            &mlp.down_proj,
+        ]
+        .into_iter()
+        .filter_map(LoraLinear::dense_base)
+        .collect()
     }
 
     /// Whether any of this layer's adapters has a copy to make.
@@ -1051,6 +1476,43 @@ mod tests {
             None => attn,
         };
         candle_nn::ops::softmax_last_dim(&attn)?.matmul(&v)
+    }
+
+    /// The rotary table is one table wherever it is made. Its sines and its
+    /// cosines, for a 1.5B base's heads over 4096 positions, each fold into
+    /// one number, and the numbers are the same on every platform this is
+    /// built for; each value is within a rounding of the platform's own sine
+    /// and cosine, which is all those ever differed by.
+    #[test]
+    fn the_rotary_table_is_the_same_table_everywhere() {
+        const SINES: u64 = 0xa074_ed7b_3cf0_8711;
+        const COSINES: u64 = 0xe02d_aaf0_471e_be10;
+        let (theta, dim, positions) = (1_000_000f64, 128usize, 4096usize);
+        let (sin, cos, pairs) = rotary_tables(theta, dim, positions);
+        assert_eq!(
+            (pairs, sin.len(), cos.len()),
+            (dim / 2, positions * dim / 2, positions * dim / 2)
+        );
+        let folded = |values: &[f32]| {
+            values
+                .iter()
+                .flat_map(|v| v.to_bits().to_le_bytes())
+                .fold(0xcbf2_9ce4_8422_2325u64, |mark, byte| {
+                    (mark ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+                })
+        };
+        assert_eq!(folded(&sin), SINES, "the sines");
+        assert_eq!(folded(&cos), COSINES, "the cosines");
+        for p in [0usize, 1, 257, 4095] {
+            for i in [0usize, 1, 31, 63] {
+                let angle = p as f32 * (1f32 / theta.powf((2 * i) as f64 / dim as f64) as f32);
+                let (s, c) = (sin[p * pairs + i], cos[p * pairs + i]);
+                assert!(
+                    (s - angle.sin()).abs() <= 3e-7 && (c - angle.cos()).abs() <= 3e-7,
+                    "position {p}, pair {i}: {s} and {c} for an angle of {angle}"
+                );
+            }
+        }
     }
 
     /// Stacking the query heads that share a KV head gives what repeating K
@@ -1226,6 +1688,63 @@ mod tests {
         let drawn = factor(&one, "q.lora_a")?;
         let sd = (drawn.iter().map(|x| x * x).sum::<f32>() / drawn.len() as f32).sqrt();
         assert!((0.01..0.03).contains(&sd), "spread {sd}");
+        Ok(())
+    }
+
+    /// The norm in one kernel is the norm: in sixteen bits, where the kernel
+    /// is, it comes within a last place or two of the steps it stands for.
+    #[test]
+    fn the_norm_in_one_kernel_is_the_norm() -> CResult<()> {
+        let dev = Device::Cpu;
+        let width = 64;
+        let weight: Vec<f32> = (0..width)
+            .map(|i| 1.0 + 0.1 * (i as f32 * 0.9).sin())
+            .collect();
+        let values: Vec<f32> = (0..3 * width)
+            .map(|i| 4.0 * (i as f32 * 0.37).sin())
+            .collect();
+        let mut norm = RmsNorm {
+            weight: Tensor::from_vec(weight, width, &dev)?.to_dtype(DType::F16)?,
+            eps: 1e-6,
+            fused: false,
+            unit: None,
+        };
+        let x = Tensor::from_vec(values, (1, 3, width), &dev)?.to_dtype(DType::F16)?;
+        let plain = norm.forward(&x)?;
+        norm.set_fused(true);
+        assert!(norm.unit.is_some());
+        let fused = norm.forward(&x)?;
+        assert_eq!(plain.dims(), fused.dims());
+        assert_eq!(fused.dtype(), DType::F16);
+        // The same two roundings: a value is the steps' value, or its
+        // neighbor where the f32 scale fell the other side of a rounding.
+        let differ = plain
+            .to_dtype(DType::F32)?
+            .ne(&fused.to_dtype(DType::F32)?)?
+            .to_dtype(DType::F32)?
+            .sum_all()?
+            .to_scalar::<f32>()?;
+        assert!(differ <= 4.0, "{differ} of {} values differ", 3 * width);
+        let gap = largest_gap(&plain.to_dtype(DType::F32)?, &fused.to_dtype(DType::F32)?)?;
+        assert!(gap < 4e-3, "{gap}");
+        // And in f64, which the tests of these passes are read in.
+        let mut norm = RmsNorm {
+            weight: norm.weight.to_dtype(DType::F64)?,
+            eps: 1e-6,
+            fused: false,
+            unit: None,
+        };
+        let x = x.to_dtype(DType::F64)?;
+        let plain = norm.forward(&x)?;
+        norm.set_fused(true);
+        let fused = norm.forward(&x)?;
+        assert_eq!(fused.dtype(), DType::F64);
+        let gap = (plain - fused)?
+            .abs()?
+            .flatten_all()?
+            .max(0)?
+            .to_scalar::<f64>()?;
+        assert!(gap < 1e-5, "{gap}");
         Ok(())
     }
 

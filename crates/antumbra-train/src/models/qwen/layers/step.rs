@@ -692,6 +692,12 @@ fn gate_times(gate: &[f32], up: &[f32], out: &mut [f32]) {
         unsafe { wide::avx2::silu_times(gate, up, out) };
         return;
     }
+    // SAFETY: every aarch64 CPU has NEON.
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        wide::neon::silu_times(gate, up, out)
+    };
+    #[cfg(not(target_arch = "aarch64"))]
     for ((o, g), u) in out.iter_mut().zip(gate).zip(up) {
         *o = g / (1.0 + (-g).exp()) * u;
     }
@@ -1249,9 +1255,10 @@ impl QwenLora {
     }
 
     /// Whether [`QwenLora::step_ahead`] has a head to answer with: the
-    /// sketch, and the dense rows it decides by.
+    /// sketch, and the dense rows it decides by; or, where rows are read
+    /// ahead as tensors ([`tensors`]), the head as it is.
     pub(in crate::models::qwen) fn reads_ahead(&self) -> bool {
-        self.lm_head_s.is_some() && plain(&self.lm_head_w)
+        (self.lm_head_s.is_some() && plain(&self.lm_head_w)) || self.reads_ahead_as_tensors()
     }
 
     /// The token the head ranks first after every one of `tokens`, the
@@ -1264,9 +1271,13 @@ impl QwenLora {
     /// that is not the model's, and their places in the cache are the
     /// caller's to cut back ([`QwenLora::truncate`]).
     ///
-    /// `None`, with nothing read or written, when the model does not read
-    /// rows this way, its head is not sketched, or there are more tokens
-    /// than are read at once.
+    /// A model that does not read rows as plain values reads them as
+    /// tensors where it reads ahead that way ([`tensors`]): a GPU, whose
+    /// rows are its own library's to compute.
+    ///
+    /// `None`, with nothing read or written, when the model reads rows
+    /// neither way, its head is not sketched, or there are more tokens than
+    /// are read at once.
     pub(in crate::models::qwen) fn step_ahead(
         &mut self,
         tokens: &[u32],
@@ -1276,7 +1287,7 @@ impl QwenLora {
             return Ok(None);
         }
         let Some(width) = self.read(tokens, position)? else {
-            return Ok(None);
+            return self.firsts_as_tensors(tokens, position);
         };
         let Some(sketch) = &self.lm_head_s else {
             bail!("a head that reads ahead has a sketch")
@@ -1302,13 +1313,14 @@ impl QwenLora {
         Ok(Some(firsts))
     }
 
-    /// Forget the positions from `len` on in every layer's cache of plain
-    /// rows: the first sequence's, which is the one [`QwenLora::step`] and
-    /// [`QwenLora::step_ahead`] read and write.
-    pub(in crate::models::qwen) fn truncate(&mut self, len: usize) {
+    /// Forget the positions from `len` on in every layer's cache, as plain
+    /// rows and as tensors: the first sequence's, which is the one
+    /// [`QwenLora::step`] and [`QwenLora::step_ahead`] read and write.
+    pub(in crate::models::qwen) fn truncate(&mut self, len: usize) -> CResult<()> {
         for layer in &mut self.layers {
-            layer.truncate(len);
+            layer.truncate(len)?;
         }
+        Ok(())
     }
 
     /// Forget the positions from `len` on in sequence `sequence`'s cache,
@@ -1468,10 +1480,22 @@ mod tests {
         serve: Option<GgmlDType>,
         trained: bool,
     ) -> CResult<QwenLora> {
+        model_in(cfg, weights, serve, trained, DType::F32)
+    }
+
+    /// [`model`] held in `dtype`. In f32 on the CPU a sequence's cache is
+    /// plain rows; in any other precision it is tensors, as it is on a GPU.
+    fn model_in(
+        cfg: &Config,
+        weights: &HashMap<String, Tensor>,
+        serve: Option<GgmlDType>,
+        trained: bool,
+        dtype: DType,
+    ) -> CResult<QwenLora> {
         let dev = Device::Cpu;
-        let base = VarBuilder::from_tensors(weights.clone(), DType::F32, &dev);
+        let base = VarBuilder::from_tensors(weights.clone(), dtype, &dev);
         let varmap = VarMap::new();
-        let lora = VarBuilder::from_varmap(&varmap, DType::F32, &dev);
+        let lora = VarBuilder::from_varmap(&varmap, dtype, &dev);
         let mut model = QwenLora::build(cfg, &base, &lora, varmap, RANK, 2.0, serve)?;
         seed_lora_a(&model.varmap, 11)?;
         {
@@ -1488,11 +1512,11 @@ mod tests {
                     true => (0..var.elem_count())
                         .map(|i| ((i + 31 * salt) as f32 * 0.37).sin() * 0.05)
                         .collect(),
-                    false => var.flatten_all()?.to_vec1()?,
+                    false => var.flatten_all()?.to_dtype(DType::F32)?.to_vec1()?,
                 };
                 let mut values = values;
                 pack::as_held(&mut values, RANK, name.ends_with("lora_a"));
-                var.set(&Tensor::from_vec(values, var.shape(), &dev)?)?;
+                var.set(&Tensor::from_vec(values, var.shape(), &dev)?.to_dtype(dtype)?)?;
             }
         }
         model.set_grad(false);
@@ -1785,7 +1809,9 @@ mod tests {
                     .map(|i| ((i + 17 * salt) as f32 * 0.53 + phase).cos() * 0.05)
                     .collect();
                 pack::as_held(&mut values, RANK, false);
-                var.set(&Tensor::from_vec(values, var.shape(), &Device::Cpu)?)?;
+                var.set(
+                    &Tensor::from_vec(values, var.shape(), &Device::Cpu)?.to_dtype(var.dtype())?,
+                )?;
             }
         }
         model.adapters_changed();
@@ -2096,7 +2122,7 @@ mod tests {
             assert_eq!(firsts, &want[3..], "{serve:?}: nine rows at once");
 
             // Cut back to five positions; a sixth token that was never there.
-            ahead.truncate(5);
+            ahead.truncate(5)?;
             let mut again = model(&cfg, &weights, Some(serve), true)?;
             for (at, token) in tokens[..5].iter().enumerate() {
                 again.step(&[*token], at, true)?;
@@ -2571,6 +2597,366 @@ mod tests {
             }
         }
         assert!(fewer, "the helped requests were never read");
+        Ok(())
+    }
+
+    /// A dense model that reads its rows and keeps its cache as tensors, as
+    /// one on a GPU does, and reads ahead that way: in f64 on the CPU, where
+    /// a row among others and the row alone come to the same first token
+    /// whatever order their sums are added in.
+    fn as_on_a_gpu(cfg: &Config, weights: &HashMap<String, Tensor>) -> CResult<QwenLora> {
+        let mut model = model_in(cfg, weights, None, true, DType::F64)?;
+        model.ahead_as_tensors = true;
+        // Room for the texts these tests read, and its adapters joined as a
+        // generation's are when it begins.
+        model.read_within(64)?;
+        Ok(model)
+    }
+
+    /// The token a greedy generation takes after `tokens` read at
+    /// `position` in a pass of their own, as the generation loop takes it
+    /// where nothing is read ahead: every logit brought back from the tensor
+    /// path, and the decode policy's pick among them.
+    fn forwarded_first(model: &mut QwenLora, tokens: &[u32], position: usize) -> CResult<u32> {
+        let input = Tensor::new(tokens, &Device::Cpu)?.unsqueeze(0)?;
+        let hidden = model.hidden(&input, position, true)?;
+        let last = hidden.narrow(1, tokens.len() - 1, 1)?;
+        let mut logits = model
+            .logits(&last)?
+            .flatten_all()?
+            .to_dtype(DType::F32)?
+            .to_vec1::<f32>()?;
+        let greedy = crate::decode::DecodePolicy {
+            temperature: 0.0,
+            top_p: 1.0,
+            repetition_penalty: 1.0,
+            no_repeat_ngram_size: 0,
+        };
+        Ok(crate::decode::pick_token_in(
+            &mut logits,
+            &[],
+            &greedy,
+            &mut StdRng::seed_from_u64(0),
+        ))
+    }
+
+    /// Rows read ahead as tensors each give the token a pass of the row's
+    /// own gives; and a cache of tensors cut back is the cache as it was
+    /// before the rows cut off.
+    #[test]
+    fn rows_read_ahead_as_tensors_give_each_rows_own_first_token() -> CResult<()> {
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        let tokens: Vec<u32> = (0..12).map(token).collect();
+        let mut alone = as_on_a_gpu(&cfg, &weights)?;
+        let mut want = Vec::new();
+        for (at, token) in tokens.iter().enumerate() {
+            want.push(forwarded_first(&mut alone, &[*token], at)?);
+        }
+        // Three as a prompt, then nine at once.
+        let mut ahead = as_on_a_gpu(&cfg, &weights)?;
+        assert!(ahead.reads_ahead());
+        assert!(
+            ahead.step(&tokens[..3], 0, true)?.is_none(),
+            "nothing of it is stepped through as plain rows"
+        );
+        assert_eq!(ahead.first_as_tensors(&tokens[..3], 0)?, Some(want[2]));
+        let Some(firsts) = ahead.step_ahead(&tokens[3..], 3)? else {
+            bail!("nine rows were not read ahead")
+        };
+        assert_eq!(firsts, &want[3..], "nine rows at once");
+
+        // Cut back to five positions; a sixth token that was never there.
+        ahead.truncate(5)?;
+        let mut again = as_on_a_gpu(&cfg, &weights)?;
+        for (at, token) in tokens[..5].iter().enumerate() {
+            forwarded_first(&mut again, &[*token], at)?;
+        }
+        let other = token(40);
+        assert_eq!(
+            ahead.step_ahead(&[other], 5)?,
+            Some(vec![forwarded_first(&mut again, &[other], 5)?]),
+            "after the cache was cut back"
+        );
+        // A cache kept with room goes on as one without: a token read in a
+        // pass of its own after it, as a generation that guesses nothing
+        // under another policy reads it.
+        let (next, after) = (token(41), token(42));
+        let Some(read) = ahead.step_ahead(&[next], 6)? else {
+            bail!("a row was not read ahead")
+        };
+        assert_eq!(read, [forwarded_first(&mut again, &[next], 6)?]);
+        assert_eq!(
+            forwarded_first(&mut ahead, &[after], 7)?,
+            forwarded_first(&mut again, &[after], 7)?,
+            "a pass of one row after passes with room"
+        );
+        // Cut back to nothing, it is a model that has read nothing.
+        ahead.truncate(0)?;
+        assert_eq!(ahead.first_as_tensors(&tokens[..3], 0)?, Some(want[2]));
+        // A pass that would end past the room its generation was given is
+        // refused, and a generation the rotary table does not reach the end
+        // of is not read this way at all.
+        assert!(ahead.read_within(8)?);
+        assert!(ahead.step_ahead(&[next], 9).is_err());
+        assert!(!ahead.read_within(cfg.max_position_embeddings - 15)?);
+        assert!(ahead.read_within(cfg.max_position_embeddings - 16)?);
+        // The adapters are joined when a generation begins. Set to others,
+        // they are let go: a pass is refused until a generation joins them
+        // again, and then reads the factors as they are now.
+        other_factors(&mut ahead, 0.7)?;
+        ahead.clear_cache();
+        assert!(
+            ahead.first_as_tensors(&tokens[..3], 0).is_err(),
+            "a pass with nothing joined for it"
+        );
+        assert!(ahead.read_within(64)?);
+        let mut others = model_in(&cfg, &weights, None, true, DType::F64)?;
+        other_factors(&mut others, 0.7)?;
+        let first = forwarded_first(&mut others, &tokens[..3], 0)?;
+        assert_eq!(ahead.first_as_tensors(&tokens[..3], 0)?, Some(first));
+        let Some(read) = ahead.step_ahead(&tokens[3..5], 3)? else {
+            bail!("two rows were not read ahead")
+        };
+        assert_eq!(
+            read,
+            [
+                forwarded_first(&mut others, &tokens[3..4], 3)?,
+                forwarded_first(&mut others, &tokens[4..5], 4)?
+            ],
+            "through the factors as they were joined last"
+        );
+        // Nothing is read for no tokens, and nothing ahead on the CPU
+        // unless a test says so.
+        assert!(ahead.step_ahead(&[], 3)?.is_none());
+        assert!(ahead.first_as_tensors(&[], 3)?.is_none());
+        let mut dense = model_in(&cfg, &weights, None, true, DType::F64)?;
+        assert!(!dense.reads_ahead());
+        assert!(dense.first_as_tensors(&tokens[..3], 0)?.is_none());
+        assert!(dense.firsts_as_tensors(&tokens[..3], 0)?.is_none());
+        // What a device is asked before rows are read this way is asked
+        // with any dense model's own weights, in either precision; what
+        // this CPU's library answers is its own affair. A base served
+        // quantized is not asked and not read this way.
+        dense.keeps_rows_apart()?;
+        model(&cfg, &weights, None, true)?.keeps_rows_apart()?;
+        assert!(!model(&cfg, &weights, Some(GgmlDType::Q8_0), true)?.keeps_rows_apart()?);
+        // A mask with room is read against a cache of tensors: in f32 on
+        // the CPU, where the cache is plain rows, such a pass is refused.
+        let mut plain = model(&cfg, &weights, None, true)?;
+        plain.ahead_as_tensors = true;
+        assert!(plain.read_within(64)?);
+        assert!(plain.first_as_tensors(&tokens[..3], 0)?.is_some());
+        assert!(plain.step_ahead(&tokens[3..5], 3).is_err());
+        Ok(())
+    }
+
+    /// A group's adapters joined give each projection what it gives alone:
+    /// the same deltas by two products for the group where each projection
+    /// takes two and a scaling. One projection joined by itself likewise,
+    /// and nothing is added where the adapters are off.
+    #[test]
+    fn joined_adapters_give_each_projection_its_own_delta() -> CResult<()> {
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        let mut model = model_in(&cfg, &weights, None, true, DType::F64)?;
+        let values: Vec<f64> = (0..5 * cfg.hidden_size)
+            .map(|i| ((i as f64) * 0.37).sin())
+            .collect();
+        let x = Tensor::from_vec(values, (1, 5, cfg.hidden_size), &Device::Cpu)?;
+        let gap = |a: &Tensor, b: &Tensor| -> CResult<f64> {
+            (a - b)?.abs()?.flatten_all()?.max(0)?.to_scalar::<f64>()
+        };
+        for on in [true, false] {
+            model.set_lora(on);
+            let attn = &model.layers[0].self_attn;
+            let group = [&attn.q_proj, &attn.k_proj, &attn.v_proj];
+            let alone = LoraLinear::forward_group(&x, group)?;
+            let joined = LoraLinear::forward_joined(&x, group, &Joined::of(&group)?)?;
+            for (name, (alone, joined)) in ["q", "k", "v"].iter().zip(alone.iter().zip(&joined)) {
+                assert_eq!(alone.dims(), joined.dims(), "{name}");
+                assert!(gap(alone, joined)? < 1e-12, "{name}, adapters on: {on}");
+            }
+            let [alone] = LoraLinear::forward_group(&x, [&attn.o_proj])?;
+            let [joined] =
+                LoraLinear::forward_joined(&x, [&attn.o_proj], &Joined::of(&[&attn.o_proj])?)?;
+            assert!(gap(&alone, &joined)? < 1e-12, "o, adapters on: {on}");
+            // Off, a projection is its base and its bias, as it is alone.
+            if !on {
+                let [base] = LoraLinear::forward_group(&x, [&attn.q_proj])?;
+                assert!(gap(&base, &joined_q(&x, attn)?)? == 0.0);
+            }
+        }
+        // And the deltas are not nothing: these adapters are trained ones.
+        model.set_lora(true);
+        let attn = &model.layers[0].self_attn;
+        let [with] = LoraLinear::forward_group(&x, [&attn.q_proj])?;
+        model.set_lora(false);
+        let attn = &model.layers[0].self_attn;
+        let [without] = LoraLinear::forward_group(&x, [&attn.q_proj])?;
+        assert!(gap(&with, &without)? > 1e-6, "the adapter adds something");
+        // A group asked for other than it was joined for is refused.
+        let two = Joined::of(&[&attn.k_proj, &attn.v_proj])?;
+        assert!(LoraLinear::forward_joined(&x, [&attn.q_proj], &two).is_err());
+        Ok(())
+    }
+
+    /// q through the group of three joined, for the comparison above.
+    fn joined_q(x: &Tensor, attn: &Attention) -> CResult<Tensor> {
+        let group = [&attn.q_proj, &attn.k_proj, &attn.v_proj];
+        let [q, _, _] = LoraLinear::forward_joined(x, group, &Joined::of(&group)?)?;
+        Ok(q)
+    }
+
+    /// A generation read ahead as tensors is the generation a token at a
+    /// time through the tensor path, token for token, whatever is guessed;
+    /// and guessed right it takes fewer passes than tokens.
+    #[test]
+    fn a_generation_read_ahead_as_tensors_is_the_generation_a_token_at_a_time() -> CResult<()> {
+        use crate::draft::Drafts;
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        const NEVER: u32 = 64;
+        let a_token_at_a_time = |eos: u32, most: usize| -> CResult<Vec<u32>> {
+            let mut model = as_on_a_gpu(&cfg, &weights)?;
+            let mut tokens = PROMPT.to_vec();
+            for index in 0..most {
+                let start = match index {
+                    0 => 0,
+                    _ => tokens.len() - 1,
+                };
+                let next = forwarded_first(&mut model, &tokens[start..], start)?;
+                if next == eos {
+                    break;
+                }
+                tokens.push(next);
+                if crate::decode::loops(&tokens[PROMPT.len()..]) {
+                    break;
+                }
+            }
+            Ok(tokens)
+        };
+        let whole = a_token_at_a_time(NEVER, 48)?;
+        let written = whole.len() - PROMPT.len();
+        assert!(
+            written >= 12,
+            "a generation of {written} tokens says little"
+        );
+        let remembering = |text: &[u32]| {
+            let mut memory = Drafts::new();
+            memory.learn(text, PROMPT.len());
+            memory
+        };
+        let kept = |text: &[u32]| {
+            let mut memory = Drafts::new();
+            memory.keep(&PROMPT, &text[PROMPT.len()..]);
+            memory
+        };
+        let mut garbled = whole.clone();
+        for token in garbled[PROMPT.len()..].iter_mut().skip(2).step_by(3) {
+            *token = (*token + 1) % 64;
+        }
+        let ending = whole[PROMPT.len() + written / 2];
+        // With nothing carried it is a token a pass, through the same
+        // passes.
+        {
+            let mut model = as_on_a_gpu(&cfg, &weights)?;
+            let (mut tokens, mut reading) = (PROMPT.to_vec(), ahead::Reading::default());
+            let Some(passes) = ahead::decode(
+                &mut model,
+                &mut tokens,
+                PROMPT.len(),
+                ahead::Ahead {
+                    eos: NEVER,
+                    most: 48,
+                    reading: &mut reading,
+                    far: &remembering(&whole),
+                    odds: &mut ahead::Odds::never(),
+                },
+                &mut GenTiming::default(),
+            )?
+            else {
+                bail!("the generation was not decoded through wide passes")
+            };
+            assert_eq!(tokens, whole);
+            assert_eq!((passes.passes, passes.guessed), (written - 1, 0));
+        }
+        // A generation that may come to more positions than the table
+        // turns is left to be decoded a token at a time, nothing read.
+        {
+            let mut model = as_on_a_gpu(&cfg, &weights)?;
+            let (mut tokens, mut reading) = (PROMPT.to_vec(), ahead::Reading::default());
+            let none = ahead::decode(
+                &mut model,
+                &mut tokens,
+                PROMPT.len(),
+                ahead::Ahead {
+                    eos: NEVER,
+                    most: cfg.max_position_embeddings,
+                    reading: &mut reading,
+                    far: &Drafts::new(),
+                    odds: &mut ahead::Odds::default(),
+                },
+                &mut GenTiming::default(),
+            )?;
+            assert!(none.is_none() && tokens == PROMPT);
+        }
+        for (what, far) in [
+            ("nothing remembered", Drafts::new()),
+            ("the text itself", remembering(&whole)),
+            ("every third token wrong", remembering(&garbled)),
+            ("the answer kept whole", kept(&whole)),
+            ("an answer kept that goes wrong", kept(&garbled)),
+        ] {
+            for (eos, most) in [
+                (NEVER, 48usize),
+                (ending, 48),
+                (NEVER, 7),
+                (NEVER, 1),
+                (NEVER, 0),
+            ] {
+                let want = a_token_at_a_time(eos, most)?;
+                for eager in [false, true] {
+                    let mut model = as_on_a_gpu(&cfg, &weights)?;
+                    let (mut tokens, mut reading) = (PROMPT.to_vec(), ahead::Reading::default());
+                    let mut odds = match eager {
+                        true => ahead::Odds::eager(),
+                        false => ahead::Odds::default(),
+                    };
+                    let mut timing = GenTiming::default();
+                    let Some(passes) = ahead::decode(
+                        &mut model,
+                        &mut tokens,
+                        PROMPT.len(),
+                        ahead::Ahead {
+                            eos,
+                            most,
+                            reading: &mut reading,
+                            far: &far,
+                            odds: &mut odds,
+                        },
+                        &mut timing,
+                    )?
+                    else {
+                        bail!("{what}: the generation was not read ahead")
+                    };
+                    assert_eq!(
+                        tokens, want,
+                        "{what}, eager {eager}, at {eos} or {most} tokens"
+                    );
+                    assert_eq!(timing.passes, passes.passes, "{what}");
+                    if eager && what == "the answer kept whole" && eos == NEVER && most == 48 {
+                        // Sixteen tokens a pass from the first.
+                        assert!(
+                            passes.passes <= written.div_ceil(16) && passes.kept + 1 >= written - 1,
+                            "{what}: {} passes and {} guesses kept for {written} tokens",
+                            passes.passes,
+                            passes.kept
+                        );
+                    }
+                }
+            }
+        }
         Ok(())
     }
 

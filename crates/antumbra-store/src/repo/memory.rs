@@ -166,6 +166,20 @@ pub async fn list(store: &Store, tenant: &TenantId) -> Result<Vec<Memory>> {
         .collect()
 }
 
+/// [`list`] without each memory's embedding: for a read of a tenant's whole
+/// population that shows or sorts its memories and never uses their vectors,
+/// which are most of each row.
+pub async fn list_lite(store: &Store, tenant: &TenantId) -> Result<Vec<Memory>> {
+    let filter = eq("tenant_id", tenant.as_str());
+    let rows: Vec<MemoryRow> = store
+        .read_paged(TABLE, Some(without_embedding()), Some(&filter))
+        .await?;
+    rows.into_iter()
+        .filter(|r| r.deleted_at.is_none())
+        .map(MemoryRow::into_domain)
+        .collect()
+}
+
 /// How many live memories `tenant` holds, counted by the ENGINE.
 ///
 /// `list(store, tenant).await?.len()` is the obvious way to get this and is a

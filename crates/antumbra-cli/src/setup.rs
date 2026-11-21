@@ -1021,7 +1021,7 @@ fn hosted(args: &HostedArgs) -> anyhow::Result<()> {
 /// Refuse `address` unless the token may travel over it: `https://` anywhere,
 /// plain `http://` to this machine alone, or plain `http://` anywhere when the
 /// operator said so with `--allow-http`.
-fn may_carry_the_token(address: &str, allow_http: bool) -> anyhow::Result<()> {
+pub(crate) fn may_carry_the_token(address: &str, allow_http: bool) -> anyhow::Result<()> {
     match cleartext_problem(address, allow_http) {
         None => Ok(()),
         Some(problem) => Err(anyhow::anyhow!("{problem}")),
@@ -2262,7 +2262,7 @@ fn secret(n: usize, url_safe: bool) -> anyhow::Result<String> {
 
 /// A program on the PATH. On Windows, `.exe`, `.cmd` and `.bat` count, and
 /// the native Claude Code installer's `~/.local/bin` is looked in too.
-fn find_program(name: &str) -> Option<PathBuf> {
+pub(crate) fn find_program(name: &str) -> Option<PathBuf> {
     let exts: &[&str] = if cfg!(windows) {
         &[".exe", ".cmd", ".bat"]
     } else {
@@ -2314,7 +2314,7 @@ fn agent(timeout: Duration) -> ureq::Agent {
 /// place, so a crash mid-write leaves the old file or none, never a truncated
 /// token. On Windows the file is given an owner-only DACL after the rename.
 /// What could not be tightened comes back as a caveat for the caller to show.
-fn write_private(path: &Path, text: &str) -> anyhow::Result<Option<String>> {
+pub(crate) fn write_private(path: &Path, text: &str) -> anyhow::Result<Option<String>> {
     let parent = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
