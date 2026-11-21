@@ -171,18 +171,17 @@ then add the lifecycle hooks. **[`scripts/hooks/README.md`](../scripts/hooks/REA
 
 ## Optional: answers from experts, and training your own
 
-The stack above is the light server: memory, recall, routing. Two more things take a server built with the `models` feature, which the published image is not:
+The stack above serves answers from trained experts (the `answer` tool) on its CPU: the published image is built with the `models` feature. The base model, about 3 GB, is read into the stack's `antumbra-weights` volume the first time the server has an expert to serve, so a server with none never fetches it. `antumbra setup check` says whether the server serves experts, on what, and from which form.
 
-- **Answers served from trained experts** (the `answer` tool). A server with a GPU serves them from it, and one with none serves them from its CPU.
-- **Training the behaviors you accept into your own standing expert**, which takes a GPU.
+What it does not do is train. Turning the behaviors you accept into your own standing expert takes a GPU, so the experts a server with no GPU serves are the ones a GPU server trained, which it fetches from that server (`--expert-source`) or reads back from the archive.
 
-On a machine with an NVIDIA card (Linux, or Windows via WSL2), the GPU build does both:
+On a machine with an NVIDIA card (Linux, or Windows via WSL2), the GPU build trains as well as serves:
 
 ```bash
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
 ```
 
-See [Running the trainer → the GPU server](running-the-trainer.md#the-gpu-server-serving--standing-experts) for the build details, the native (non-Docker) recipe, standing experts, and serving on a CPU, which includes a server with no GPU serving the experts another one trained (`--expert-source`). With the light server, `answer` escalates cleanly and everything else works as normal.
+See [Running the trainer → the GPU server](running-the-trainer.md#the-gpu-server-serving--standing-experts) for the build details, the native (non-Docker) recipe, standing experts, and serving on a CPU, which includes a server with no GPU serving the experts another one trained (`--expert-source`). With no expert to serve, `answer` escalates cleanly and everything else works as normal.
 
 ## Just kicking the tires?
 

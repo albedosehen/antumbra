@@ -367,6 +367,24 @@ impl Serve for MultiAdapterServe {
         true
     }
 
+    /// Where the base is read and in what form, from the configuration alone:
+    /// asked before the first answer, it says what that answer will be served
+    /// on without loading anything.
+    fn serving(&self) -> Option<antumbra_core::ports::Serving> {
+        let quant = self.config.serve_quant;
+        let device = antumbra_train::device::serving_device(quant.is_some());
+        let kernels = (device == "cpu").then(|| match quant {
+            Some(_) => antumbra_train::device::cpu_kernels().to_string(),
+            // A dense base on a CPU is multiplied by candle's kernels.
+            None => "none".to_string(),
+        });
+        Some(antumbra_core::ports::Serving {
+            device: device.to_string(),
+            base: quant.map_or("dense", ServeQuant::name).to_string(),
+            kernels,
+        })
+    }
+
     async fn act(
         &self,
         req: antumbra_core::ports::ActRequest,

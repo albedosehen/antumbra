@@ -21,7 +21,7 @@ Because the database is a real `ws://` server, the MCP server and the CLI can bo
 
 ## Why these choices
 
-- **Non-root, zero privilege.** The SurrealDB image already runs as uid 65532; the `antumbra-mcp` image ships on `distroless/cc:nonroot`. Both drop all capabilities and set `no-new-privileges`. `antumbra-mcp` runs read-only (it talks to the DB over the wire).
+- **Non-root, zero privilege.** The SurrealDB image already runs as uid 65532; the `antumbra-mcp` image ships on `distroless/cc:nonroot`. Both drop all capabilities and set `no-new-privileges`. `antumbra-mcp` runs with a read-only root (it talks to the DB over the wire); it writes only to its two named volumes, `antumbra-weights` (`/weights`, the base model it reads the first time it serves an expert) and `antumbra-adapters` (`/adapters`).
 - **Host bind-mount for the data.** A named volume is created root-owned, which the non-root server cannot write. A host bind-mount is writable by the container on Docker Desktop. On a **Linux** host, `chown -R 65532:65532` the `ANTUMBRA_SURREAL_DATA` directory once.
 - **rocksdb backend.** A standard server KV backend; the v3 client is agnostic to it over `ws://`.
 

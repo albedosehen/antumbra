@@ -401,6 +401,32 @@ pub(super) struct StatsOut {
     pub(super) experts: u32,
     pub(super) boundaries: u32,
     pub(super) compartments: u32,
+    /// How this server answers through experts. `null` where it cannot: a
+    /// build without the model backend, whose `answer` always escalates.
+    pub(super) serving: Option<ServingView>,
+}
+
+/// How a server answers through experts.
+#[derive(Serialize, schemars::JsonSchema)]
+pub(super) struct ServingView {
+    /// `cpu`, `cuda` or `metal`: where the base is read.
+    pub(super) device: String,
+    /// `dense`, or the form the base is held in: `q8_0`, `q6_k` or `q4_k`.
+    pub(super) base: String,
+    /// On a CPU, the kernels a token goes through: `avx-512`, `avx2` or
+    /// `neon` for Antumbra's own, `none` for candle's. Absent off the CPU.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) kernels: Option<String>,
+}
+
+impl From<antumbra_core::ports::Serving> for ServingView {
+    fn from(s: antumbra_core::ports::Serving) -> Self {
+        Self {
+            device: s.device,
+            base: s.base,
+            kernels: s.kernels,
+        }
+    }
 }
 
 #[derive(Serialize, schemars::JsonSchema)]

@@ -218,7 +218,7 @@ Release builds also need the `surrealdb` / `surrealdb-core` `opt-level = 1` over
 
 ## The GPU server (serving + standing experts)
 
-The default Docker stack ([`docker/Dockerfile`](../docker/Dockerfile)) builds the **light** server: it does memory (store / recall / route / compartments / sync), but `answer` reports _serving not configured_, because serving needs the candle/GPU half. Run the `models,cuda` server where the GPU is to get real expert serving, and the keeper that trains each user's **standing experts** from the behaviors they accepted.
+The default Docker stack ([`docker/Dockerfile`](../docker/Dockerfile)) builds the server with `--features models`, which is the published image `antumbra setup local` runs: memory (store / recall / route / compartments / sync) and expert serving on the CPU, from a quantized base through Antumbra's kernels. It trains nothing, since its role is a memory node's, so the experts it serves are ones a GPU server trained and it fetched (`--expert-source`, or the archive). The base is read into `/weights` (the `antumbra-weights` volume, `HF_HOME`) the first time an expert is served, and adapters live under `/adapters` (the `antumbra-adapters` volume); the root stays read-only. `--build-arg FEATURES=` builds the light server, whose `answer` reports _serving not configured_. Run the `models,cuda` server where the GPU is to serve from it and get the keeper that trains each user's **standing experts** from the behaviors they accepted.
 
 **Docker (Linux, or Windows via WSL2; needs the NVIDIA Container Toolkit):**
 
@@ -226,7 +226,7 @@ The default Docker stack ([`docker/Dockerfile`](../docker/Dockerfile)) builds th
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
 ```
 
-The override ([`docker/docker-compose.gpu.yml`](../docker/docker-compose.gpu.yml)) swaps the mcp service for the [`Dockerfile.cuda`](../docker/Dockerfile.cuda) build, requests the GPU, and mounts volumes for the base weights and trained adapters. Set `CUDA_COMPUTE_CAP` in `Dockerfile.cuda` to your card's arch (86 = RTX 30-series, 89 = 40-series). On a CDI host (NixOS, or any daemon without a named nvidia runtime) add `-f docker/docker-compose.gpu-cdi.yml` last. _The image is validated on a Linux GPU host and still not built in CI, which has no GPU._
+The override ([`docker/docker-compose.gpu.yml`](../docker/docker-compose.gpu.yml)) swaps the mcp service for the [`Dockerfile.cuda`](../docker/Dockerfile.cuda) build and requests the GPU; the volumes for the base weights and adapters are the base service's. Set `CUDA_COMPUTE_CAP` in `Dockerfile.cuda` to your card's arch (86 = RTX 30-series, 89 = 40-series). On a CDI host (NixOS, or any daemon without a named nvidia runtime) add `-f docker/docker-compose.gpu-cdi.yml` last. _The image is validated on a Linux GPU host and still not built in CI, which has no GPU._
 
 **Native (e.g. a Windows GPU box):** build `antumbra-mcp` per the CUDA section above (`--features models,cuda`), then run it with the runtime `PATH` set:
 

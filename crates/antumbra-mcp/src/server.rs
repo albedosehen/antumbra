@@ -771,7 +771,7 @@ impl McpServer {
 
     /// At-a-glance counts for this workspace (read-only, ACL-scoped).
     #[tool(
-        description = "At-a-glance counts for your workspace: memories, knowledge documents, visible experts, boundaries, and your compartments."
+        description = "At-a-glance counts for your workspace: memories, knowledge documents, visible experts, boundaries, and your compartments. Also how this server answers through experts (`serving`: the device, the base's form and the CPU kernels), or null where it cannot and `answer` always escalates."
     )]
     async fn workspace_stats(&self) -> Result<Json<StatsOut>, ErrorData> {
         // Counted by the engine: listing the rows to call `.len()` pulls every
@@ -795,6 +795,11 @@ impl McpServer {
             experts,
             boundaries,
             compartments,
+            serving: self
+                .serve
+                .as_ref()
+                .and_then(|serve| serve.serving())
+                .map(ServingView::from),
         }))
     }
 

@@ -287,6 +287,67 @@ async fn population_and_stats_report_the_workspace() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// An engine that says how it serves, as a model-backed one does.
+struct Described;
+#[async_trait::async_trait]
+impl antumbra_core::ports::Serve for Described {
+    async fn act(
+        &self,
+        _req: ActRequest,
+    ) -> antumbra_core::Result<antumbra_core::ports::ActOutput> {
+        Err(antumbra_core::AntumbraError::other(
+            "asking how an engine serves answers nothing",
+        ))
+    }
+    fn serving(&self) -> Option<antumbra_core::ports::Serving> {
+        Some(antumbra_core::ports::Serving {
+            device: "cpu".into(),
+            base: "q6_k".into(),
+            kernels: Some("avx2".into()),
+        })
+    }
+}
+
+/// `workspace_stats` says whether the server answers through experts and on
+/// what, which is what `antumbra setup check` reads: `null` with no engine (a
+/// build without the model backend) and for an engine that does not read a
+/// model, and the engine's own account where it gives one.
+#[tokio::test]
+async fn stats_say_how_the_server_serves_experts() -> anyhow::Result<()> {
+    let none = server().await?;
+    let via = none
+        .call_tool("workspace_stats", serde_json::json!({}))
+        .await?;
+    assert_eq!(via.get("serving"), Some(&serde_json::Value::Null));
+
+    let build = |serve: Arc<dyn antumbra_core::ports::Serve>| async move {
+        anyhow::Ok(McpServer::new(
+            mem_store().await?,
+            Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "h".into(),
+            CompartmentId::new("comp:test:default"),
+            Some(serve),
+        ))
+    };
+    let echo = build(Arc::new(antumbra_core::testing::EchoServe)).await?;
+    let via = echo
+        .call_tool("workspace_stats", serde_json::json!({}))
+        .await?;
+    assert_eq!(via.get("serving"), Some(&serde_json::Value::Null));
+
+    let described = build(Arc::new(Described)).await?;
+    let via = described
+        .call_tool("workspace_stats", serde_json::json!({}))
+        .await?;
+    assert_eq!(
+        via.get("serving"),
+        Some(&serde_json::json!({ "device": "cpu", "base": "q6_k", "kernels": "avx2" }))
+    );
+    Ok(())
+}
+
 /// A page of `list_memories` is the most recently updated first, says
 /// whether another follows, and continues from `offset`, over the REST
 /// dispatcher as over JSON-RPC.

@@ -1,13 +1,13 @@
-# GPU override: swap the light antumbra-mcp for the `models,cuda` build, which
-# adds real expert serving (the `answer` tool) and the keeper that trains each
-# user's standing experts from the behaviors they accepted. Use alongside the
-# base compose:
+# GPU override: swap the CPU antumbra-mcp for the `models,cuda` build, which
+# serves experts from the GPU and adds the keeper that trains each user's
+# standing experts from the behaviors they accepted (the base image serves
+# experts on the CPU and trains none). Use alongside the base compose:
 #
 #   docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
 #
 # Needs an NVIDIA GPU + the NVIDIA Container Toolkit on the host (Linux, or
 # Windows via WSL2). NOT yet CI-validated; see docs/running-the-trainer.md.
-# The light docker/docker-compose.yml remains the default for non-GPU hosts.
+# docker/docker-compose.yml alone remains the default for non-GPU hosts.
 
 services:
   antumbra-mcp:
@@ -15,7 +15,7 @@ services:
       dockerfile: docker/Dockerfile.cuda
     image: antumbra-mcp-gpu:local
     # Command is replaced wholesale (compose does not merge arrays); the password
-    # still rides ANTUMBRA_DB_PASS from the base service's environment. Unlike the light
+    # still rides ANTUMBRA_DB_PASS from the base service's environment. Unlike the
     # base server this OMITS --embedder-url, so the IN-PROCESS candle BERT embedder
     # (all-MiniLM-L6-v2, compiled via --features models, running on the GPU) is used --
     # one embedder for embed + train + serve, with no Ollama dependency and no
@@ -27,12 +27,10 @@ services:
       - ws://surrealdb:8000/rpc
       - --db-user
       - root
-    # Serving caches base weights and the keeper writes adapter files, so the
-    # light server's read-only root is relaxed and two volumes are added.
+    # The weights and adapter volumes come from the base service. This server
+    # trains as well as serves, and was validated with a writable root, so it
+    # keeps one.
     read_only: false
-    volumes:
-      - ${ANTUMBRA_WEIGHTS:-antumbra-weights}:/weights
-      - ${ANTUMBRA_ADAPTERS:-antumbra-adapters}:/adapters
     deploy:
       resources:
         reservations:
@@ -90,7 +88,3 @@ services:
     command: ["--config=/etc/otelcol/config.yaml", "--config=/etc/otelcol/gpu.yaml"]
     volumes:
       - ./otel-collector.gpu.yaml:/etc/otelcol/gpu.yaml:ro
-
-volumes:
-  antumbra-weights:
-  antumbra-adapters:

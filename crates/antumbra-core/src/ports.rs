@@ -109,6 +109,30 @@ pub trait Serve: Send + Sync {
     /// without a restart. Default no-op for engines that pin a single adapter or
     /// snapshot their population at build time.
     fn register_expert(&self, _expert: &ExpertId, _adapter_uri: &str) {}
+
+    /// How this engine answers through experts, for a caller that wants to say
+    /// so (`workspace_stats`, and through it `antumbra setup check`). `None`,
+    /// the default, is an engine that does not read a model: a test double, or
+    /// one that echoes.
+    fn serving(&self) -> Option<Serving> {
+        None
+    }
+}
+
+/// How an engine answers through experts: the device the base is read on, the
+/// form it is held in there, and on a CPU the kernels a token goes through.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Serving {
+    /// `cpu`, `cuda` or `metal`: where the base is read, which is not always
+    /// the build's backend (a Metal build serves from the CPU where it tiles).
+    pub device: String,
+    /// `dense`, or the quantized form the base is held in: `q8_0`, `q6_k` or
+    /// `q4_k`.
+    pub base: String,
+    /// On a CPU, the kernels a token goes through: `avx-512`, `avx2` or
+    /// `neon` for Antumbra's own, `none` where the CPU has none of them and
+    /// candle's are used. `None` off the CPU.
+    pub kernels: Option<String>,
 }
 
 /// The optional flagship escalation tier: consulted only when the
