@@ -113,6 +113,35 @@ args=$(jq -nc --arg repo "$repo" --arg branch "$branch" '
 call recall_memories "$args" "$answers/recall.json" &
 pending="$pending $!"
 
+# --- the same, of each workspace this machine joined ------------------------
+# A workspace (`antumbra join`) is asked with the token kept for it and never
+# this machine's own, for a few of what it holds on the same question. At most
+# three workspaces, at once with everything else and inside the one budget; one
+# this machine already points at is the first ask, not a second.
+# ANTUMBRA_RECALL_WORKSPACES=0 asks only your own.
+ws_count=0
+if [ "${ANTUMBRA_RECALL_WORKSPACES:-1}" != "0" ]; then
+  ws_args=$(printf '%s' "$args" | jq -c '.top_k = 5')
+  for WS in "${ANTUMBRA_WORKSPACES_DIR:-$HOME/.antumbra/workspaces}"/*/workspace.json; do
+    [ -r "$WS" ] || continue
+    ws_url=$(jq -r '.url // ""' "$WS" 2>/dev/null || true)
+    ws_name=$(jq -r '.workspace // ""' "$WS" 2>/dev/null || true)
+    ws_token_file=$(jq -r '.token_file // ""' "$WS" 2>/dev/null || true)
+    [ -n "$ws_url" ] && [ -n "$ws_name" ] && [ "${ws_url%/}" != "${URL%/}" ] && [ -r "$ws_token_file" ] || continue
+    ws_token=$(tr -d '\r\n' < "$ws_token_file" 2>/dev/null || true)
+    [ -n "$ws_token" ] || continue
+    [ "$ws_count" -ge 3 ] && break
+    ws_count=$((ws_count + 1))
+    printf '%s' "$ws_name" > "$answers/ws$ws_count.name"
+    ( printf 'header = "Authorization: Bearer %s"\n' "$ws_token" \
+        | curl -sS --max-time "$(remaining)" -X POST "${ws_url%/}/mcp/call" \
+            -H 'Content-Type: application/json' --config - \
+            -d "$(jq -nc --argjson args "$ws_args" '{tool: "recall_memories", arguments: $args}')" \
+            >"$answers/ws$ws_count.json" 2>/dev/null || : >"$answers/ws$ws_count.json" ) &
+    pending="$pending $!"
+  done
+fi
+
 # --- report this repository's recent merges (fail-open, detached) ------------
 # A server GitHub cannot reach never hears that a branch merged, so what was
 # learned on it reads other_branch from the base branch until someone says so.
@@ -243,6 +272,23 @@ entries=$(printf '%s' "$resp" | jq -c --argjson st "$statuses" '
           else "" end )
   ]' 2>/dev/null) || entries='[]'
 [ -n "$entries" ] || entries='[]'
+
+# What each workspace answered, after your own and marked as the workspace's.
+# No anchor is judged for these: they were learned in someone else's clone.
+n=1
+while [ "$n" -le "$ws_count" ]; do
+  theirs=$(jq -c --arg ws "$(cat "$answers/ws$n.name" 2>/dev/null)" '
+    [ (.memories // .result.memories // [])[]
+      | "[workspace " + $ws + ", not your own store] " + .content
+        + ( if .provenance
+            then "\n  (learned at " + .provenance.repo + "@" + .provenance.commit
+                 + (if .provenance.branch then "#" + .provenance.branch else "" end) + ")"
+            else "" end )
+    ]' "$answers/ws$n.json" 2>/dev/null) || theirs='[]'
+  [ -n "$theirs" ] || theirs='[]'
+  entries=$(jq -nc --argjson a "$entries" --argjson b "$theirs" '$a + $b' 2>/dev/null) || :
+  n=$((n + 1))
+done
 
 git_line=""
 if [ -n "$commit" ]; then

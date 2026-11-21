@@ -146,6 +146,48 @@ if ($repo)   { $arguments['repo']   = $repo }
 if ($branch) { $arguments['branch'] = $branch }
 $recallCall = Start-Call 'recall_memories' $arguments
 
+# --- the same, of each workspace this machine joined ------------------------
+# A workspace (`antumbra join`) is asked with the token kept for it and never
+# this machine's own: its calls go through a client of their own that carries
+# no token, each request given the workspace's. At most three workspaces, at
+# once with everything else and inside the one budget; one this machine already
+# points at is the first ask, not a second. ANTUMBRA_RECALL_WORKSPACES=0 asks
+# only your own.
+$wsCalls = @()
+$wsClient = $null
+if ($client -and $env:ANTUMBRA_RECALL_WORKSPACES -ne '0') {
+    try {
+        $wsDir = if ($env:ANTUMBRA_WORKSPACES_DIR) { $env:ANTUMBRA_WORKSPACES_DIR }
+                 else { Join-Path $HOME '.antumbra/workspaces' }
+        if (Test-Path $wsDir) {
+            $wsArguments = $arguments.Clone()
+            $wsArguments.top_k = 5
+            $wsBody = @{ tool = 'recall_memories'; arguments = $wsArguments } | ConvertTo-Json -Compress -Depth 5
+            foreach ($dir in (Get-ChildItem -Path $wsDir -Directory | Sort-Object Name)) {
+                if ($wsCalls.Count -ge 3) { break }
+                $file = Join-Path $dir.FullName 'workspace.json'
+                if (-not (Test-Path $file)) { continue }
+                $ws = Get-Content $file -Raw | ConvertFrom-Json
+                $wsUrl = ([string]$ws.url).TrimEnd('/')
+                if (-not $wsUrl -or -not $ws.workspace -or $wsUrl -eq $url.TrimEnd('/')) { continue }
+                if (-not $ws.token_file -or -not (Test-Path ([string]$ws.token_file))) { continue }
+                $wsToken = (Get-Content ([string]$ws.token_file) -Raw).Trim()
+                if (-not $wsToken) { continue }
+                if (-not $wsClient) {
+                    $wsHandler = New-Object System.Net.Http.HttpClientHandler
+                    $wsHandler.UseProxy = $false
+                    $wsClient = New-Object System.Net.Http.HttpClient($wsHandler)
+                    $wsClient.Timeout = [TimeSpan]::FromMilliseconds([Math]::Max(1000, (Get-RemainingMs)))
+                }
+                $request = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Post, "$wsUrl/mcp/call")
+                $request.Headers.Authorization = New-Object System.Net.Http.Headers.AuthenticationHeaderValue('Bearer', $wsToken)
+                $request.Content = New-Object System.Net.Http.StringContent($wsBody, [System.Text.Encoding]::UTF8, 'application/json')
+                $wsCalls += @{ name = [string]$ws.workspace; call = $wsClient.SendAsync($request) }
+            }
+        }
+    } catch { }
+}
+
 # --- report this repository's recent merges (fail-open, detached) ------------
 # A server GitHub cannot reach never hears that a branch merged, so what was
 # learned on it reads other_branch from the base branch until someone says so.
@@ -328,6 +370,24 @@ if ($mems.Count -gt 0) {
         "$prefix$($m.content)$anchor"
     })
 }
+
+# What each workspace answered, after your own and marked as the workspace's.
+# No anchor is judged for these: they were learned in someone else's clone.
+foreach ($asked in $wsCalls) {
+    $answer = Receive-Call $asked.call
+    if (-not $answer) { continue }
+    $theirs = if ($answer.memories) { @($answer.memories) } elseif ($answer.result.memories) { @($answer.result.memories) } else { @() }
+    foreach ($m in $theirs) {
+        $anchor = ''
+        if ($m.provenance) {
+            $anchor = "`n  (learned at $($m.provenance.repo)@$($m.provenance.commit)"
+            if ($m.provenance.branch) { $anchor += "#$($m.provenance.branch)" }
+            $anchor += ')'
+        }
+        $entries += "[workspace $($asked.name), not your own store] $($m.content)$anchor"
+    }
+}
+if ($wsClient) { $wsClient.Dispose() }
 
 $gitLine = ''
 if ($commit) {
