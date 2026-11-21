@@ -95,6 +95,23 @@ pub struct Asking<'a> {
     pub note: Option<String>,
     pub host: Option<String>,
     pub secret_digest: &'a str,
+    /// The address a control plane verified they hold, when one did.
+    pub email: Option<String>,
+}
+
+/// The workspace `code` is for, when it would admit a request now. It spends
+/// nothing: for saying a code is no good before anything is sent anywhere.
+pub async fn admits(store: &Store, code: &str, now: DateTime<Utc>) -> Result<Option<TenantId>> {
+    Ok(store
+        .get_row::<JoinCode>(CODE, &join::digest(code))
+        .await?
+        .filter(|held| held.admits(now))
+        .map(|held| held.tenant))
+}
+
+/// A request by its id, for the server's own reading.
+pub async fn request(store: &Store, id: &str) -> Result<Option<JoinRequest>> {
+    store.get_row::<JoinRequest>(REQUEST, id).await
 }
 
 /// Ask to join the workspace a code is for.
@@ -176,6 +193,7 @@ pub async fn ask(store: &Store, asking: Asking<'_>, now: DateTime<Utc>) -> Resul
         decided_at: admitted.then_some(now),
         decided_by: admitted.then(|| code.created_by.clone()),
         reason: None,
+        email: asking.email,
     };
     store.put(REQUEST, &request.key, &request).await?;
     Ok(request)
@@ -325,6 +343,7 @@ mod tests {
             note: None,
             host: Some("laptop".to_string()),
             secret_digest: secret,
+            email: None,
         }
     }
 
