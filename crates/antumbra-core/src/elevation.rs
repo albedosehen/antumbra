@@ -201,6 +201,84 @@ pub fn held(content: &str, compartment_name: Option<&str>) -> Option<Held> {
     looks_secret(content).then_some(Held::LooksSecret)
 }
 
+/// How many memories a person must have shared before anything is suggested.
+pub const LEARNS_FROM: usize = 5;
+/// How much nearer what was shared than what was not a memory must lie to be
+/// suggested.
+pub const SUGGEST_ABOVE: f32 = 0.05;
+
+/// What a person's decisions say about what they share: where the memories
+/// they shared lie, and where the ones they did not.
+///
+/// It is two centres and nothing else, made again from the decisions each
+/// time it is asked for. It suggests; it decides nothing.
+#[derive(Debug, Clone)]
+pub struct Taste {
+    shared: Vec<f32>,
+    other: Vec<f32>,
+}
+
+/// The centre of some embeddings, each counted at unit length; `None` for
+/// none, or for embeddings of differing sizes.
+fn centre<'a>(of: impl IntoIterator<Item = &'a [f32]>) -> Option<Vec<f32>> {
+    let mut sum: Vec<f32> = Vec::new();
+    let mut count = 0usize;
+    for e in of {
+        let norm = e.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm == 0.0 {
+            continue;
+        }
+        if sum.is_empty() {
+            sum = vec![0.0; e.len()];
+        }
+        if sum.len() != e.len() {
+            return None;
+        }
+        for (s, x) in sum.iter_mut().zip(e) {
+            *s += x / norm;
+        }
+        count += 1;
+    }
+    (count > 0).then(|| sum.into_iter().map(|s| s / count as f32).collect())
+}
+
+impl Taste {
+    /// Learn from the embeddings of what was shared (chosen or brought), of
+    /// what was left out (declined or never), and of what is undecided.
+    /// `None` until [`LEARNS_FROM`] memories were shared. Until as many were
+    /// left out, what was shared is told from the undecided instead.
+    pub fn learn<'a>(
+        shared: &[&'a [f32]],
+        left_out: &[&'a [f32]],
+        undecided: &[&'a [f32]],
+    ) -> Option<Taste> {
+        if shared.len() < LEARNS_FROM {
+            return None;
+        }
+        let against = if left_out.len() >= LEARNS_FROM {
+            left_out
+        } else {
+            undecided
+        };
+        Some(Taste {
+            shared: centre(shared.iter().copied())?,
+            other: centre(against.iter().copied())?,
+        })
+    }
+
+    /// How much nearer what was shared than what was not `embedding` lies:
+    /// above zero leans toward sharing.
+    pub fn leaning(&self, embedding: &[f32]) -> f32 {
+        crate::expert::cosine_similarity(embedding, &self.shared)
+            - crate::expert::cosine_similarity(embedding, &self.other)
+    }
+
+    /// Whether a memory with this embedding is one to suggest.
+    pub fn suggests(&self, embedding: &[f32]) -> bool {
+        self.leaning(embedding) > SUGGEST_ABOVE
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,6 +350,43 @@ mod tests {
             assert_eq!(choice.as_str().parse::<Choice>()?, choice);
         }
         assert!("maybe".parse::<Choice>().is_err());
+        Ok(())
+    }
+
+    /// Nothing is suggested until enough was shared; then what lies with
+    /// what was shared is suggested and what lies with what was left out is
+    /// not; and with too few left out, the undecided stand in for them.
+    #[test]
+    fn what_is_suggested_lies_with_what_was_shared() -> anyhow::Result<()> {
+        fn refs(v: &[Vec<f32>]) -> Vec<&[f32]> {
+            v.iter().map(Vec::as_slice).collect()
+        }
+        let near = |x: f32, y: f32| vec![x, y, 0.1];
+        let work: Vec<Vec<f32>> = (0..5).map(|i| near(1.0, 0.05 * i as f32)).collect();
+        let home: Vec<Vec<f32>> = (0..5).map(|i| near(0.05 * i as f32, 1.0)).collect();
+        assert!(Taste::learn(&refs(&work[..4]), &refs(&home), &[]).is_none());
+        let taste = Taste::learn(&refs(&work), &refs(&home), &[])
+            .ok_or_else(|| anyhow::anyhow!("no taste was learned"))?;
+        assert!(taste.suggests(&near(0.9, 0.1)));
+        assert!(!taste.suggests(&near(0.1, 0.9)));
+        assert!(!taste.suggests(&near(0.7, 0.7)));
+        assert!(taste.leaning(&near(0.9, 0.1)) > taste.leaning(&near(0.6, 0.4)));
+        // One left out is not enough to learn from: the undecided are what
+        // the shared are told from.
+        let undecided = [near(0.1, 0.9), near(0.2, 0.8), near(0.9, 0.1)];
+        let taste = Taste::learn(&refs(&work), &refs(&home[..1]), &refs(&undecided))
+            .ok_or_else(|| anyhow::anyhow!("no taste was learned"))?;
+        assert!(taste.suggests(&near(0.9, 0.1)));
+        assert!(!taste.suggests(&near(0.1, 0.9)));
+        // Embeddings of two sizes teach nothing.
+        let mixed = [
+            vec![1.0, 0.0],
+            vec![1.0, 0.0, 0.0],
+            vec![1.0],
+            vec![1.0],
+            vec![1.0],
+        ];
+        assert!(Taste::learn(&refs(&mixed), &[], &refs(&undecided)).is_none());
         Ok(())
     }
 }

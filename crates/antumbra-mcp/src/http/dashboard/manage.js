@@ -119,7 +119,7 @@ async function loadAgent() {
               h("span", { class: "mono" }, r.rule),
               h("span", { class: "tag" }, r.current ? "current" : "retired"),
             ),
-            h("p", { class: "content" }, r.text),
+            rich(r.text),
           ),
         )
       : [h("li", { class: "empty" }, "No rules are kept: `antumbra claude rules` writes the ones for an agent run with its feature flags off.")]),
@@ -563,6 +563,130 @@ function drawMembers() {
   );
 }
 
+// The workspace's shared pool: what its members offered to everyone in it,
+// and its admins accepted. The server decides each act by who asks; the page
+// offers what their role allows and says what the server answered.
+
+async function loadPool() {
+  const [pool, mine] = await Promise.all([consoleFetch("pool"), call("list_compartments")]);
+  state.shell.pool = pool;
+  state.shell.offered = (pool.offers ?? []).filter((o) => o.status === "offered").length;
+  drawPool(pool, mine.compartments ?? []);
+  showCounts();
+}
+
+/** Do something to the pool and redraw it from the server. */
+async function changePool(path, body, doing, done) {
+  const status = byId("pool-status");
+  const ok = await attempt(status, doing, done, () => consoleFetch(path, body));
+  try {
+    await section(byId("pool-offers"), loadPool);
+  } catch (error) {
+    if (error instanceof SignedOut) signOut(REFUSED);
+  }
+  if (ok) status.textContent = done;
+  renderAttention();
+}
+
+function poolSwitch(name, about, on, change) {
+  const row = h("div", { class: "pref" }, h("div", {}, h("p", { class: "pref-name" }, name), h("p", { class: "muted small" }, about)));
+  if (change) {
+    const button = h("button", { type: "button", class: on ? "quiet" : "" }, change.label);
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      change.act();
+    });
+    row.append(button);
+  } else {
+    row.append(h("span", { class: "tag" }, on ? "on" : "off"));
+  }
+  return row;
+}
+
+function drawPool(pool, compartments) {
+  const offers = pool.offers ?? [];
+  const owner = pool.your_role === "owner";
+  const rules = owner || pool.your_role === "admin";
+  const accepted = offers.filter((o) => o.status === "accepted").length;
+  byId("pool-summary").textContent = pool.open
+    ? `${numbers.format(accepted)} shared \u00b7 ${numbers.format(state.shell.offered)} waiting for an admin`
+    : "The pool is closed: nothing is shared";
+  byId("pool-switches").replaceChildren(
+    poolSwitch(
+      pool.open ? "The pool is open" : "The pool is closed",
+      pool.open
+        ? "Accepted compartments are read by everyone in the workspace."
+        : "Nothing offered is read by anyone but its owner until the workspace's owner opens the pool.",
+      pool.open,
+      owner
+        ? {
+            label: pool.open ? "Close the pool" : "Open the pool",
+            act: () => changePool("pool/open", { on: !pool.open }, pool.open ? "Closing" : "Opening", pool.open ? "The pool is closed." : "The pool is open."),
+          }
+        : null,
+    ),
+    poolSwitch(
+      pool.joined ? "You share with this workspace" : "You are not sharing",
+      pool.joined
+        ? "What you offered and an admin accepted is read by the others. Stop, and it is yours alone again at once."
+        : "Nothing of yours is read by the others, whatever was accepted before. Offering a compartment starts sharing.",
+      pool.joined,
+      pool.joined
+        ? { label: "Stop sharing", act: () => changePool("pool/join", { on: false }, "Stopping", "You are no longer sharing: what you offered is yours alone.") }
+        : { label: "Start sharing", act: () => changePool("pool/join", { on: true }, "Starting", "You are sharing what was accepted.") },
+    ),
+  );
+  const offered = new Map(offers.map((o) => [o.compartment, o]));
+  byId("pool-yours").replaceChildren(
+    ...(compartments.length
+      ? compartments.map((c) => {
+          const held = offered.get(c.id);
+          let act = h("span", { class: "tag" }, held ? held.status : "");
+          if (!held) {
+            act = h("button", { type: "button", class: "link strong" }, "Offer to the workspace");
+            act.addEventListener("click", () => {
+              act.disabled = true;
+              changePool("pool/offer", { compartment: c.id }, "Offering", `"${c.name}" is offered: an admin of the workspace decides.`);
+            });
+          }
+          return h("li", {}, h("span", { class: "member-text" }, h("span", {}, c.name), h("span", { class: "small muted mono" }, c.id)), act);
+        })
+      : [h("li", { class: "empty" }, "You have no compartments.")]),
+  );
+  byId("pool-offers").replaceChildren(
+    ...(offers.length
+      ? offers.map((o) => {
+          const name = o.name || o.compartment;
+          const acts = [];
+          const button = (label, quiet, path, body, doing, done) => {
+            const b = h("button", { type: "button", class: quiet ? "quiet" : "" }, label);
+            b.addEventListener("click", () => {
+              b.disabled = true;
+              changePool(path, body, doing, done);
+            });
+            return b;
+          };
+          if (rules && o.status !== "accepted") {
+            acts.push(button("Accept", false, "pool/rule", { key: o.key, accept: true }, "Accepting", `"${name}" is the workspace's to read.`));
+          }
+          if (rules && o.status !== "declined") {
+            acts.push(button(o.status === "accepted" ? "Take out of the pool" : "Decline", true, "pool/rule", { key: o.key, accept: false }, "Declining", `"${name}" is not shared.`));
+          }
+          if (o.yours) {
+            acts.push(button("Take it back", true, "pool/withdraw", { key: o.key }, "Taking it back", `"${name}" is yours alone again.`));
+          }
+          return h(
+            "li",
+            { class: "ask" },
+            h("p", { class: "asking-who" }, h("span", { class: "member-text" }, h("span", {}, name), h("span", { class: "small muted" }, `offered by ${o.offered_by_name || bareName(o.offered_by)}${o.yours ? " (you)" : ""} \u00b7 ${numbers.format(o.memories)} ${o.memories === 1 ? "memory" : "memories"}`)), h("span", { class: "tag" }, o.status)),
+            ...(o.preview ?? []).map((text) => h("p", { class: "content small" }, plain(text))),
+            acts.length ? h("div", { class: "write-row" }, ...acts) : null,
+          );
+        })
+      : [h("li", { class: "empty" }, "Nothing has been offered to this workspace.")]),
+  );
+}
+
 function startManage() {
   startProfile();
   startJoining();
@@ -618,7 +742,9 @@ function clearManage() {
   byId("members-summary").textContent = "";
   byId("members-status").textContent = "";
   byId("removed-section").hidden = true;
-  for (const id of ["asking", "codes"]) byId(id).replaceChildren();
+  for (const id of ["asking", "codes", "pool-switches", "pool-yours", "pool-offers"]) byId(id).replaceChildren();
+  byId("pool-summary").textContent = "";
+  byId("pool-status").textContent = "";
   byId("asking-section").hidden = true;
   byId("codes-section").hidden = true;
   byId("code-made").hidden = true;

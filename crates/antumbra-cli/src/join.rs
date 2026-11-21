@@ -42,6 +42,25 @@ pub struct JoinArgs {
     /// Drop the request this machine is waiting on, without collecting it.
     #[arg(long, conflicts_with_all = ["code", "handle", "name", "note"])]
     pub forget: bool,
+    /// Give this machine's coding agent the tools of the workspaces it has
+    /// joined: each is registered with Claude Code as an MCP server of its
+    /// own, beside the machine's own, reading the workspace's token from its
+    /// file.
+    #[arg(long, conflicts_with_all = ["code", "handle", "name", "note", "status", "forget", "disconnect"])]
+    pub connect: bool,
+    /// Take those MCP servers back out.
+    #[arg(long, conflicts_with_all = ["code", "handle", "name", "note", "status", "forget"])]
+    pub disconnect: bool,
+    /// Where an agent's new memories go once this machine is in a workspace:
+    /// `private` (your own store; the default), `workspace` (what is learned
+    /// about the team's work goes to the workspace), or `ask` (your own
+    /// store, and the agent asks when something looks like the team's).
+    #[arg(long, value_name = "WHERE", conflicts_with_all = ["code", "handle", "name", "note", "status", "forget"])]
+    pub write: Option<String>,
+    /// The workspace `--connect`, `--disconnect` and `--write` are about, by
+    /// its id or address, when this machine has joined more than one.
+    #[arg(long)]
+    pub to: Option<String>,
     /// Accept a plain `http://` address that is not this machine: a lab whose
     /// network is trusted. The code and the secret travel in cleartext.
     #[arg(long)]
@@ -291,6 +310,7 @@ fn status(antumbra: &Path, send: Send<'_>) -> anyhow::Result<Vec<String>> {
                     "workspace": workspace,
                     "user": user,
                     "token_file": token_file,
+                    "write": "private",
                     "joined_at": chrono::Utc::now().to_rfc3339(),
                 }))?,
             )?;
@@ -299,11 +319,9 @@ fn status(antumbra: &Path, send: Send<'_>) -> anyhow::Result<Vec<String>> {
                 format!("You are {user} in {workspace} at {}.", waiting.server),
                 format!("Your token for it is in {}", token_file.display()),
                 "This machine's own setup is as it was: your private memories stay yours and stay in use.".to_string(),
-                format!(
-                    "To point this machine's agents at the workspace instead: antumbra setup hosted {} --token-file {}",
-                    waiting.server,
-                    token_file.display()
-                ),
+                "What the workspace holds comes with each prompt from now, labelled as the workspace's.".to_string(),
+                "To give your agent the workspace's tools as well: antumbra join --connect".to_string(),
+                "New memories go to your own store unless you say otherwise: antumbra join --write private|workspace|ask".to_string(),
             ];
             lines.extend(caveat);
             Ok(lines)
@@ -327,8 +345,203 @@ fn forget(antumbra: &Path) -> anyhow::Result<Vec<String>> {
     }
 }
 
+/// Where new memories go, as `--write` names it.
+const WRITES: [&str; 3] = ["private", "workspace", "ask"];
+
+/// Register an MCP server with the machine's agent, or take it out: its name
+/// and, to register, its definition as JSON. `Ok(false)` when the agent's
+/// command is not on this machine. A seam, so the flow is tested without one.
+pub(crate) type Register<'a> = &'a dyn Fn(&str, Option<&str>) -> anyhow::Result<bool>;
+
+/// The name a workspace's MCP server is registered under.
+fn server_name(workspace: &str) -> String {
+    let plain: String = workspace
+        .trim_start_matches("ws:")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    format!("antumbra-{}", plain.trim_matches('-'))
+}
+
+/// The joined workspaces `--to` names, or all of them, each with the file
+/// that records it.
+fn recorded(antumbra: &Path, to: Option<&str>) -> anyhow::Result<Vec<(PathBuf, Value)>> {
+    let mut found = Vec::new();
+    let dirs = std::fs::read_dir(antumbra.join("workspaces"))
+        .map(|dirs| dirs.flatten().map(|d| d.path()).collect::<Vec<_>>())
+        .unwrap_or_default();
+    for dir in dirs {
+        let file = dir.join("workspace.json");
+        let Some(kept) = std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        else {
+            continue;
+        };
+        let field = |name: &str| kept.get(name).and_then(Value::as_str).unwrap_or_default();
+        let named = to.is_none_or(|to| {
+            let to = to.trim().trim_end_matches('/');
+            field("workspace") == to
+                || field("url").trim_end_matches('/') == to
+                || field("workspace").trim_start_matches("ws:") == to
+        });
+        if named && !field("workspace").is_empty() {
+            found.push((file, kept));
+        }
+    }
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    if found.is_empty() {
+        anyhow::bail!(match to {
+            Some(to) => format!("this machine has not joined `{to}`"),
+            None => "this machine has joined no workspace. Ask to join one with: antumbra join <server> --code <code> --handle <handle>".to_string(),
+        });
+    }
+    Ok(found)
+}
+
+fn keep(file: &Path, kept: &Value) -> anyhow::Result<()> {
+    crate::setup::write_private(file, &serde_json::to_string_pretty(kept)?)?;
+    Ok(())
+}
+
+/// Give the machine's agent each workspace's tools, or take them back.
+fn connect(
+    antumbra: &Path,
+    to: Option<&str>,
+    on: bool,
+    program: &str,
+    register: Register<'_>,
+) -> anyhow::Result<Vec<String>> {
+    let mut lines = Vec::new();
+    for (file, mut kept) in recorded(antumbra, to)? {
+        let field = |name: &str| {
+            kept.get(name)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        let (workspace, url, token_file) = (field("workspace"), field("url"), field("token_file"));
+        let name = server_name(&workspace);
+        if !on {
+            let had = register(&name, None)?;
+            if let Some(kept) = kept.as_object_mut() {
+                kept.remove("server");
+            }
+            keep(&file, &kept)?;
+            lines.push(match had {
+                true => format!(
+                    "{workspace}: its tools are taken back out (the MCP server \"{name}\")."
+                ),
+                false => format!(
+                    "{workspace}: recorded as not connected; no agent's command was found to tell."
+                ),
+            });
+            continue;
+        }
+        // A bridge of its own, reading the workspace's token from its file
+        // and never the machine's own from the environment.
+        let server = json!({
+            "type": "stdio",
+            "command": program,
+            "args": ["mcp", "bridge", "--agent", "claude", "--surface", url, "--token-file", token_file, "--file-token-only"],
+        })
+        .to_string();
+        if register(&name, Some(&server))? {
+            kept["server"] = json!(name);
+            keep(&file, &kept)?;
+            lines.push(format!(
+                "{workspace}: your agent has its tools as the MCP server \"{name}\", beside your own. Start a new session to see them."
+            ));
+        } else {
+            lines.push(format!(
+                "{workspace}: the claude command is not on your PATH. Once it is:"
+            ));
+            lines.push(format!(
+                "  claude mcp add-json {name} --scope user '{server}'"
+            ));
+        }
+    }
+    Ok(lines)
+}
+
+/// Say where an agent's new memories go for each workspace named.
+fn set_write(antumbra: &Path, to: Option<&str>, write: &str) -> anyhow::Result<Vec<String>> {
+    let write = write.trim().to_ascii_lowercase();
+    if !WRITES.contains(&write.as_str()) {
+        anyhow::bail!("`{write}` is not where memories can go: private, workspace or ask");
+    }
+    let mut lines = Vec::new();
+    for (file, mut kept) in recorded(antumbra, to)? {
+        let workspace = kept
+            .get("workspace")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let connected = kept.get("server").and_then(Value::as_str).is_some();
+        kept["write"] = json!(write);
+        keep(&file, &kept)?;
+        lines.push(match write.as_str() {
+            "workspace" if connected => format!("{workspace}: what is learned about the team's work goes to the workspace; what is yours stays in your own store."),
+            "workspace" => format!("{workspace}: recorded, and it does nothing until your agent has the workspace's tools: antumbra join --connect"),
+            "ask" => format!("{workspace}: new memories go to your own store, and your agent asks when something looks like the team's."),
+            _ => format!("{workspace}: new memories go to your own store."),
+        });
+    }
+    lines.push("An agent reads this when a session starts.".to_string());
+    Ok(lines)
+}
+
+/// Register with Claude Code, by its own command.
+fn with_claude(name: &str, server: Option<&str>) -> anyhow::Result<bool> {
+    let Some(claude) = crate::setup::find_program("claude") else {
+        return Ok(false);
+    };
+    let quiet = |args: &[&str]| {
+        std::process::Command::new(&claude)
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+    };
+    // Out first either way: registering again replaces what was there.
+    let _ = quiet(&["mcp", "remove", name, "--scope", "user"]);
+    if let Some(server) = server {
+        let out = std::process::Command::new(&claude)
+            .args(["mcp", "add-json", name, "--scope", "user", server])
+            .output()?;
+        if !out.status.success() {
+            anyhow::bail!(
+                "registering the MCP server failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+    }
+    Ok(true)
+}
+
 /// The flow, with the network and the home given.
 fn run_in(antumbra: &Path, args: &JoinArgs, send: Send<'_>) -> anyhow::Result<Vec<String>> {
+    if let Some(write) = &args.write {
+        return set_write(antumbra, args.to.as_deref(), write);
+    }
+    if args.connect || args.disconnect {
+        let program = std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "antumbra".to_string());
+        return connect(
+            antumbra,
+            args.to.as_deref(),
+            args.connect,
+            &program,
+            &with_claude,
+        );
+    }
     if args.forget {
         return forget(antumbra);
     }
@@ -371,6 +584,10 @@ mod tests {
             note: None,
             status: false,
             forget: false,
+            connect: false,
+            disconnect: false,
+            write: None,
+            to: None,
             allow_http: false,
         }
     }
@@ -541,6 +758,117 @@ mod tests {
             none.to_string().contains("not waiting on a request"),
             "{none}"
         );
+        Ok(())
+    }
+
+    fn joined_home(name: &str) -> anyhow::Result<(crate::agents::scratch::Scratch, PathBuf)> {
+        let home = crate::agents::scratch::Scratch::new(name)?;
+        let antumbra = home.path().join(".antumbra");
+        for (dir, url, workspace) in [
+            ("a__ws_crew", "https://team.example", "ws:crew"),
+            ("b__ws_lab", "https://lab.example", "ws:The Lab"),
+        ] {
+            let at = antumbra.join("workspaces").join(dir);
+            std::fs::create_dir_all(&at)?;
+            std::fs::write(
+                at.join("workspace.json"),
+                json!({ "url": url, "workspace": workspace, "user": "user:bodil", "token_file": at.join("token.txt"), "write": "private" }).to_string(),
+            )?;
+        }
+        Ok((home, antumbra))
+    }
+
+    fn recorded_as(antumbra: &Path, dir: &str) -> anyhow::Result<Value> {
+        Ok(serde_json::from_str(&std::fs::read_to_string(
+            antumbra.join("workspaces").join(dir).join("workspace.json"),
+        )?)?)
+    }
+
+    /// Each workspace's tools are a server of its own, a bridge to the
+    /// workspace with the workspace's token and never the machine's own; and
+    /// they are taken back out by name.
+    #[test]
+    fn an_agent_is_given_each_workspaces_tools_and_they_are_taken_back() -> anyhow::Result<()> {
+        let (_home, antumbra) = joined_home("join-connect")?;
+        let calls = RefCell::new(Vec::new());
+        let register = |name: &str, server: Option<&str>| {
+            calls
+                .borrow_mut()
+                .push((name.to_string(), server.map(str::to_string)));
+            Ok(true)
+        };
+        let said = connect(&antumbra, None, true, "/bin/antumbra", &register)?;
+        assert_eq!(said.len(), 2, "{said:?}");
+        let registered = calls.borrow().clone();
+        assert_eq!(registered[0].0, "antumbra-crew");
+        assert_eq!(registered[1].0, "antumbra-the-lab");
+        let server: Value = serde_json::from_str(registered[0].1.as_deref().unwrap_or("{}"))?;
+        assert_eq!(server["command"], "/bin/antumbra");
+        let args: Vec<&str> = server["args"]
+            .as_array()
+            .map(|a| a.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--surface", "https://team.example"]),
+            "{args:?}"
+        );
+        assert!(
+            args.contains(&"--file-token-only") && args.contains(&"--token-file"),
+            "{args:?}"
+        );
+        assert_eq!(
+            recorded_as(&antumbra, "a__ws_crew")?["server"],
+            "antumbra-crew"
+        );
+
+        // One of them, taken back.
+        calls.borrow_mut().clear();
+        connect(&antumbra, Some("crew"), false, "/bin/antumbra", &register)?;
+        assert_eq!(*calls.borrow(), [("antumbra-crew".to_string(), None)]);
+        assert!(recorded_as(&antumbra, "a__ws_crew")?
+            .get("server")
+            .is_none());
+        assert_eq!(
+            recorded_as(&antumbra, "b__ws_lab")?["server"],
+            "antumbra-the-lab"
+        );
+
+        // No agent's command: the line to run is given, and nothing is recorded.
+        let none = |_: &str, _: Option<&str>| Ok(false);
+        let said = connect(&antumbra, Some("ws:crew"), true, "/bin/antumbra", &none)?;
+        assert!(
+            said.iter()
+                .any(|l| l.contains("claude mcp add-json antumbra-crew")),
+            "{said:?}"
+        );
+        assert!(recorded_as(&antumbra, "a__ws_crew")?
+            .get("server")
+            .is_none());
+        Ok(())
+    }
+
+    /// Where new memories go is one of three, recorded for the workspace, and
+    /// writing to a workspace the agent has no tools for is said to do nothing.
+    #[test]
+    fn where_new_memories_go_is_recorded_for_a_workspace() -> anyhow::Result<()> {
+        let (_home, antumbra) = joined_home("join-write")?;
+        assert!(set_write(&antumbra, None, "everywhere").is_err());
+        let said = set_write(&antumbra, Some("crew"), "Workspace")?;
+        assert!(
+            said[0].contains("does nothing until your agent has the workspace's tools"),
+            "{said:?}"
+        );
+        assert_eq!(recorded_as(&antumbra, "a__ws_crew")?["write"], "workspace");
+        assert_eq!(recorded_as(&antumbra, "b__ws_lab")?["write"], "private");
+        connect(&antumbra, Some("crew"), true, "/bin/antumbra", &|_, _| {
+            Ok(true)
+        })?;
+        let said = set_write(&antumbra, Some("crew"), "workspace")?;
+        assert!(said[0].contains("goes to the workspace"), "{said:?}");
+        set_write(&antumbra, None, "ask")?;
+        assert_eq!(recorded_as(&antumbra, "b__ws_lab")?["write"], "ask");
+        assert!(set_write(&antumbra, Some("ws:nowhere"), "ask").is_err());
         Ok(())
     }
 }

@@ -78,6 +78,7 @@ mod experts;
 mod github;
 mod join;
 mod members;
+mod pool;
 mod relics;
 mod revocation;
 pub(crate) mod sync;
@@ -628,6 +629,7 @@ fn router(state: Arc<HttpState>) -> Router {
         .merge(console::routes())
         .merge(members::routes())
         .merge(join::routes())
+        .merge(pool::routes())
         .merge(dashboard::routes())
         .merge(relics::routes())
         .merge(experts::routes())

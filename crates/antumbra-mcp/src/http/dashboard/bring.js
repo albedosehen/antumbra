@@ -1,4 +1,4 @@
-// The Bring page: choosing which of your own memories go to a workspace you
+// The Share page: choosing which of your own memories go to a workspace you
 // joined. It is built for a store of thousands. Every narrowing is done by
 // the server (`bring_candidates`), which also counts what each way of
 // narrowing would leave, and a whole filter's worth is decided in one call
@@ -36,6 +36,11 @@ const bring = { ticket: 0, shown: 0, total: 0 };
 function bringFilter() {
   const form = new FormData(byId("bring-filter"));
   const filter = { state: form.get("state") || "undecided" };
+  // Suggested is the undecided, narrowed to what lies with what was shared.
+  if (filter.state === "suggested") {
+    filter.state = "undecided";
+    filter.suggested = true;
+  }
   for (const [name] of BRING_FACETS) {
     if (form.get(name)) filter[name] = form.get(name);
   }
@@ -89,7 +94,7 @@ function bringRow(m, state) {
         ? []
         : [decide("clear", "Undo", true), state === "declined" ? decide("chosen", "Choose") : null];
   item.append(
-    h("p", { class: "content" }, m.content, m.truncated ? " \u2026" : ""),
+    rich(m.truncated ? `${m.content} \u2026` : m.content),
     h(
       "p",
       { class: "meta small muted" },
@@ -100,6 +105,7 @@ function bringRow(m, state) {
       h("span", { title: m.created_at }, dates.format(new Date(m.created_at))),
       m.reinforcement ? h("span", {}, `used ${numbers.format(m.reinforcement)}\u00d7`) : null,
       m.held ? h("span", { class: "held" }, `Held back: ${BRING_HELD[m.held] || m.held}`) : null,
+      m.leaning !== undefined ? h("span", { class: "tag" }, "Like what you shared") : null,
     ),
     h("div", { class: "actions-row" }, ...acts, status),
   );
@@ -132,6 +138,7 @@ function drawBringStates(out) {
   const badge = byId("nav-chosen");
   badge.hidden = !states.chosen;
   badge.textContent = states.chosen ? numbers.format(states.chosen) : "";
+  byId("bring-send").hidden = !states.chosen;
 }
 
 async function refreshBringCounts() {
@@ -153,8 +160,11 @@ async function loadBring() {
   drawBringStates(out);
   bring.total = out.total;
   bring.shown = out.memories.length;
-  const empty =
-    filter.state === "undecided"
+  const empty = filter.suggested
+    ? out.suggests_after
+      ? `Suggestions start once you have shared ${numbers.format(out.suggests_after)} more ${out.suggests_after === 1 ? "memory" : "memories"}.`
+      : "Nothing to suggest: none of what is left is like what you shared."
+    : filter.state === "undecided"
       ? "Nothing here to decide. Loosen the filters, or look at what is held back."
       : "None.";
   byId("bring-list").replaceChildren(
@@ -173,7 +183,7 @@ async function showBring() {
 
 /** The page reads every memory to count them, so it is read when looked at. */
 function showBringWhenAsked() {
-  if (location.hash.replace(/^#\/?/, "") === "bring" && state.token) showBring();
+  if (location.hash.replace(/^#\/?/, "") === "share" && state.token) showBring();
 }
 
 function startBring() {

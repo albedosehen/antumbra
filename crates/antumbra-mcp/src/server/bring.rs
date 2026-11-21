@@ -55,6 +55,11 @@ pub(super) struct BringFilter {
     /// looks like it holds a key, a token or a password.
     #[serde(default)]
     pub(super) include_held: bool,
+    /// Only undecided memories that lie nearer what you shared before than
+    /// what you did not, the nearest first. Nothing is suggested until you
+    /// have shared a few; what is held back is never suggested.
+    #[serde(default)]
+    pub(super) suggested: bool,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -93,6 +98,10 @@ pub(super) struct CandidateView {
     /// Why it is held back, when it is: `housekeeping` or `looks_secret`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) held: Option<String>,
+    /// With `suggested`: how much nearer what you shared than what you did
+    /// not it lies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) leaning: Option<f32>,
     /// With `full`: how sure its writer was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) confidence: Option<f32>,
@@ -116,6 +125,10 @@ pub(super) struct BringCandidatesOut {
     pub(super) states: BTreeMap<String, usize>,
     /// How many undecided memories are held back.
     pub(super) held_back: usize,
+    /// With `suggested`, when nothing can be suggested yet: how many more
+    /// memories must be shared first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) suggests_after: Option<usize>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -254,6 +267,59 @@ impl McpServer {
     }
 }
 
+/// What is suggested among a person's memories: each suggested memory's id
+/// with its leaning, or how many more must be shared before anything is.
+enum Suggested {
+    After(usize),
+    These(HashMap<String, f32>),
+}
+
+impl McpServer {
+    /// Learn from what the caller decided and say which undecided memories
+    /// lie with what they shared. This is the one read here that takes the
+    /// memories' vectors, so it is made only when suggestions are asked for.
+    async fn suggested(&self, mine: &[Mine]) -> Result<Suggested, ErrorData> {
+        let shared = mine
+            .iter()
+            .filter(|m| matches!(m.choice, Some(Choice::Chosen | Choice::Brought)))
+            .count();
+        if shared < elevation::LEARNS_FROM {
+            return Ok(Suggested::After(elevation::LEARNS_FROM - shared));
+        }
+        let vectors: HashMap<String, Vec<f32>> = memory::list(&self.store, &self.tenant)
+            .await
+            .map_err(err)?
+            .into_iter()
+            .filter_map(|m| Some((m.id.as_str().to_string(), m.embedding?)))
+            .collect();
+        let of = |want: &dyn Fn(&Mine) -> bool| -> Vec<&[f32]> {
+            mine.iter()
+                .filter(|m| want(m))
+                .filter_map(|m| vectors.get(m.memory.id.as_str()).map(Vec::as_slice))
+                .collect()
+        };
+        let open = |m: &Mine| m.choice.is_none() && m.held.is_none();
+        let Some(taste) = elevation::Taste::learn(
+            &of(&|m| matches!(m.choice, Some(Choice::Chosen | Choice::Brought))),
+            &of(&|m| matches!(m.choice, Some(Choice::Declined | Choice::Never))),
+            &of(&open),
+        ) else {
+            // Shared, but without vectors to learn from.
+            return Ok(Suggested::These(HashMap::new()));
+        };
+        Ok(Suggested::These(
+            mine.iter()
+                .filter(|m| open(m))
+                .filter_map(|m| {
+                    let id = m.memory.id.as_str();
+                    let leaning = taste.leaning(vectors.get(id)?);
+                    (leaning > elevation::SUGGEST_ABOVE).then(|| (id.to_string(), leaning))
+                })
+                .collect(),
+        ))
+    }
+}
+
 /// A facet's values, the commonest first, then by name.
 fn commonest(counts: HashMap<String, usize>) -> Vec<(String, usize)> {
     let mut values: Vec<(String, usize)> = counts.into_iter().collect();
@@ -266,7 +332,7 @@ fn commonest(counts: HashMap<String, usize>) -> Vec<(String, usize)> {
 impl McpServer {
     /// Your own memories, narrowed, for choosing which to bring to a workspace.
     #[tool(
-        description = "List your own memories for choosing which to bring to a workspace you joined: narrowed by `filter` (network, compartment, repo, host, month, contains, used, state, include_held), newest first, a page at a time, with how many match, the values each way of narrowing has, and how many are in each state. The hooks' own memories and text that looks like a secret are held back unless `include_held`. Read-only; nothing is sent anywhere."
+        description = "List your own memories for choosing which to bring to a workspace you joined: narrowed by `filter` (network, compartment, repo, host, month, contains, used, state, include_held, suggested), newest first, a page at a time, with how many match, the values each way of narrowing has, and how many are in each state. The hooks' own memories and text that looks like a secret are held back unless `include_held`. With `suggested`, only undecided memories that lie nearer what you shared before than what you did not, nearest first. Read-only; nothing is sent anywhere."
     )]
     pub(super) async fn bring_candidates(
         &self,
@@ -286,10 +352,27 @@ impl McpServer {
             .filter(|m| m.choice.is_none() && m.held.is_some())
             .count();
 
-        let in_state: Vec<&Mine> = mine
+        let (suggested, suggests_after) = match filter.suggested {
+            false => (None, None),
+            true => match self.suggested(&mine).await? {
+                Suggested::After(more) => (Some(HashMap::new()), Some(more)),
+                Suggested::These(these) => (Some(these), None),
+            },
+        };
+        let leaning = |m: &Mine| suggested.as_ref()?.get(m.memory.id.as_str()).copied();
+        let mut in_state: Vec<&Mine> = mine
             .iter()
             .filter(|m| m.in_state(&state, filter.include_held))
+            .filter(|m| suggested.is_none() || leaning(m).is_some())
             .collect();
+        if suggested.is_some() {
+            // The nearest what was shared first.
+            in_state.sort_by(|a, b| {
+                leaning(b)
+                    .partial_cmp(&leaning(a))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
         let mut counts: BTreeMap<&str, HashMap<String, usize>> = BTreeMap::new();
         for m in &in_state {
             let mut count = |facet: &'static str, value: Option<&str>| {
@@ -329,6 +412,7 @@ impl McpServer {
                     reinforcement: m.memory.reinforcement,
                     state: m.choice.map(|c| c.as_str().to_string()),
                     held: m.held.map(|h| h.as_str().to_string()),
+                    leaning: leaning(m),
                     confidence: p.full.then_some(m.memory.confidence),
                     volatile: p.full.then_some(m.memory.volatile),
                     provenance: GitProvenance::from_evidence(&m.memory.evidence)
@@ -346,6 +430,7 @@ impl McpServer {
                 .collect(),
             states,
             held_back,
+            suggests_after,
         }))
     }
 
@@ -377,8 +462,21 @@ impl McpServer {
             None => {
                 let filter = p.filter.clone().unwrap_or_default();
                 let state = wanted(&filter)?;
+                // Everything suggested, when that is what the filter asks.
+                let suggested = match filter.suggested {
+                    false => None,
+                    true => match self.suggested(&mine).await? {
+                        Suggested::After(_) => Some(HashMap::new()),
+                        Suggested::These(these) => Some(these),
+                    },
+                };
                 mine.iter()
                     .filter(|m| m.in_state(&state, filter.include_held) && m.matches(&filter))
+                    .filter(|m| {
+                        suggested
+                            .as_ref()
+                            .is_none_or(|s| s.contains_key(m.memory.id.as_str()))
+                    })
                     .map(|m| m.memory.id.as_str().to_string())
                     .collect()
             }
