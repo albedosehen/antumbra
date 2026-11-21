@@ -9,7 +9,7 @@
 
 use super::*;
 use antumbra_core::behavior::{self, normalize_scope, State, Status, EVERYWHERE};
-use antumbra_core::ports::Serve;
+use antumbra_core::ports::{Readiness, Serve};
 use antumbra_core::{cosine_similarity, Expert};
 
 #[tool_router(router = answer_router, vis = "pub(super)")]
@@ -101,6 +101,31 @@ impl McpServer {
                 ),
             )));
         };
+        // A server that has never answered through an expert may not have its
+        // base yet, and fetching it (about 3 GB) outlasts any caller, as can
+        // loading it on a slow CPU. Both happen in the background and the task
+        // escalates until the base is ready.
+        match serve.prepare() {
+            Readiness::Ready => {}
+            Readiness::NotYet(why) => {
+                return Ok(Json(escalation(
+                    Some(served_by.as_str().to_string()),
+                    format!(
+                        "{why}; escalate, and this server answers through experts once it is \
+                         ready"
+                    ),
+                )));
+            }
+            Readiness::Failed(why) => {
+                return Ok(Json(escalation(
+                    Some(served_by.as_str().to_string()),
+                    format!(
+                        "this server could not fetch its base model ({why}); escalate, and the \
+                         next answer tries again"
+                    ),
+                )));
+            }
+        }
         let mut blend: Vec<ExpertId> = top.into_iter().collect();
         blend.extend(standing.iter().cloned());
         // The workspace is who asks: where the engine answers several

@@ -287,6 +287,67 @@ async fn population_and_stats_report_the_workspace() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// An engine that says how it serves, as a model-backed one does.
+struct Described;
+#[async_trait::async_trait]
+impl antumbra_core::ports::Serve for Described {
+    async fn act(
+        &self,
+        _req: ActRequest,
+    ) -> antumbra_core::Result<antumbra_core::ports::ActOutput> {
+        Err(antumbra_core::AntumbraError::other(
+            "asking how an engine serves answers nothing",
+        ))
+    }
+    fn serving(&self) -> Option<antumbra_core::ports::Serving> {
+        Some(antumbra_core::ports::Serving {
+            device: "cpu".into(),
+            base: "q6_k".into(),
+            kernels: Some("avx2".into()),
+        })
+    }
+}
+
+/// `workspace_stats` says whether the server answers through experts and on
+/// what, which is what `antumbra setup check` reads: `null` with no engine (a
+/// build without the model backend) and for an engine that does not read a
+/// model, and the engine's own account where it gives one.
+#[tokio::test]
+async fn stats_say_how_the_server_serves_experts() -> anyhow::Result<()> {
+    let none = server().await?;
+    let via = none
+        .call_tool("workspace_stats", serde_json::json!({}))
+        .await?;
+    assert_eq!(via.get("serving"), Some(&serde_json::Value::Null));
+
+    let build = |serve: Arc<dyn antumbra_core::ports::Serve>| async move {
+        anyhow::Ok(McpServer::new(
+            mem_store().await?,
+            Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "h".into(),
+            CompartmentId::new("comp:test:default"),
+            Some(serve),
+        ))
+    };
+    let echo = build(Arc::new(antumbra_core::testing::EchoServe)).await?;
+    let via = echo
+        .call_tool("workspace_stats", serde_json::json!({}))
+        .await?;
+    assert_eq!(via.get("serving"), Some(&serde_json::Value::Null));
+
+    let described = build(Arc::new(Described)).await?;
+    let via = described
+        .call_tool("workspace_stats", serde_json::json!({}))
+        .await?;
+    assert_eq!(
+        via.get("serving"),
+        Some(&serde_json::json!({ "device": "cpu", "base": "q6_k", "kernels": "avx2" }))
+    );
+    Ok(())
+}
+
 /// A page of `list_memories` is the most recently updated first, says
 /// whether another follows, and continues from `offset`, over the REST
 /// dispatcher as over JSON-RPC.
@@ -796,6 +857,84 @@ async fn answer_escalates_when_the_routed_expert_is_not_servable() -> anyhow::Re
     );
     assert_eq!(out.0.expert_id.as_deref(), Some("expert:adder"));
     assert!(out.0.answer.is_empty());
+    Ok(())
+}
+
+// An engine still fetching its base, as a server is before its first answer
+// through an expert, or one whose fetch failed. `act` is never reached: it
+// answers with an error, which `answer` would pass on.
+struct NotYet(antumbra_core::ports::Readiness);
+#[async_trait::async_trait]
+impl antumbra_core::ports::Serve for NotYet {
+    async fn act(
+        &self,
+        _req: ActRequest,
+    ) -> antumbra_core::Result<antumbra_core::ports::ActOutput> {
+        Err(antumbra_core::AntumbraError::other(
+            "act must not be called before the base is here",
+        ))
+    }
+    fn prepare(&self) -> antumbra_core::ports::Readiness {
+        self.0.clone()
+    }
+}
+
+/// A first answer on a server whose base has never been downloaded escalates
+/// at once and says the base is coming, where it used to wait out a 3 GB
+/// download and time out; a failed download says why.
+#[tokio::test]
+async fn answer_escalates_while_the_base_is_fetched() -> anyhow::Result<()> {
+    use antumbra_core::ports::Readiness;
+    for (readiness, said) in [
+        (
+            Readiness::NotYet("the base model (Qwen/x) is downloading to this server".into()),
+            "the base model (Qwen/x) is downloading to this server; escalate",
+        ),
+        (
+            Readiness::NotYet("the base model (Qwen/x) is loading on this server".into()),
+            "is loading on this server; escalate",
+        ),
+        (
+            Readiness::Failed("no network".into()),
+            "could not fetch its base model (no network)",
+        ),
+    ] {
+        let store = mem_store().await?;
+        router::save(
+            &store,
+            &LearnedRouter {
+                weights: vec![1.0; EMBED_DIM],
+                experts: vec![RouterExpert {
+                    id: ExpertId::new("expert:adder"),
+                    centroid: vec![0.0; EMBED_DIM],
+                }],
+                temperature: 0.1,
+                floor: -1.0,
+            },
+        )
+        .await?;
+        let s = McpServer::new(
+            store,
+            Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "h".into(),
+            CompartmentId::new("comp:test:default"),
+            Some(Arc::new(NotYet(readiness))),
+        );
+        let out = s
+            .answer(Parameters(AnswerParams {
+                task: "add two numbers".into(),
+                repo: None,
+                standing_only: false,
+            }))
+            .await?;
+        assert!(out.0.escalate, "a base not yet here escalates");
+        assert_eq!(out.0.expert_id.as_deref(), Some("expert:adder"));
+        assert!(out.0.answer.is_empty());
+        let note = out.0.note.unwrap_or_default();
+        assert!(note.contains(said), "{note}");
+    }
     Ok(())
 }
 

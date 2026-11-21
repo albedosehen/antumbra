@@ -73,6 +73,30 @@ pub struct MultiAdapterServe {
     /// Where requests go: the thread that owns the resident model, started
     /// by the first of them.
     worker: std::sync::Mutex<Option<std::sync::mpsc::Sender<engine::Job>>>,
+    /// Whether the base's files are on this machine and loaded, and the
+    /// download and the load that make them so ([`Serve::prepare`]).
+    fetch: std::sync::Arc<std::sync::Mutex<Fetch>>,
+    /// Set by the serving thread once the base is resident, however it came
+    /// to be loaded: ahead of the first answer, or by one.
+    base_loaded: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Where the base is, as [`Serve::prepare`] found it.
+#[cfg(feature = "models")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Fetch {
+    /// Not asked yet.
+    Unknown,
+    /// In the Hugging Face cache.
+    Here,
+    /// Being downloaded on a thread of its own.
+    Fetching,
+    /// Being loaded by the serving thread, started to load it before any
+    /// answer asks it to.
+    Loading,
+    /// The download or the load failed, for this reason; the next ask starts
+    /// again.
+    Failed(String),
 }
 
 /// How many adapters one request may blend: a routed expert and the user's
@@ -131,6 +155,9 @@ struct Resident {
     loaded: Option<engine::BlendKey>,
     runtime: tokio::runtime::Runtime,
     seed: u64,
+    /// Raised once [`Resident::model`] has loaded the base, for
+    /// [`Serve::prepare`] to read from another thread.
+    base_loaded: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[cfg(feature = "models")]
@@ -147,6 +174,8 @@ impl Resident {
             ))?;
             self.model = Some(model);
             self.loaded = None;
+            self.base_loaded
+                .store(true, std::sync::atomic::Ordering::Release);
         }
         match self.model.as_mut() {
             Some(model) => Ok(model),
@@ -225,6 +254,8 @@ fn serve_requests(
     base_model: String,
     config: antumbra_train::RaftConfig,
     jobs: std::sync::mpsc::Receiver<engine::Job>,
+    base_loaded: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    warm: Option<std::sync::Arc<std::sync::Mutex<Fetch>>>,
 ) {
     let runtime = match tokio::runtime::Builder::new_current_thread().build() {
         Ok(runtime) => runtime,
@@ -246,7 +277,30 @@ fn serve_requests(
         loaded: None,
         runtime,
         seed: 0,
+        base_loaded,
     };
+    // Started to load the base before any answer asks for it: requests that
+    // arrive meanwhile wait in the channel, and a load that fails is said to
+    // the next ask, whose answer then loads it itself.
+    if let Some(fetch) = warm {
+        let base = resident.base_model.clone();
+        eprintln!("antumbra-serve: loading the base model {base} ahead of the first answer");
+        let failed = match resident.model() {
+            Ok(_) => {
+                eprintln!("antumbra-serve: the base model {base} is loaded");
+                None
+            }
+            Err(e) => {
+                eprintln!("antumbra-serve: loading the base model {base} failed: {e}");
+                Some(Fetch::Failed(format!("the base model did not load: {e}")))
+            }
+        };
+        if let Some(failed) = failed {
+            *fetch
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = failed;
+        }
+    }
     let mut schedule = engine::Schedule::new(KEPT_BLENDS, WAITING_AT_MOST);
     loop {
         if schedule.idle() {
@@ -272,7 +326,30 @@ impl MultiAdapterServe {
             config,
             registry: std::sync::RwLock::new(std::collections::HashMap::new()),
             worker: std::sync::Mutex::new(None),
+            fetch: std::sync::Arc::new(std::sync::Mutex::new(Fetch::Unknown)),
+            base_loaded: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// Start the thread that owns the resident model, loading the base on it
+    /// before it takes any request when `warm`.
+    fn spawn_worker(
+        &self,
+        warm: bool,
+    ) -> antumbra_core::Result<std::sync::mpsc::Sender<engine::Job>> {
+        let (jobs, taken) = std::sync::mpsc::channel();
+        let (base_model, config) = (self.base_model.clone(), self.config.clone());
+        let base_loaded = self.base_loaded.clone();
+        let warm = warm.then(|| self.fetch.clone());
+        std::thread::Builder::new()
+            .name("antumbra-serve".into())
+            .spawn(move || serve_requests(base_model, config, taken, base_loaded, warm))
+            .map_err(|e| {
+                antumbra_core::AntumbraError::other(format!(
+                    "the serving thread did not start: {e}"
+                ))
+            })?;
+        Ok(jobs)
     }
 
     /// Map an expert to its adapter file (its `artifact_uri`). Routes naming this
@@ -367,6 +444,108 @@ impl Serve for MultiAdapterServe {
         true
     }
 
+    /// Where the base is read and in what form, from the configuration alone:
+    /// asked before the first answer, it says what that answer will be served
+    /// on without loading anything.
+    fn serving(&self) -> Option<antumbra_core::ports::Serving> {
+        let quant = self.config.serve_quant;
+        let device = antumbra_train::device::serving_device(quant.is_some());
+        let kernels = (device == "cpu").then(|| match quant {
+            Some(_) => antumbra_train::device::cpu_kernels().to_string(),
+            // A dense base on a CPU is multiplied by candle's kernels.
+            None => "none".to_string(),
+        });
+        Some(antumbra_core::ports::Serving {
+            device: device.to_string(),
+            base: quant.map_or("dense", ServeQuant::name).to_string(),
+            kernels,
+        })
+    }
+
+    /// Ready once the base is loaded. Asked the first time, the cache is
+    /// looked at without the network; where the base's files are not there,
+    /// they are downloaded on a thread of their own. Once they are here, the
+    /// serving thread is started to load the base before any answer asks it
+    /// to. Every ask until then says which of the two is under way, and a
+    /// failed download or load is said once and started again by the next
+    /// ask. Where a serving thread is already running, started by an answer
+    /// served some other way, that answer loads the base as it always did.
+    fn prepare(&self) -> antumbra_core::ports::Readiness {
+        use antumbra_core::ports::Readiness;
+        let base = &self.base_model;
+        let downloading = || {
+            Readiness::NotYet(format!(
+                "the base model ({base}) is downloading to this server"
+            ))
+        };
+        let loading =
+            || Readiness::NotYet(format!("the base model ({base}) is loading on this server"));
+        if self.base_loaded.load(std::sync::atomic::Ordering::Acquire) {
+            return Readiness::Ready;
+        }
+        let mut state = self
+            .fetch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match &*state {
+            Fetch::Fetching => return downloading(),
+            Fetch::Loading => return loading(),
+            Fetch::Failed(why) => {
+                let said = Readiness::Failed(why.clone());
+                *state = Fetch::Unknown;
+                return said;
+            }
+            Fetch::Here => {}
+            Fetch::Unknown => {
+                if antumbra_train::models::base_is_cached(base) {
+                    *state = Fetch::Here;
+                }
+            }
+        }
+        if *state == Fetch::Here {
+            let mut worker = self
+                .worker
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if worker.is_some() {
+                return Readiness::Ready;
+            }
+            return match self.spawn_worker(true) {
+                Ok(jobs) => {
+                    *worker = Some(jobs);
+                    *state = Fetch::Loading;
+                    loading()
+                }
+                Err(e) => Readiness::Failed(e.to_string()),
+            };
+        }
+        *state = Fetch::Fetching;
+        let (base, fetch) = (self.base_model.clone(), self.fetch.clone());
+        let started = std::thread::Builder::new()
+            .name("antumbra-fetch".into())
+            .spawn(move || {
+                eprintln!("antumbra-serve: fetching the base model {base}, about 3 GB, for the first answer through an expert");
+                let done = match antumbra_train::models::fetch_base(&base) {
+                    Ok(()) => {
+                        eprintln!("antumbra-serve: the base model {base} is fetched");
+                        Fetch::Here
+                    }
+                    Err(e) => {
+                        eprintln!("antumbra-serve: fetching the base model {base} failed: {e}");
+                        Fetch::Failed(e.to_string())
+                    }
+                };
+                *fetch.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = done;
+            });
+        match started {
+            Ok(_) => downloading(),
+            Err(e) => {
+                *state = Fetch::Unknown;
+                Readiness::Failed(format!("the download thread did not start: {e}"))
+            }
+        }
+    }
+
     async fn act(
         &self,
         req: antumbra_core::ports::ActRequest,
@@ -424,14 +603,7 @@ impl Serve for MultiAdapterServe {
             };
             if let Some(job) = job {
                 // No thread yet, or the one there has gone: start one.
-                let (jobs, taken) = std::sync::mpsc::channel();
-                let (base_model, config) = (self.base_model.clone(), self.config.clone());
-                std::thread::Builder::new()
-                    .name("antumbra-serve".into())
-                    .spawn(move || serve_requests(base_model, config, taken))
-                    .map_err(|e| {
-                        AntumbraError::other(format!("the serving thread did not start: {e}"))
-                    })?;
+                let jobs = self.spawn_worker(false)?;
                 if jobs.send(job).is_err() {
                     return Err(AntumbraError::other(
                         "the serving thread ended before it took a request",

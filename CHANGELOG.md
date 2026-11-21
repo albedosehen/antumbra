@@ -2,6 +2,10 @@
 
 ## 0.5.2 - unreleased
 
+### Before you upgrade
+
+- **The published server image serves experts, and writes to two volumes** ([#574](https://github.com/albedosehen/antumbra/pull/574)). `ghcr.io/albedosehen/antumbra-mcp` is built with the `models` feature, and the stack mounts the named volumes `antumbra-weights` on `/weights` (the Hugging Face cache, `HF_HOME`) and `antumbra-adapters` on `/adapters`; the root stays read-only. Run `antumbra setup local` again to move to the image and create them. A server with no expert to serve never fetches the base; one that has an expert fetches it, about 3 GB, the first time it is asked to answer through one. `--build-arg FEATURES=` builds the light server.
+
 ### Accounts
 
 - **A followed link is answered with a page** ([#568](https://github.com/albedosehen/antumbra/pull/568), [#570](https://github.com/albedosehen/antumbra/pull/570)). A browser that follows a link from the control plane is told what happened and what to run next, in a page that runs no script, loads nothing and is not kept; a signup's token is shown on it once. A program is still answered with JSON. It was written for 0.5.1 and merged after that release was cut.
@@ -9,6 +13,21 @@
 ### Setup
 
 - **An agent whose command is there and does not run is not taken as installed** ([#571](https://github.com/albedosehen/antumbra/pull/571)). `antumbra setup` with no `--agent` connected Codex wherever a `codex` program was on the PATH. Where that program was another tool's wrapper that fails for want of the real one, setup wrote Codex's hooks, could not register the server, recorded Codex among the machine's agents, and `antumbra setup check` then failed on a machine that had passed it. An agent's command now has to answer `--version`; one that does not is said in a line and left out. `antumbra join --connect` leaves such a Codex out too. A machine 0.5.1 left that way is put right by running setup again with `--agent` naming the agents it has.
+
+### Serving
+
+- **A standard install serves experts on the CPU** ([#572](https://github.com/albedosehen/antumbra/issues/572), [#574](https://github.com/albedosehen/antumbra/pull/574)). The image `antumbra setup local` pulls was built without the model backend, so on a standard install `answer` escalated whatever experts the store held. It is built with `--features models` now, which adds `g++` to the build for the tokenizer's C++ crate; `--build-arg JOBS=8` holds cargo to eight compilers on a host whose memory the model backend's crates fill at one per core. On one laptop (an 8-core i9-11900H with AVX-512, Docker Desktop's VM at 16 GB), the image built in 18 minutes at eight jobs and is 261 MB. Given the `everywhere` standing expert trained on another machine, it answered one task each of three behaviors that expert learned (held out at 1.00, 1.00 and 0.67 against the base's 0.00), and each answer passed its behavior's own check: the base read through Antumbra's AVX-512 kernels from Q6_K, in 1.3 to 1.5 seconds an answer, the container at 2.8 GiB.
+- **A first answer waits out neither the base's download nor its load** ([#574](https://github.com/albedosehen/antumbra/pull/574)). On a server that had never fetched its base, the first `answer` through an expert downloaded the 3 GB inside the request and was cut at the two-minute request limit (408), and the first answer once it was fetched loaded and quantized the base inside the request: 62 seconds on that laptop. `Serve::prepare` now looks for the base in the Hugging Face cache without the network. Where it is not there, it is fetched on a thread of its own; once it is, the serving thread is started to load it before any answer asks it to. Until it is loaded, `answer` escalates at once and says which of the two is under way, and a failed fetch or load is said once and started again by the next answer. On that laptop, with an empty weights volume, the first answer escalated in 0.23 seconds and the fetch took five to nine minutes over two runs; with the base already cached, the first answer escalated in 0.46 seconds while the base loaded, in 76 seconds from a cache bind-mounted from Windows, and the answers after it were served in 1.4 and 0.4 seconds.
+- **The server says how it serves** ([#574](https://github.com/albedosehen/antumbra/pull/574)). `workspace_stats` returns `serving`: the device the base is read on (`cpu`, `cuda` or `metal`, the device a model would be loaded on and not only the build's backend), the base's form, and on a CPU the kernels a token goes through (`avx-512`, `avx2`, `neon`, or `none` for candle's). It is `null` on a build without the model backend. `antumbra setup check` says it in a line, and says plainly when the server does not serve experts.
+- **The image is checked where it is built** ([#574](https://github.com/albedosehen/antumbra/pull/574)). `scripts/image-smoke.sh <image>` starts an image on an in-memory store with a fixed embedder, so no database and no model download, and requires that `workspace_stats` says it serves on the CPU from a quantized base through Antumbra's kernels and that `answer` escalates with no expert. The image workflow runs it after the build of `main`, and on each platform's own runner before a release's version tag names the image, so an image that cannot serve is never the one setup pulls.
+
+### Known limits
+
+- **A server with no GPU trains nothing.** It serves the experts a GPU server trained, fetched from that server (`--expert-source`) or read back from the archive. Fetching an adapter between two machines has still been run in tests only. The end-to-end run above was given the adapter by hand.
+- **The installed CLI is still the light build:** `antumbra ask` and `antumbra serve` need a `models` build from the source.
+- **Only the amd64 image has served an expert.** The arm64 image is built by the release workflow and smoke-checked there on an Arm runner, which serves no expert.
+- **Nothing fetches or loads the base ahead of the first answer that asks for it.** While it downloads, and then loads, every `answer` through an expert escalates and the agent does the task; the load starts with the first answer after the download ends.
+- **A serving thread started by an answer served some other way** (an `act` that did not ask `prepare` first) still loads the base inside that answer, as before.
 
 ## 0.5.1 - 2026-11-21
 

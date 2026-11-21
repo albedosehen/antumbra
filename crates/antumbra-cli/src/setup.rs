@@ -1720,6 +1720,48 @@ fn stamp_of(said: &Value, host: &str) -> Stamp {
     }
 }
 
+/// Whether the server answers through experts, from its answer to
+/// `workspace_stats` (#572).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Serving {
+    /// It does, and this is how, as the check says it.
+    Serves(String),
+    /// It says it cannot: a build without the model backend, whose every
+    /// `answer` goes back to the agent.
+    DoesNot,
+    /// It does not say, being older than the field.
+    Unsaid,
+}
+
+fn serving_of(stats: &Value) -> Serving {
+    let serving = match stats.get("serving") {
+        None => return Serving::Unsaid,
+        Some(Value::Null) => return Serving::DoesNot,
+        Some(serving) => serving,
+    };
+    let on = match serving["device"].as_str().unwrap_or("?") {
+        "cpu" => "the CPU".to_string(),
+        "cuda" => "a CUDA GPU".to_string(),
+        "metal" => "the Metal GPU".to_string(),
+        other => other.to_string(),
+    };
+    let base = match serving["base"].as_str().unwrap_or("?") {
+        "dense" => "a dense base".to_string(),
+        form => format!("a {} base", form.to_uppercase()),
+    };
+    let through = match serving["kernels"].as_str() {
+        Some("none") => {
+            ", through candle's kernels (this CPU has none of Antumbra's, so it decodes a fraction as fast)"
+                .to_string()
+        }
+        Some(kernels) => format!(", through Antumbra's {} kernels", kernels.to_uppercase()),
+        None => String::new(),
+    };
+    Serving::Serves(format!(
+        "the server serves experts on {on} from {base}{through}"
+    ))
+}
+
 /// The name setup registers the MCP server under with Claude Code.
 const CLAUDE_SERVER: &str = "antumbra";
 
@@ -2222,6 +2264,27 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
                     || e.to_string().contains("not in this server's tool profile") =>
             {
                 println!("  ! the server does not list devices yet (it is older than device registration)")
+            }
+            Err(e) => fail(format!("{e}"), "check the server".into()),
+        }
+        // Whether `answer` can be served here or always goes back to the
+        // agent. Neither answer is a fault: a server built without the model
+        // backend is a memory server, and one that is older does not say.
+        match call_tool_from(&url, &token, Some(&host), "workspace_stats", json!({})) {
+            Ok(stats) => match serving_of(&stats) {
+                Serving::Serves(line) => ok(line),
+                Serving::DoesNot => println!(
+                    "  ! the server does not serve experts: it was built without the model backend, so `answer` goes back to your agent"
+                ),
+                Serving::Unsaid => println!(
+                    "  ! the server does not say whether it serves experts (it is older than 0.5.2)"
+                ),
+            },
+            Err(e)
+                if e.to_string().contains("unknown tool")
+                    || e.to_string().contains("not in this server's tool profile") =>
+            {
+                println!("  ! the server's tool profile leaves out workspace_stats, so whether it serves experts is not known")
             }
             Err(e) => fail(format!("{e}"), "check the server".into()),
         }
@@ -2787,6 +2850,31 @@ mod tests {
             stamp_of(&json!({ "devices": [] }), "windows"),
             Stamp::Unsaid
         );
+        Ok(())
+    }
+
+    #[test]
+    fn the_check_reads_whether_the_server_serves_experts() -> anyhow::Result<()> {
+        assert_eq!(
+            serving_of(&json!({ "memories": 3, "serving": {
+                "device": "cpu", "base": "q6_k", "kernels": "avx2" } })),
+            Serving::Serves(
+                "the server serves experts on the CPU from a Q6_K base, through Antumbra's AVX2 kernels"
+                    .into()
+            )
+        );
+        // A CPU with none of Antumbra's kernels is said, since it is slow.
+        assert!(matches!(
+            serving_of(&json!({ "serving": { "device": "cpu", "base": "q8_0", "kernels": "none" } })),
+            Serving::Serves(line) if line.contains("candle's kernels")
+        ));
+        // Off the CPU there are no kernels to name.
+        assert_eq!(
+            serving_of(&json!({ "serving": { "device": "cuda", "base": "dense" } })),
+            Serving::Serves("the server serves experts on a CUDA GPU from a dense base".into())
+        );
+        assert_eq!(serving_of(&json!({ "serving": null })), Serving::DoesNot);
+        assert_eq!(serving_of(&json!({ "memories": 3 })), Serving::Unsaid);
         Ok(())
     }
 

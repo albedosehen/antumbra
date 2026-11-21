@@ -56,6 +56,10 @@ jobs:
             ${{ env.IMAGE }}:${{ github.sha }}
             ${{ env.IMAGE }}:latest
             ${{ steps.tags.outputs.main }}
+      # The image as setup runs it: it starts, says it serves experts on the
+      # CPU through Antumbra's kernels, and escalates with none to serve.
+      - name: Smoke-check the image
+        run: bash scripts/image-smoke.sh "${IMAGE}:${GITHUB_SHA}"
 
   # One platform per runner, pushed by digest only. `release` names them.
   release-platform:
@@ -92,6 +96,10 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.licenses=Elastic-2.0
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      # On each platform's own runner, before the version tag names it: an
+      # image that cannot serve experts never becomes the one setup pulls.
+      - name: Smoke-check the image
+        run: bash scripts/image-smoke.sh "${IMAGE}@${{ steps.build.outputs.digest }}"
       - name: Keep the digest
         run: |
           mkdir -p "$RUNNER_TEMP/digests"

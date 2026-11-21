@@ -95,6 +95,44 @@ pub fn device_for(served_quantized: bool) -> candle_core::Result<Device> {
     best_device()
 }
 
+/// The device [`device_for`] would load a served model on, by name (`cpu`,
+/// `cuda` or `metal`), without opening it: for a server to say where it
+/// answers before the base has been loaded.
+pub fn serving_device(served_quantized: bool) -> &'static str {
+    if served_quantized && serves_from_cpu() {
+        return "cpu";
+    }
+    if cfg!(feature = "cuda") {
+        "cuda"
+    } else if cfg!(feature = "metal") {
+        "metal"
+    } else {
+        "cpu"
+    }
+}
+
+/// The kernels a token served from a quantized base goes through on this CPU,
+/// by name: `avx-512` or `avx2` on x86-64 and `neon` on aarch64 for
+/// Antumbra's own ([`tiles`]), and `none` where the CPU has none of them and
+/// candle's kernels are used, which decodes a fraction as fast.
+pub fn cpu_kernels() -> &'static str {
+    if !tiles() {
+        return "none";
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        if wide_tiles() {
+            "avx-512"
+        } else {
+            "avx2"
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        "neon"
+    }
+}
+
 /// The best available device: CUDA/Metal when the feature is on, else CPU.
 pub fn best_device() -> candle_core::Result<Device> {
     #[cfg(feature = "cuda")]
@@ -107,4 +145,39 @@ pub fn best_device() -> candle_core::Result<Device> {
     }
     #[allow(unreachable_code)]
     Ok(Device::Cpu)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn name_of(device: &Device) -> &'static str {
+        match device {
+            Device::Cpu => "cpu",
+            Device::Cuda(_) => "cuda",
+            Device::Metal(_) => "metal",
+        }
+    }
+
+    /// The name a server reports is the device it would load on, for a base
+    /// served quantized and for one served dense.
+    #[test]
+    fn the_serving_device_named_is_the_one_a_model_is_loaded_on() -> candle_core::Result<()> {
+        for quantized in [true, false] {
+            assert_eq!(
+                serving_device(quantized),
+                name_of(&device_for(quantized)?),
+                "served quantized: {quantized}"
+            );
+        }
+        Ok(())
+    }
+
+    /// Kernels are named exactly where the CPU tiles, and only then.
+    #[test]
+    fn the_kernels_named_follow_what_the_cpu_tiles() {
+        let kernels = cpu_kernels();
+        assert_eq!(kernels == "none", !tiles(), "kernels {kernels}");
+        assert!(["avx-512", "avx2", "neon", "none"].contains(&kernels));
+    }
 }
