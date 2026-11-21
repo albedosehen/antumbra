@@ -1578,3 +1578,233 @@ async fn memories_are_chosen_to_bring_by_filter_and_by_hand() -> anyhow::Result<
     );
     Ok(())
 }
+
+/// A compartment is its owner's until it is offered to the workspace and an
+/// admin accepts it; then every member reads it, by the engine's own rule.
+/// The pool is its owner's to open, an offer its offerer's to take back, and
+/// leaving the pool takes what one offered out of everyone's reach.
+#[tokio::test]
+async fn an_offered_compartment_is_the_workspaces_once_an_admin_accepts_it() -> anyhow::Result<()> {
+    let st = state().await?;
+    let (ada, bodil, cyrus) = (
+        token("ws:pool", "user:ada")?,
+        token("ws:pool", "user:bodil")?,
+        token("ws:pool", "user:cyrus")?,
+    );
+    let send = |tok: &str, method: &str, path: &str, body: serde_json::Value| {
+        let (st, tok, method, path) = (
+            st.clone(),
+            tok.to_string(),
+            method.to_string(),
+            path.to_string(),
+        );
+        async move {
+            let req = Request::builder()
+                .method(method.as_str())
+                .uri(path)
+                .header(header::AUTHORIZATION, format!("Bearer {tok}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))?;
+            let res = router(st).oneshot(req).await?;
+            let status = res.status();
+            let text = body_text(res).await?;
+            anyhow::Ok((
+                status,
+                serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default(),
+            ))
+        }
+    };
+    let tool = |tok: &str, tool: &str, arguments: serde_json::Value| {
+        let send = send(
+            tok,
+            "POST",
+            "/mcp/call",
+            serde_json::json!({ "tool": tool, "arguments": arguments }),
+        );
+        async move {
+            let (status, out) = send.await?;
+            anyhow::ensure!(status == StatusCode::OK, "{status}: {out}");
+            anyhow::Ok(out)
+        }
+    };
+    let none = serde_json::Value::Null;
+    let reads = |tok: &str| {
+        let listed = tool(tok, "list_memories", serde_json::json!({}));
+        async move { anyhow::Ok(listed.await?.to_string().contains("nullable first")) }
+    };
+    // Ada is first in, so the owner; the others are members.
+    send(&ada, "GET", "/members", none.clone()).await?;
+    let brought = tool(
+        &bodil,
+        "create_compartment",
+        serde_json::json!({ "name": "brought from laptop" }),
+    )
+    .await?;
+    let comp = brought["id"].as_str().unwrap_or_default().to_string();
+    tool(&bodil, "store_memory", serde_json::json!({ "content": "Migrations run in two steps: nullable first.", "network": "bank", "compartment": comp })).await?;
+    anyhow::ensure!(
+        reads(&bodil).await? && !reads(&ada).await? && !reads(&cyrus).await?,
+        "it is hers alone to begin with"
+    );
+
+    // The pool is the owner's to open.
+    let (status, _) = send(
+        &bodil,
+        "POST",
+        "/pool/open",
+        serde_json::json!({ "on": true }),
+    )
+    .await?;
+    anyhow::ensure!(
+        status == StatusCode::FORBIDDEN,
+        "a member opened the pool: {status}"
+    );
+    let (status, _) = send(
+        &ada,
+        "POST",
+        "/pool/open",
+        serde_json::json!({ "on": true }),
+    )
+    .await?;
+    anyhow::ensure!(status == StatusCode::OK);
+
+    // Only its owner offers a compartment; offering joins the pool.
+    let (status, _) = send(
+        &cyrus,
+        "POST",
+        "/pool/offer",
+        serde_json::json!({ "compartment": comp }),
+    )
+    .await?;
+    anyhow::ensure!(
+        status == StatusCode::FORBIDDEN,
+        "another member offered it: {status}"
+    );
+    let (status, offered) = send(
+        &bodil,
+        "POST",
+        "/pool/offer",
+        serde_json::json!({ "compartment": comp }),
+    )
+    .await?;
+    anyhow::ensure!(
+        status == StatusCode::OK && offered["status"] == "offered",
+        "{status} {offered}"
+    );
+    let key = offered["key"].clone();
+    let (_, again) = send(
+        &bodil,
+        "POST",
+        "/pool/offer",
+        serde_json::json!({ "compartment": comp }),
+    )
+    .await?;
+    anyhow::ensure!(again["key"] == key, "one compartment is one offer");
+    anyhow::ensure!(
+        !reads(&ada).await?,
+        "an offer nobody accepted is read by nobody new"
+    );
+
+    // Who decides sees what they would be accepting; another member does not.
+    let (_, pool) = send(&ada, "GET", "/pool", none.clone()).await?;
+    let seen = &pool["offers"][0];
+    anyhow::ensure!(
+        pool["open"] == true && seen["name"] == "brought from laptop" && seen["memories"] == 1,
+        "{pool}"
+    );
+    anyhow::ensure!(
+        seen["preview"][0]
+            .as_str()
+            .is_some_and(|p| p.contains("nullable first")),
+        "{seen}"
+    );
+    let (_, others) = send(&cyrus, "GET", "/pool", none.clone()).await?;
+    anyhow::ensure!(
+        others["offers"][0]["preview"]
+            .as_array()
+            .is_some_and(Vec::is_empty),
+        "{others}"
+    );
+    anyhow::ensure!(others["joined"] == false, "{others}");
+
+    // A member accepts nothing; an owner does, and then everyone reads it.
+    let accept = serde_json::json!({ "key": key, "accept": true });
+    let (status, _) = send(&cyrus, "POST", "/pool/rule", accept.clone()).await?;
+    anyhow::ensure!(
+        status == StatusCode::FORBIDDEN,
+        "a member accepted an offer: {status}"
+    );
+    let (status, _) = send(&ada, "POST", "/pool/rule", accept).await?;
+    anyhow::ensure!(status == StatusCode::OK);
+    anyhow::ensure!(
+        reads(&ada).await? && reads(&cyrus).await?,
+        "accepted, and not read by the workspace"
+    );
+    let recalled = tool(
+        &cyrus,
+        "recall_memories",
+        serde_json::json!({ "query": "how do migrations run", "top_k": 5 }),
+    )
+    .await?;
+    anyhow::ensure!(
+        recalled.to_string().contains("nullable first"),
+        "accepted, and not recalled: {recalled}"
+    );
+    // Another workspace reads none of it.
+    anyhow::ensure!(!reads(&token("ws:elsewhere", "user:dee")?).await?);
+
+    // Leaving the pool takes it back out of the others' reach; rejoining returns it.
+    send(
+        &bodil,
+        "POST",
+        "/pool/join",
+        serde_json::json!({ "on": false }),
+    )
+    .await?;
+    anyhow::ensure!(
+        reads(&bodil).await? && !reads(&ada).await?,
+        "she left, and it is still read"
+    );
+    send(
+        &bodil,
+        "POST",
+        "/pool/join",
+        serde_json::json!({ "on": true }),
+    )
+    .await?;
+    anyhow::ensure!(reads(&ada).await?);
+    // Closing the pool does the same for everything in it.
+    send(
+        &ada,
+        "POST",
+        "/pool/open",
+        serde_json::json!({ "on": false }),
+    )
+    .await?;
+    anyhow::ensure!(
+        !reads(&cyrus).await?,
+        "the pool is closed, and it is still read"
+    );
+    send(
+        &ada,
+        "POST",
+        "/pool/open",
+        serde_json::json!({ "on": true }),
+    )
+    .await?;
+
+    // An offer is its offerer's to take back, and nobody else's.
+    let named = serde_json::json!({ "key": key });
+    let (status, _) = send(&ada, "POST", "/pool/withdraw", named.clone()).await?;
+    anyhow::ensure!(
+        status == StatusCode::FORBIDDEN,
+        "someone else withdrew her offer: {status}"
+    );
+    let (status, _) = send(&bodil, "POST", "/pool/withdraw", named).await?;
+    anyhow::ensure!(status == StatusCode::OK);
+    anyhow::ensure!(
+        reads(&bodil).await? && !reads(&ada).await?,
+        "withdrawn, and still read"
+    );
+    Ok(())
+}

@@ -568,6 +568,11 @@ function renderAttention() {
   if (handoffs) {
     items.push(attentionItem(`${numbers.format(handoffs)} ${handoffs === 1 ? "handoff" : "handoffs"} waiting`, "Read and mark done", "#/devices"));
   }
+  const offered = state.shell.offered || 0;
+  const rulesPool = state.shell.pool && ["owner", "admin"].includes(state.shell.pool.your_role);
+  if (offered && rulesPool) {
+    items.push(attentionItem(`${numbers.format(offered)} offered to the workspace`, "Accept or decline", "#/knowledge"));
+  }
   const asking = state.shell.asking || 0;
   if (asking) {
     items.push(attentionItem(`${numbers.format(asking)} asking to join`, "Approve or refuse", "#/members"));
@@ -584,6 +589,7 @@ function shellLoads() {
   return [
     section(byId("devices"), loadDevices),
     section(byId("members"), loadMembers),
+    section(byId("pool-offers"), loadPool),
     // The member's name and image (manage.js), drawn after the identity the
     // token gave, which it then stands in for. A server from before profiles
     // does not have the tool: the initials stay.
