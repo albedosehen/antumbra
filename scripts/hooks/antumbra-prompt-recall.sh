@@ -77,32 +77,87 @@ BODY="$(jq -nc --arg q "$QUERY" --arg repo "$REPO" --arg branch "$BRANCH" --arg 
 # The bearer reaches curl as a config line on its stdin, never as an argument:
 # an argument sits in the process list, readable by every other user of the
 # machine, for as long as the request lasts.
-RESP="$(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" | curl -s -X POST "$URL/mcp/call" \
-    -H 'Content-Type: application/json' \
-    --config - \
-    --max-time "$BUDGET" --data-binary "$BODY" 2>/dev/null || true)"
-[ -z "$RESP" ] && exit 0
+ask() { # <url> <token> <file the answer goes to>
+    printf 'header = "Authorization: Bearer %s"\n' "$2" | curl -s -X POST "$1/mcp/call" \
+        -H 'Content-Type: application/json' \
+        --config - \
+        --max-time "$BUDGET" --data-binary "$BODY" > "$3" 2>/dev/null || true
+}
 
 # recall_memories answers {"memories":[...]} at the TOP LEVEL -- there is no
 # `result` wrapper. Both shapes are accepted so a future wrapper would not
 # silently empty this.
-LINES="$(printf '%s' "$RESP" | jq -r '
-    (.memories // .result.memories // [])
-    | map(select(.content != null))
-    | map("- (" + (.network // "unknown") + ")"
-          + (if .scope then " [" + .scope + "]" else "" end) + " "
-          + (.id // "?") + ": "
-          + (if (.content | length) > 900
-             then (.content[0:900] + " [truncated]")
-             else .content end))
-    | join("\n\n")' 2>/dev/null || true)"
-[ -z "$LINES" ] && exit 0
+lines_of() { # <file an answer is in>
+    [ -s "$1" ] || return 0
+    jq -r '
+        (.memories // .result.memories // [])
+        | map(select(.content != null))
+        | map("- (" + (.network // "unknown") + ")"
+              + (if .scope then " [" + .scope + "]" else "" end) + " "
+              + (.id // "?") + ": "
+              + (if (.content | length) > 900
+                 then (.content[0:900] + " [truncated]")
+                 else .content end))
+        | join("\n\n")' "$1" 2>/dev/null || true
+}
 
-CONTEXT="## Antumbra recall (top matches for this prompt)
+ANSWERS="$(mktemp -d 2>/dev/null)" || exit 0
+trap 'rm -rf "$ANSWERS"' EXIT
+
+# This machine's own store, and beside it each workspace it has joined
+# (`antumbra join`): a workspace is read with the token kept for it, and what
+# it holds is said apart from what is yours. All are asked at once, inside the
+# one budget. ANTUMBRA_RECALL_WORKSPACES=0 asks only your own.
+ask "$URL" "$TOKEN" "$ANSWERS/own" &
+JOINED=0
+if [ "${ANTUMBRA_RECALL_WORKSPACES:-1}" != "0" ]; then
+    for WS in "${ANTUMBRA_WORKSPACES_DIR:-$HOME/.antumbra/workspaces}"/*/workspace.json; do
+        [ -r "$WS" ] || continue
+        WS_URL="$(jq -r '.url // ""' "$WS" 2>/dev/null || true)"
+        WS_NAME="$(jq -r '.workspace // ""' "$WS" 2>/dev/null || true)"
+        WS_TOKEN_FILE="$(jq -r '.token_file // ""' "$WS" 2>/dev/null || true)"
+        # One this machine already points at is the first ask, not a second.
+        [ -n "$WS_URL" ] && [ "${WS_URL%/}" != "${URL%/}" ] && [ -r "$WS_TOKEN_FILE" ] || continue
+        WS_TOKEN="$(tr -d '\r\n' < "$WS_TOKEN_FILE" 2>/dev/null || true)"
+        [ -n "$WS_TOKEN" ] || continue
+        JOINED=$((JOINED + 1))
+        # A few, so a machine in many workspaces still answers inside the budget.
+        [ "$JOINED" -gt 3 ] && { JOINED=3; break; }
+        printf '%s' "$WS_NAME" > "$ANSWERS/ws$JOINED.name"
+        ask "${WS_URL%/}" "$WS_TOKEN" "$ANSWERS/ws$JOINED" &
+    done
+fi
+wait
+
+LINES="$(lines_of "$ANSWERS/own")"
+SHARED=""
+N=1
+while [ "$N" -le "$JOINED" ]; do
+    FOUND="$(lines_of "$ANSWERS/ws$N")"
+    if [ -n "$FOUND" ]; then
+        SHARED="$SHARED
+
+## From the workspace $(cat "$ANSWERS/ws$N.name" 2>/dev/null) (your team's, not your own store)
+
+$FOUND"
+    fi
+    N=$((N + 1))
+done
+[ -z "$LINES" ] && [ -z "$SHARED" ] && exit 0
+
+CONTEXT=""
+if [ -n "$LINES" ]; then
+    CONTEXT="## Antumbra recall (top matches for this prompt)
 
 $LINES
 
 These are automatic; call recall_memories for a deeper or differently-phrased search. The system notes which of these your answer draws on; when your own work proves one right or wrong, you may reinforce_memory or penalize_memory it by id."
+fi
+if [ -n "$SHARED" ]; then
+    CONTEXT="$CONTEXT$SHARED
+
+A workspace's memories are read here and are not in your own store: your tools reach your own, so do not reinforce or penalize these by id."
+fi
 
 jq -nc --arg ctx "$CONTEXT" \
     '{ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: $ctx } }'
