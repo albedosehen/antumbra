@@ -45,7 +45,11 @@ pub(super) fn routes() -> Router<Arc<HttpState>> {
 ///
 /// The token is read off the request before anything is awaited: a request's
 /// body is not something a task may hold a reference to across a wait.
-async fn caller(state: &HttpState, token: Option<String>, route: &str) -> Result<Access, Response> {
+pub(super) async fn caller(
+    state: &HttpState,
+    token: Option<String>,
+    route: &str,
+) -> Result<Access, Response> {
     let access = state.access_of(token.as_deref()).map_err(|e| {
         eprintln!("antumbra-mcp: rejected {route}: {e}");
         unauthorized()
@@ -60,7 +64,7 @@ async fn caller(state: &HttpState, token: Option<String>, route: &str) -> Result
 }
 
 /// The request's `Authorization` header, as it was sent.
-fn token_of(req: &Request<Body>) -> Option<String> {
+pub(super) fn token_of(req: &Request<Body>) -> Option<String> {
     req.headers()
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
@@ -68,7 +72,7 @@ fn token_of(req: &Request<Body>) -> Option<String> {
 }
 
 /// Run `work` on the owner's connection ([`super::console`] does the same).
-async fn as_owner<T, F, Fut>(state: &HttpState, work: F) -> antumbra_core::Result<T>
+pub(super) async fn as_owner<T, F, Fut>(state: &HttpState, work: F) -> antumbra_core::Result<T>
 where
     F: FnOnce(antumbra_store::Store) -> Fut,
     Fut: std::future::Future<Output = antumbra_core::Result<T>>,
@@ -80,7 +84,7 @@ where
 
 /// A refusal by the rules is the caller's to read (403); anything else is the
 /// server's fault and is said on stderr.
-fn failed(route: &str, e: &antumbra_core::AntumbraError) -> Response {
+pub(super) fn failed(route: &str, e: &antumbra_core::AntumbraError) -> Response {
     if e.is_rejection() {
         return (
             StatusCode::FORBIDDEN,

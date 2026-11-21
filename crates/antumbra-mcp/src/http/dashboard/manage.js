@@ -297,6 +297,169 @@ const ROLES = ["owner", "admin", "member"];
 async function loadMembers() {
   state.shell.members = await consoleFetch("members");
   drawMembers();
+  await loadJoining();
+}
+
+// Letting people in: the codes an admin makes, and the requests made with
+// them. Read and drawn only for an admin or an owner; the server refuses
+// anyone else whatever the page offers.
+
+function letsPeopleIn() {
+  const role = state.shell.members && state.shell.members.your_role;
+  return role === "owner" || role === "admin";
+}
+
+async function loadJoining() {
+  const admin = letsPeopleIn();
+  byId("asking-section").hidden = true;
+  byId("codes-section").hidden = !admin;
+  state.shell.asking = 0;
+  if (!admin) {
+    showCounts();
+    return;
+  }
+  const [asked, codes] = await Promise.all([consoleFetch("join/requests"), consoleFetch("join/codes")]);
+  drawAsking(asked);
+  drawCodes(codes);
+  showCounts();
+  renderAttention();
+}
+
+/** Decide a request and redraw the page from the server. */
+async function decideRequest(key, approve, reason, status, name) {
+  const done = approve ? `${name} may join: their token is theirs to collect, once.` : `${name} was refused.`;
+  const ok = await attempt(status, approve ? "Approving" : "Refusing", done, () =>
+    consoleFetch("join/decide", { key, approve, reason }),
+  );
+  if (!ok) return;
+  try {
+    await section(byId("members"), loadMembers);
+  } catch (error) {
+    if (error instanceof SignedOut) signOut(REFUSED);
+  }
+  byId("members-status").textContent = done;
+}
+
+function drawAsking(out) {
+  const all = out.requests ?? [];
+  const waiting = all.filter((r) => r.standing === "pending");
+  // Approved and not yet collected is worth seeing; the rest is history.
+  const coming = all.filter((r) => r.standing === "approved");
+  state.shell.asking = waiting.length;
+  byId("asking-section").hidden = !(waiting.length || coming.length);
+  byId("asking-summary").textContent = [
+    waiting.length ? `${numbers.format(waiting.length)} waiting for you` : "",
+    coming.length ? `${numbers.format(coming.length)} approved, not yet collected` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  byId("asking").replaceChildren(
+    ...[...waiting, ...coming].map((r) => {
+      const name = r.display || r.handle;
+      const status = h("span", { class: "small muted", role: "status" });
+      const head = h(
+        "p",
+        { class: "asking-who" },
+        h("span", { class: "avatar", "aria-hidden": "true" }, initialsOf(name)),
+        h("span", { class: "member-text" }, h("span", {}, name), h("span", { class: "small muted mono" }, r.user)),
+      );
+      const meta = h(
+        "p",
+        { class: "meta small muted" },
+        r.host ? h("span", {}, `from ${r.host}`) : null,
+        h("span", { title: r.created_at }, `asked ${ago(r.created_at)}`),
+        h("span", { title: r.expires_at }, `expires ${dates.format(new Date(r.expires_at))}`),
+      );
+      const note = r.note ? h("p", { class: "content" }, r.note) : null;
+      if (r.standing !== "pending") {
+        return h("li", { class: "ask" }, head, note, meta, h("p", { class: "small muted" }, `Approved by ${bareName(r.decided_by || "")}; waiting for them to collect their token.`));
+      }
+      const reason = h("input", { type: "text", maxlength: "500", placeholder: "A word to them (optional)", "aria-label": `A word to ${name}` });
+      const approve = h("button", { type: "button" }, "Approve");
+      const refuse = h("button", { type: "button", class: "quiet" }, "Refuse");
+      const act = (yes) => async () => {
+        approve.disabled = true;
+        refuse.disabled = true;
+        await decideRequest(r.key, yes, reason.value.trim() || null, status, name);
+        approve.disabled = false;
+        refuse.disabled = false;
+      };
+      approve.addEventListener("click", act(true));
+      refuse.addEventListener("click", act(false));
+      return h("li", { class: "ask" }, head, note, meta, h("div", { class: "write-row" }, reason, approve, refuse, status));
+    }),
+  );
+}
+
+function drawCodes(out) {
+  const codes = (out.codes ?? []).filter((c) => c.admits);
+  byId("code-new").querySelector("button[type=submit]").disabled = !out.can_sign;
+  if (!out.can_sign) {
+    byId("code-new").querySelector("[role=status]").textContent =
+      "This server verifies tokens with a public key and cannot sign one for a new member.";
+  }
+  byId("codes").replaceChildren(
+    ...(codes.length
+      ? codes.map((c) => {
+          const revoke = h("button", { type: "button", class: "link danger" }, "Revoke");
+          revoke.addEventListener("click", async () => {
+            revoke.disabled = true;
+            const status = byId("code-new").querySelector("[role=status]");
+            const ok = await attempt(status, "Revoking", "Revoked: no one else can ask with it.", () =>
+              consoleFetch("join/codes/revoke", { key: c.key }),
+            );
+            if (ok) drawCodes(await consoleFetch("join/codes"));
+          });
+          return h(
+            "li",
+            {},
+            h(
+              "span",
+              { class: "member-text" },
+              h("span", {}, c.label || "A code", c.needs_approval ? "" : " (lets in without asking)"),
+              h(
+                "span",
+                { class: "small muted" },
+                `${numbers.format(c.uses_left)} ${c.uses_left === 1 ? "use" : "uses"} left · until ${dates.format(new Date(c.expires_at))} · made by ${bareName(c.created_by)}`,
+              ),
+            ),
+            revoke,
+          );
+        })
+      : [h("li", { class: "empty" }, "No code is out. Make one above and send it to the person you want to let in.")]),
+  );
+}
+
+function startJoining() {
+  const form = byId("code-new");
+  const status = form.querySelector("[role=status]");
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!form.reportValidity()) return;
+    const values = Object.fromEntries(new FormData(form));
+    let made = null;
+    const ok = await attempt(status, "Making it", "Made.", async () => {
+      made = await consoleFetch("join/codes", {
+        label: values.label.trim() || null,
+        uses: Number(values.uses),
+        days: Number(values.days),
+        needs_approval: !byId("code-open").checked,
+      });
+    });
+    if (!ok || !made) return;
+    byId("code-shown").textContent = made.code;
+    byId("code-made").hidden = false;
+    byId("code-label").value = "";
+    drawCodes(await consoleFetch("join/codes"));
+  });
+  byId("code-copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(byId("code-shown").textContent);
+      status.textContent = "Copied.";
+    } catch {
+      status.textContent = "Select the code and copy it by hand.";
+    }
+  });
 }
 
 /** A member's picture or initials, as the sidebar draws the signed-in one. */
@@ -402,6 +565,7 @@ function drawMembers() {
 
 function startManage() {
   startProfile();
+  startJoining();
   window.addEventListener("hashchange", showAgentWhenAsked);
 
   wireForm(
@@ -454,6 +618,13 @@ function clearManage() {
   byId("members-summary").textContent = "";
   byId("members-status").textContent = "";
   byId("removed-section").hidden = true;
+  for (const id of ["asking", "codes"]) byId(id).replaceChildren();
+  byId("asking-section").hidden = true;
+  byId("codes-section").hidden = true;
+  byId("code-made").hidden = true;
+  byId("code-shown").textContent = "";
+  byId("code-new").reset();
+  byId("code-new").querySelector("[role=status]").textContent = "";
   for (const id of ["skills-summary", "rules-summary"]) byId(id).textContent = "";
   for (const id of ["memory-new", "handoff-new", "document-new", "compartment-new", "profile"]) {
     byId(id).reset();

@@ -21,6 +21,7 @@ pub mod genesis;
 pub mod grow;
 pub mod hive;
 pub mod invite;
+pub mod join;
 pub mod lifecycle;
 pub mod loop_control;
 pub mod magic_use;

@@ -548,6 +548,7 @@ function showCounts() {
   };
   badge("nav-proposed", proposedCount());
   badge("nav-handoffs", state.shell.handoffs);
+  badge("nav-asking", state.shell.asking || 0);
 }
 
 function attentionItem(text, detail, href) {
@@ -565,6 +566,10 @@ function renderAttention() {
   const handoffs = state.shell.handoffs;
   if (handoffs) {
     items.push(attentionItem(`${numbers.format(handoffs)} ${handoffs === 1 ? "handoff" : "handoffs"} waiting`, "Read and mark done", "#/devices"));
+  }
+  const asking = state.shell.asking || 0;
+  if (asking) {
+    items.push(attentionItem(`${numbers.format(asking)} asking to join`, "Approve or refuse", "#/members"));
   }
   const left = state.shell.tokenDaysLeft;
   if (left !== null && left <= EXPIRING_DAYS) {

@@ -433,6 +433,15 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // to a tenant and must never be tenant-readable).
         table_schema(tables::INVITE_CODE).with_mode(TableMode::Schemaless),
         table_schema(tables::ACCOUNT).with_mode(TableMode::Schemaless),
+        // Join codes and join requests: a way into a workspace, and the digest
+        // of the secret a request's token is collected with. Owner-only like
+        // the two above; the server reads them for an admin it has checked.
+        table_schema(tables::JOIN_CODE)
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([index("join_code_tenant_idx", ["tenant"])]),
+        table_schema(tables::JOIN_REQUEST)
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([index("join_request_tenant_idx", ["tenant"])]),
         // Consumed magic-link ids (keyed by `jti`): the single-use ledger a
         // verify writes through, with an `expires_at` matching the link's so
         // rows self-expire out at the next sweep. Owner-only, like the rest of

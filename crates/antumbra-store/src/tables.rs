@@ -25,6 +25,10 @@ pub const HIVE: &str = "hive";
 pub const HIVE_MEMBERSHIP: &str = "hive_membership";
 pub const HIVE_OFFER: &str = "hive_offer";
 pub const INVITE_CODE: &str = "invite_code";
+/// A way into a workspace, made by one of its admins.
+pub const JOIN_CODE: &str = "join_code";
+/// One person's request to join one workspace.
+pub const JOIN_REQUEST: &str = "join_request";
 pub const LEARNED_ROUTER: &str = "learned_router";
 pub const LOOP_CONTROL: &str = "loop_control";
 pub const MAGIC_LINK_USE: &str = "magic_link_use";
@@ -69,6 +73,8 @@ pub const ALL: &[&str] = &[
     HIVE_MEMBERSHIP,
     HIVE_OFFER,
     INVITE_CODE,
+    JOIN_CODE,
+    JOIN_REQUEST,
     LEARNED_ROUTER,
     LOOP_CONTROL,
     MAGIC_LINK_USE,
@@ -110,6 +116,6 @@ mod tests {
         let mut named: Vec<String> = ALL.iter().map(|n| (*n).to_owned()).collect();
         named.sort();
         assert_eq!(named, defined);
-        assert_eq!(ALL.len(), 42, "every name is distinct");
+        assert_eq!(ALL.len(), 44, "every name is distinct");
     }
 }
