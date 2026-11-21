@@ -18,6 +18,7 @@ use clap::Parser;
 
 mod agents;
 mod behave;
+mod bring;
 mod capture_args;
 mod claude;
 mod cli;
@@ -164,6 +165,10 @@ async fn run() -> anyhow::Result<()> {
         Command::Setup { mode } => {
             // Files, Docker, HTTP and prompts: all blocking, so off the runtime.
             tokio::task::spawn_blocking(move || setup::run(mode)).await??;
+        }
+        Command::Bring(args) => {
+            // Files and HTTP: blocking, so off the runtime.
+            tokio::task::spawn_blocking(move || bring::run(args)).await??;
         }
         Command::Join(args) => {
             // Files and HTTP: blocking, so off the runtime.
