@@ -1611,6 +1611,33 @@ async fn a_server_with_a_control_plane_makes_codes_and_sends_askers_there() -> a
         listed["can_sign"] == true && listed["control_plane"] == "https://accounts.example",
         "{listed}"
     );
+    // And it says so to whoever asks where, as a server that signs says that.
+    let (status, at) = with(
+        through.clone(),
+        None,
+        "POST",
+        "/join/where",
+        serde_json::json!({}),
+    )
+    .await?;
+    anyhow::ensure!(
+        status == StatusCode::OK
+            && at["signs_here"] == false
+            && at["control_plane"] == "https://accounts.example",
+        "{status} {at}"
+    );
+    let (_, at) = with(
+        open.clone(),
+        None,
+        "POST",
+        "/join/where",
+        serde_json::json!({}),
+    )
+    .await?;
+    anyhow::ensure!(
+        at["signs_here"] == true && at["control_plane"].is_null(),
+        "{at}"
+    );
     for (path, body) in [("/join/request", asking), ("/join/collect", collecting)] {
         let (status, why) = with(through.clone(), None, "POST", path, body).await?;
         anyhow::ensure!(

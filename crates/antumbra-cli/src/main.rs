@@ -34,6 +34,7 @@ mod gitfacts;
 mod join;
 #[cfg(feature = "models")]
 mod learned_gate;
+mod login;
 mod machine;
 mod models;
 mod ops;
@@ -173,6 +174,9 @@ async fn run() -> anyhow::Result<()> {
         Command::Join(args) => {
             // Files and HTTP: blocking, so off the runtime.
             tokio::task::spawn_blocking(move || join::run(args)).await??;
+        }
+        Command::Login(args) => {
+            tokio::task::spawn_blocking(move || login::run(args)).await??;
         }
         Command::Claude { action } => {
             // Blocking work (files, git, an HTTP surface): keep it off the runtime.

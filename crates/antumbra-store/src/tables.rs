@@ -35,6 +35,7 @@ pub const JOIN_REQUEST: &str = "join_request";
 pub const LEARNED_ROUTER: &str = "learned_router";
 pub const LOOP_CONTROL: &str = "loop_control";
 pub const MAGIC_LINK_USE: &str = "magic_link_use";
+pub const SIGNIN: &str = "signin";
 pub const MANIFEST_SET: &str = "manifest_set";
 pub const MEMORY: &str = "memory";
 pub const MEMORY_CHUNK: &str = "memory_chunk";
@@ -82,6 +83,7 @@ pub const ALL: &[&str] = &[
     LEARNED_ROUTER,
     LOOP_CONTROL,
     MAGIC_LINK_USE,
+    SIGNIN,
     MANIFEST_SET,
     MEMBER_PROFILE,
     MEMORY_CHOICE,
@@ -121,6 +123,6 @@ mod tests {
         let mut named: Vec<String> = ALL.iter().map(|n| (*n).to_owned()).collect();
         named.sort();
         assert_eq!(named, defined);
-        assert_eq!(ALL.len(), 46, "every name is distinct");
+        assert_eq!(ALL.len(), 47, "every name is distinct");
     }
 }
