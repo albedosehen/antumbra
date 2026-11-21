@@ -226,6 +226,9 @@ async function loadProfile() {
   const out = await call("profiles", { images: true });
   const mine = (out.profiles ?? []).find((p) => p.user === out.you) || {};
   state.shell.profile = mine;
+  // Every member's, for where one member is drawn for another.
+  state.shell.profiles = new Map((out.profiles ?? []).map((p) => [p.user, p]));
+  drawMembers();
   showSideProfile(mine.display || "", mine.image || "");
   byId("profile-display").value = mine.display || "";
   byId("profile-image-clear").hidden = !mine.image;
@@ -285,6 +288,118 @@ function startProfile() {
   });
 }
 
+// Members: who is in the workspace, as what, and the changes its owners and
+// admins make. The server decides each by the caller's role; the page offers
+// what that role may do, and says what the server answered.
+
+const ROLES = ["owner", "admin", "member"];
+
+async function loadMembers() {
+  state.shell.members = await consoleFetch("members");
+  drawMembers();
+}
+
+/** A member's picture or initials, as the sidebar draws the signed-in one. */
+function memberAvatar(user, display) {
+  const held = state.shell.profiles && state.shell.profiles.get(user);
+  const node = h("span", { class: "avatar", "aria-hidden": "true" });
+  if (held && held.image) {
+    const picture = document.createElement("img");
+    picture.alt = "";
+    picture.src = held.image;
+    node.append(picture);
+    node.classList.add("has-image");
+  } else {
+    node.textContent = initialsOf(display || user);
+  }
+  return node;
+}
+
+/** Ask the server for a change to the members and redraw from its answer. */
+async function changeMember(path, body, doing, done) {
+  const status = byId("members-status");
+  const ok = await attempt(status, doing, done, () => consoleFetch(path, body));
+  try {
+    await section(byId("members"), loadMembers);
+  } catch (error) {
+    if (error instanceof SignedOut) signOut(REFUSED);
+  }
+  // The redraw is of the list; what was said stays said.
+  if (ok) status.textContent = done;
+}
+
+function drawMembers() {
+  const out = state.shell.members;
+  if (!out) return;
+  const yours = out.your_role;
+  const members = out.members ?? [];
+  const owners = members.filter((m) => m.role === "owner").length;
+  byId("members-summary").textContent = `${numbers.format(members.length)} ${members.length === 1 ? "member" : "members"} · you are ${yours === "owner" ? "an owner" : yours === "admin" ? "an admin" : "a member"}`;
+  byId("members").replaceChildren(
+    ...members.map((m) => {
+      const name = m.display || bareName(m.user);
+      const you = m.user === out.you;
+      const lastOwner = m.role === "owner" && owners === 1;
+      // Only an owner changes roles; the last owner's is not offered.
+      let role = h("span", { class: "tag" }, m.role);
+      if (yours === "owner" && !lastOwner) {
+        role = h(
+          "select",
+          { class: "role", "aria-label": `Role of ${name}` },
+          ...ROLES.map((r) => h("option", { value: r, selected: r === m.role ? "" : null }, r)),
+        );
+        role.addEventListener("change", () =>
+          changeMember("members/role", { user: m.user, role: role.value }, "Changing", `${name} is now ${role.value === "member" ? "a member" : `an ${role.value}`}.`),
+        );
+      }
+      // An admin removes members; an owner removes anyone but the last owner.
+      const removable = !lastOwner && (yours === "owner" || (yours === "admin" && m.role === "member"));
+      let act = null;
+      if (removable) {
+        act = h("button", { type: "button", class: "link danger" }, you ? "Leave" : "Remove");
+        let asked = false;
+        act.addEventListener("click", () => {
+          if (!asked) {
+            asked = true;
+            act.textContent = you ? "Leave this workspace?" : `Remove ${name}?`;
+            return;
+          }
+          act.disabled = true;
+          changeMember("members/remove", { user: m.user }, "Removing", `${name} was removed. Their token is refused from now.`);
+        });
+      }
+      return h(
+        "tr",
+        {},
+        h(
+          "th",
+          { scope: "row" },
+          h(
+            "span",
+            { class: "member" },
+            memberAvatar(m.user, m.display),
+            h("span", { class: "member-text" }, h("span", {}, name, you ? " (you)" : ""), h("span", { class: "small muted mono" }, m.user)),
+          ),
+        ),
+        h("td", {}, role),
+        h("td", { title: m.joined_at || "" }, m.joined_at ? dates.format(new Date(m.joined_at)) : "before roles"),
+        h("td", { class: "num" }, act),
+      );
+    }),
+  );
+  const removed = out.removed ?? [];
+  byId("removed-section").hidden = !removed.length;
+  byId("removed").replaceChildren(
+    ...removed.map((user) => {
+      const back = h("button", { type: "button", class: "link" }, "Let back in");
+      back.addEventListener("click", () =>
+        changeMember("members/readmit", { user }, "Letting them in", `${bareName(user)} is a member again.`),
+      );
+      return h("li", {}, h("span", { class: "mono" }, user), back);
+    }),
+  );
+}
+
 function startManage() {
   startProfile();
   window.addEventListener("hashchange", showAgentWhenAsked);
@@ -335,7 +450,10 @@ function startManage() {
 function clearManage() {
   showSideProfile("", "");
   byId("profile-image-clear").hidden = true;
-  for (const id of ["skills", "rules"]) byId(id).replaceChildren();
+  for (const id of ["skills", "rules", "members", "removed"]) byId(id).replaceChildren();
+  byId("members-summary").textContent = "";
+  byId("members-status").textContent = "";
+  byId("removed-section").hidden = true;
   for (const id of ["skills-summary", "rules-summary"]) byId(id).textContent = "";
   for (const id of ["memory-new", "handoff-new", "document-new", "compartment-new", "profile"]) {
     byId(id).reset();

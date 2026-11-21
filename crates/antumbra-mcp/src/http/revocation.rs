@@ -41,6 +41,16 @@ pub(super) async fn refresh(state: &HttpState) -> anyhow::Result<usize> {
         let _guard = state.auth.lock().await;
         state.store.signin_root().await?;
         revocation::sweep_expired(&state.store, now).await?;
+        // The members removed from their workspaces ride the same read:
+        // their tokens are refused as a revoked one is.
+        let removed = antumbra_store::repo::principal::removed(&state.store).await?;
+        *state
+            .removed
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = removed
+            .into_iter()
+            .map(|(tenant, user)| (tenant.as_str().to_string(), user.as_str().to_string()))
+            .collect();
         revocation::live(&state.store, now).await?
     };
     // A poisoned lock holds a whole set: nothing writes it in two steps.

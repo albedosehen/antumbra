@@ -778,7 +778,11 @@ pub fn tenant_access() -> AccessDefinition {
     record_access(
         "tenant",
         RecordAccessConfig::new()
-            .with_signin("SELECT * FROM principal WHERE tenant = $tenant AND user = $user"),
+            // A removed member's row stays, marked, and does not sign in.
+            .with_signin(
+                "SELECT * FROM principal WHERE tenant = $tenant AND user = $user \
+                 AND (status IS NONE OR status IS NULL OR status != 'removed')",
+            ),
     )
     .with_session(format!("{}s", TENANT_SESSION.as_secs()))
 }

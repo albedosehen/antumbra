@@ -34,6 +34,7 @@ pub mod keyed;
 pub mod lifecycle;
 pub mod limit;
 pub mod manifest;
+pub mod membership;
 pub mod memory;
 pub mod orchestration;
 pub mod penumbra;
