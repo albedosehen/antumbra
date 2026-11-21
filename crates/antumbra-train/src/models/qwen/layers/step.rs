@@ -1809,7 +1809,9 @@ mod tests {
                     .map(|i| ((i + 17 * salt) as f32 * 0.53 + phase).cos() * 0.05)
                     .collect();
                 pack::as_held(&mut values, RANK, false);
-                var.set(&Tensor::from_vec(values, var.shape(), &Device::Cpu)?)?;
+                var.set(
+                    &Tensor::from_vec(values, var.shape(), &Device::Cpu)?.to_dtype(var.dtype())?,
+                )?;
             }
         }
         model.adapters_changed();
@@ -2605,8 +2607,9 @@ mod tests {
     fn as_on_a_gpu(cfg: &Config, weights: &HashMap<String, Tensor>) -> CResult<QwenLora> {
         let mut model = model_in(cfg, weights, None, true, DType::F64)?;
         model.ahead_as_tensors = true;
-        // Room for the texts these tests read.
-        model.read_within(64);
+        // Room for the texts these tests read, and its adapters joined as a
+        // generation's are when it begins.
+        model.read_within(64)?;
         Ok(model)
     }
 
@@ -2694,10 +2697,35 @@ mod tests {
         // A pass that would end past the room its generation was given is
         // refused, and a generation the rotary table does not reach the end
         // of is not read this way at all.
-        assert!(ahead.read_within(8));
+        assert!(ahead.read_within(8)?);
         assert!(ahead.step_ahead(&[next], 9).is_err());
-        assert!(!ahead.read_within(cfg.max_position_embeddings - 15));
-        assert!(ahead.read_within(cfg.max_position_embeddings - 16));
+        assert!(!ahead.read_within(cfg.max_position_embeddings - 15)?);
+        assert!(ahead.read_within(cfg.max_position_embeddings - 16)?);
+        // The adapters are joined when a generation begins. Set to others,
+        // they are let go: a pass is refused until a generation joins them
+        // again, and then reads the factors as they are now.
+        other_factors(&mut ahead, 0.7)?;
+        ahead.clear_cache();
+        assert!(
+            ahead.first_as_tensors(&tokens[..3], 0).is_err(),
+            "a pass with nothing joined for it"
+        );
+        assert!(ahead.read_within(64)?);
+        let mut others = model_in(&cfg, &weights, None, true, DType::F64)?;
+        other_factors(&mut others, 0.7)?;
+        let first = forwarded_first(&mut others, &tokens[..3], 0)?;
+        assert_eq!(ahead.first_as_tensors(&tokens[..3], 0)?, Some(first));
+        let Some(read) = ahead.step_ahead(&tokens[3..5], 3)? else {
+            bail!("two rows were not read ahead")
+        };
+        assert_eq!(
+            read,
+            [
+                forwarded_first(&mut others, &tokens[3..4], 3)?,
+                forwarded_first(&mut others, &tokens[4..5], 4)?
+            ],
+            "through the factors as they were joined last"
+        );
         // Nothing is read for no tokens, and nothing ahead on the CPU
         // unless a test says so.
         assert!(ahead.step_ahead(&[], 3)?.is_none());
@@ -2717,10 +2745,67 @@ mod tests {
         // the CPU, where the cache is plain rows, such a pass is refused.
         let mut plain = model(&cfg, &weights, None, true)?;
         plain.ahead_as_tensors = true;
-        assert!(plain.read_within(64));
+        assert!(plain.read_within(64)?);
         assert!(plain.first_as_tensors(&tokens[..3], 0)?.is_some());
         assert!(plain.step_ahead(&tokens[3..5], 3).is_err());
         Ok(())
+    }
+
+    /// A group's adapters joined give each projection what it gives alone:
+    /// the same deltas by two products for the group where each projection
+    /// takes two and a scaling. One projection joined by itself likewise,
+    /// and nothing is added where the adapters are off.
+    #[test]
+    fn joined_adapters_give_each_projection_its_own_delta() -> CResult<()> {
+        let cfg = config();
+        let weights = weights(&cfg)?;
+        let mut model = model_in(&cfg, &weights, None, true, DType::F64)?;
+        let values: Vec<f64> = (0..5 * cfg.hidden_size)
+            .map(|i| ((i as f64) * 0.37).sin())
+            .collect();
+        let x = Tensor::from_vec(values, (1, 5, cfg.hidden_size), &Device::Cpu)?;
+        let gap = |a: &Tensor, b: &Tensor| -> CResult<f64> {
+            (a - b)?.abs()?.flatten_all()?.max(0)?.to_scalar::<f64>()
+        };
+        for on in [true, false] {
+            model.set_lora(on);
+            let attn = &model.layers[0].self_attn;
+            let group = [&attn.q_proj, &attn.k_proj, &attn.v_proj];
+            let alone = LoraLinear::forward_group(&x, group)?;
+            let joined = LoraLinear::forward_joined(&x, group, &Joined::of(&group)?)?;
+            for (name, (alone, joined)) in ["q", "k", "v"].iter().zip(alone.iter().zip(&joined)) {
+                assert_eq!(alone.dims(), joined.dims(), "{name}");
+                assert!(gap(alone, joined)? < 1e-12, "{name}, adapters on: {on}");
+            }
+            let [alone] = LoraLinear::forward_group(&x, [&attn.o_proj])?;
+            let [joined] =
+                LoraLinear::forward_joined(&x, [&attn.o_proj], &Joined::of(&[&attn.o_proj])?)?;
+            assert!(gap(&alone, &joined)? < 1e-12, "o, adapters on: {on}");
+            // Off, a projection is its base and its bias, as it is alone.
+            if !on {
+                let [base] = LoraLinear::forward_group(&x, [&attn.q_proj])?;
+                assert!(gap(&base, &joined_q(&x, attn)?)? == 0.0);
+            }
+        }
+        // And the deltas are not nothing: these adapters are trained ones.
+        model.set_lora(true);
+        let attn = &model.layers[0].self_attn;
+        let [with] = LoraLinear::forward_group(&x, [&attn.q_proj])?;
+        model.set_lora(false);
+        let attn = &model.layers[0].self_attn;
+        let [without] = LoraLinear::forward_group(&x, [&attn.q_proj])?;
+        assert!(gap(&with, &without)? > 1e-6, "the adapter adds something");
+        // A group asked for other than it was joined for is refused.
+        let two = Joined::of(&[&attn.k_proj, &attn.v_proj])?;
+        assert!(LoraLinear::forward_joined(&x, [&attn.q_proj], &two).is_err());
+        Ok(())
+    }
+
+    /// q through the group of three joined, for the comparison above.
+    fn joined_q(x: &Tensor, attn: &Attention) -> CResult<Tensor> {
+        let group = [&attn.q_proj, &attn.k_proj, &attn.v_proj];
+        let [q, _, _] = LoraLinear::forward_joined(x, group, &Joined::of(&group)?)?;
+        Ok(q)
     }
 
     /// A generation read ahead as tensors is the generation a token at a
