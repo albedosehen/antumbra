@@ -74,7 +74,7 @@ pub struct JoinArgs {
 
 /// One request to a server: the path, the body, and what came back as a
 /// status and the answer's JSON. A seam, so the flow is tested with no server.
-type Send<'a> = &'a dyn Fn(&str, &str, Value) -> anyhow::Result<(u16, Value)>;
+pub(crate) type Send<'a> = &'a dyn Fn(&str, &str, Value) -> anyhow::Result<(u16, Value)>;
 
 /// What this machine keeps of a request it is waiting on.
 #[derive(Debug, Clone, PartialEq)]
@@ -132,7 +132,7 @@ fn keep_waiting(antumbra: &Path, waiting: &Waiting) -> anyhow::Result<()> {
 }
 
 /// A secret nobody could guess: 32 bytes from the system, in hex.
-fn new_secret() -> anyhow::Result<String> {
+pub(crate) fn new_secret() -> anyhow::Result<String> {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes)
         .map_err(|e| anyhow::anyhow!("no randomness from the system: {e}"))?;
@@ -140,7 +140,7 @@ fn new_secret() -> anyhow::Result<String> {
 }
 
 /// What a server said was wrong, or its status when it said nothing.
-fn said(status: u16, answer: &Value) -> String {
+pub(crate) fn said(status: u16, answer: &Value) -> String {
     answer
         .get("error")
         .and_then(Value::as_str)
@@ -149,7 +149,7 @@ fn said(status: u16, answer: &Value) -> String {
 }
 
 /// A directory name for a workspace on a server: what a path can hold of both.
-fn workspace_dir(antumbra: &Path, server: &str, workspace: &str) -> PathBuf {
+pub(crate) fn workspace_dir(antumbra: &Path, server: &str, workspace: &str) -> PathBuf {
     let plain = |s: &str| -> String {
         s.chars()
             .map(|c| {
@@ -765,20 +765,26 @@ fn run_in(antumbra: &Path, args: &JoinArgs, send: Send<'_>) -> anyhow::Result<Ve
     ask(antumbra, args, send)
 }
 
+/// One request to a server over the network, as [`Send`] takes it.
+pub(crate) fn over_the_network(
+    server: &str,
+    path: &str,
+    body: Value,
+) -> anyhow::Result<(u16, Value)> {
+    let agent = antumbra_http::agent(Duration::from_secs(30));
+    let mut response = agent
+        .post(format!("{server}{path}"))
+        .header("content-type", "application/json")
+        .send_json(body)
+        .map_err(|e| anyhow::anyhow!("could not reach {server}: {e}"))?;
+    let status = response.status().as_u16();
+    let answer = response.body_mut().read_json().unwrap_or(Value::Null);
+    Ok((status, answer))
+}
+
 pub fn run(args: JoinArgs) -> anyhow::Result<()> {
     let home = crate::machine::home().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
-    let agent = antumbra_http::agent(Duration::from_secs(30));
-    let send = |server: &str, path: &str, body: Value| -> anyhow::Result<(u16, Value)> {
-        let mut response = agent
-            .post(format!("{server}{path}"))
-            .header("content-type", "application/json")
-            .send_json(body)
-            .map_err(|e| anyhow::anyhow!("could not reach {server}: {e}"))?;
-        let status = response.status().as_u16();
-        let answer = response.body_mut().read_json().unwrap_or(Value::Null);
-        Ok((status, answer))
-    };
-    for line in run_in(&home.join(".antumbra"), &args, &send)? {
+    for line in run_in(&home.join(".antumbra"), &args, &over_the_network)? {
         println!("{line}");
     }
     Ok(())

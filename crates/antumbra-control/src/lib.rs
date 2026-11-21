@@ -18,11 +18,12 @@ use antumbra_core::join::{self as joining, Answer};
 use antumbra_core::{AntumbraError, Result, TenantId, UserId};
 use antumbra_store::repo::account::{self, Account, Membership};
 use antumbra_store::repo::join as store_join;
+use antumbra_store::repo::signin::{self, Signin};
 use antumbra_store::repo::{invite, magic_use, principal};
 use antumbra_store::Store;
 
 mod magic;
-pub use magic::{JoinAsk, MagicLink, Mailer, VerifiedLink};
+pub use magic::{JoinAsk, MagicLink, Mailer, SigninAsk, VerifiedLink};
 
 /// A verified external identity (the output of an OAuth callback or a magic-link
 /// click). `subject` is the stable, canonical login key (e.g. `github:12345` or
@@ -157,7 +158,16 @@ pub async fn login(store: &Store, identity: &VerifiedIdentity, issuer: &Issuer) 
     let account = account::get_by_subject(store, &identity.subject)
         .await?
         .ok_or_else(|| AntumbraError::rejected("no account for this identity; sign up first"))?;
-    issuer.mint(&account.tenant, &account.user)
+    // The first of its workspaces it is still in: a membership an admin
+    // removed is not signed for.
+    for m in account::memberships(store, &account).await? {
+        if principal::is_member(store, &TenantId::new(&m.tenant), &UserId::new(&m.user)).await? {
+            return issuer.mint(&m.tenant, &m.user);
+        }
+    }
+    Err(AntumbraError::rejected(
+        "this account is in no workspace any more",
+    ))
 }
 
 /// A fresh id for a request to join, made before the request is.
@@ -178,6 +188,9 @@ pub enum Followed {
         handle: String,
         standing: String,
     },
+    /// A sign-in a machine asked for: it may now collect its token. The
+    /// browser that followed the link is given none.
+    SigningIn { request: String },
 }
 
 /// Complete a clicked magic link: verify it, consume its single-use id, then
@@ -223,11 +236,145 @@ pub async fn follow(
             standing: request.standing.as_str().to_string(),
         });
     }
+    if let Some(ask) = link.signin {
+        // Only an account signs in; an address with none is told to join or
+        // sign up, as a plain login is.
+        if account::get_by_subject(store, &link.identity.subject)
+            .await?
+            .is_none()
+        {
+            return Err(AntumbraError::rejected(
+                "no account for this identity; sign up first",
+            ));
+        }
+        let now = Utc::now();
+        signin::sweep_expired(store, now).await?;
+        signin::open(
+            store,
+            &Signin {
+                key: ask.request.clone(),
+                subject: link.identity.subject.clone(),
+                secret: ask.secret_digest,
+                workspace: ask.workspace,
+                expires_at: now + chrono::Duration::minutes(SIGNIN_MINUTES),
+                collected: false,
+            },
+        )
+        .await?;
+        return Ok(Followed::SigningIn {
+            request: ask.request,
+        });
+    }
     match link.invite {
         Some(code) => signup(store, &link.identity, &code, issuer).await,
         None => login(store, &link.identity, issuer).await,
     }
     .map(Followed::Token)
+}
+
+/// How long a followed sign-in waits to be collected.
+pub const SIGNIN_MINUTES: i64 = 15;
+
+/// Send the link that, followed, lets the machine that asked collect a token.
+/// Whether the address has an account is not said here: every well-formed
+/// request sends a link, as a login's does.
+pub fn ask_to_sign_in(magic: &MagicLink<'_>, email: &str, mut ask: SigninAsk) -> Result<()> {
+    let digest = ask.secret_digest.trim().to_ascii_lowercase();
+    if digest.len() != 64 || !digest.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(AntumbraError::rejected(
+            "`secret_digest` is the SHA-256 of your secret, in hex",
+        ));
+    }
+    ask.secret_digest = digest;
+    ask.workspace = ask
+        .workspace
+        .map(|w| w.trim().to_string())
+        .filter(|w| !w.is_empty());
+    magic.request_signin(email, &ask)
+}
+
+/// How a sign-in stands, for the machine that can show its secret.
+#[derive(Debug)]
+pub enum SignedIn {
+    /// The link was not followed yet, or there is no such sign-in, or that
+    /// is not its secret: one answer for all three.
+    Unverified,
+    /// The account is in several workspaces and none was named: these.
+    /// Nothing is spent; collect again naming one.
+    Choose(Vec<Membership>),
+    /// A token for the account in one of its workspaces. Said once.
+    Token {
+        workspace: String,
+        user: String,
+        token: String,
+    },
+    /// Collected already.
+    Collected,
+    /// Followed too long ago.
+    Expired,
+}
+
+/// Collect a sign-in: a token for the account in the workspace named (here
+/// or with the link), or in its only one. A workspace the account was
+/// removed from is not among its workspaces and is not signed for.
+pub async fn collect_signin(
+    store: &Store,
+    request: &str,
+    secret: &str,
+    workspace: Option<&str>,
+    issuer: &Issuer,
+) -> Result<SignedIn> {
+    let digest = joining::digest(secret);
+    let Some(held) = signin::get(store, request.trim())
+        .await?
+        .filter(|held| held.secret == digest)
+    else {
+        return Ok(SignedIn::Unverified);
+    };
+    if held.collected {
+        return Ok(SignedIn::Collected);
+    }
+    if held.expires_at <= Utc::now() {
+        return Ok(SignedIn::Expired);
+    }
+    let Some(account) = account::get_by_subject(store, &held.subject).await? else {
+        return Ok(SignedIn::Unverified);
+    };
+    let mut still = Vec::new();
+    for m in account::memberships(store, &account).await? {
+        if principal::is_member(store, &TenantId::new(&m.tenant), &UserId::new(&m.user)).await? {
+            still.push(m);
+        }
+    }
+    let named = workspace
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        .or(held.workspace.clone());
+    let chosen = match (&named, still.len()) {
+        (_, 0) => {
+            return Err(AntumbraError::rejected(
+                "this account is in no workspace any more",
+            ))
+        }
+        (Some(named), _) => still
+            .iter()
+            .find(|m| &m.tenant == named || m.tenant.trim_start_matches("ws:") == named)
+            .cloned()
+            .ok_or_else(|| {
+                AntumbraError::rejected(format!("this account is not in the workspace `{named}`"))
+            })?,
+        (None, 1) => still[0].clone(),
+        (None, _) => return Ok(SignedIn::Choose(still)),
+    };
+    if !signin::take(store, &held.key).await? {
+        return Ok(SignedIn::Collected);
+    }
+    Ok(SignedIn::Token {
+        token: issuer.mint(&chosen.tenant, &chosen.user)?,
+        workspace: chosen.tenant,
+        user: chosen.user,
+    })
 }
 
 /// [`follow`] for a link that signs up or logs in: the bearer token. A link
@@ -242,6 +389,9 @@ pub async fn authenticate(
         Followed::Token(token) => Ok(token),
         Followed::Asked { .. } => Err(AntumbraError::rejected(
             "this link asks to join a workspace and signs no one in",
+        )),
+        Followed::SigningIn { .. } => Err(AntumbraError::rejected(
+            "this link signs in the machine that asked for it, and no one here",
         )),
     }
 }
@@ -740,6 +890,157 @@ mod tests {
             collect_join(&store, "r3", "my-secret", &issuer()).await?,
             Collected::Unverified
         ));
+        Ok(())
+    }
+
+    /// Signing in from a machine: the browser that follows the link is given
+    /// nothing, and the machine collects with its secret, once. An account
+    /// in several workspaces is asked which; one it was removed from is not
+    /// offered and is not signed for; and an address with no account cannot
+    /// sign in.
+    #[tokio::test]
+    async fn a_machine_signs_in_by_a_link_and_chooses_among_its_workspaces() -> Result<()> {
+        let store = mem_store().await?;
+        invite::mint(&store, "inv", None).await?;
+        let id = VerifiedIdentity::new("email:dana@example.com")
+            .with(Some("dana@example.com".into()), None);
+        let (own, own_user) = verify(&signup(&store, &id, "inv", &issuer()).await?)?;
+        let mailer = Capture(Mutex::new(Vec::new()));
+        let ml = MagicLink::new(b"magic", Duration::from_secs(600), "https://app", &mailer);
+        let ask = |request: &str, workspace: Option<&str>| SigninAsk {
+            request: request.into(),
+            secret_digest: joining::digest("machine-secret"),
+            workspace: workspace.map(str::to_string),
+        };
+        let follow_last = || async {
+            let link = mailer.links().last().cloned().unwrap_or_default();
+            let token = link.split("token=").nth(1).unwrap_or_default().to_string();
+            follow(&store, &ml, &token, &issuer()).await
+        };
+
+        // One workspace: no choice to make.
+        ask_to_sign_in(&ml, "dana@example.com", ask("s1", None))?;
+        assert!(matches!(
+            collect_signin(&store, "s1", "machine-secret", None, &issuer()).await?,
+            SignedIn::Unverified
+        ));
+        assert!(matches!(follow_last().await?, Followed::SigningIn { request } if request == "s1"));
+        assert!(matches!(
+            collect_signin(&store, "s1", "a-guess", None, &issuer()).await?,
+            SignedIn::Unverified
+        ));
+        let SignedIn::Token {
+            workspace,
+            user,
+            token,
+        } = collect_signin(&store, "s1", "machine-secret", None, &issuer()).await?
+        else {
+            return Err(AntumbraError::other("a followed sign-in gave no token"));
+        };
+        assert_eq!(
+            (workspace.clone(), user.clone()),
+            (own.clone(), own_user.clone())
+        );
+        assert_eq!(verify(&token)?, (own.clone(), own_user.clone()));
+        assert!(matches!(
+            collect_signin(&store, "s1", "machine-secret", None, &issuer()).await?,
+            SignedIn::Collected
+        ));
+
+        // In a second workspace too: asked which, and nothing is spent by asking.
+        let (crew, there) = (TenantId::new("ws:crew"), UserId::new("user:dana"));
+        // Ada is the workspace's only person when her role is first asked
+        // for, so its owner.
+        let ada = UserId::new("user:ada");
+        principal::provision(&store, &crew, &ada).await?;
+        principal::role_of(&store, &crew, &ada, false).await?;
+        principal::provision(&store, &crew, &there).await?;
+        account::add_membership(
+            &store,
+            &Membership {
+                subject: id.subject.clone(),
+                tenant: "ws:crew".into(),
+                user: "user:dana".into(),
+                joined_at: Utc::now(),
+            },
+        )
+        .await?;
+        ask_to_sign_in(&ml, "dana@example.com", ask("s2", None))?;
+        follow_last().await?;
+        let SignedIn::Choose(offered) =
+            collect_signin(&store, "s2", "machine-secret", None, &issuer()).await?
+        else {
+            return Err(AntumbraError::other(
+                "an account in two workspaces was not asked which",
+            ));
+        };
+        assert_eq!(
+            offered
+                .iter()
+                .map(|m| m.tenant.as_str())
+                .collect::<Vec<_>>(),
+            [own.as_str(), "ws:crew"]
+        );
+        assert!(
+            collect_signin(&store, "s2", "machine-secret", Some("ws:other"), &issuer())
+                .await
+                .is_err()
+        );
+        let SignedIn::Token {
+            workspace, user, ..
+        } = collect_signin(&store, "s2", "machine-secret", Some("crew"), &issuer()).await?
+        else {
+            return Err(AntumbraError::other("naming a workspace gave no token"));
+        };
+        assert_eq!(
+            (workspace.as_str(), user.as_str()),
+            ("ws:crew", "user:dana")
+        );
+
+        // Removed from one: it is not offered, cannot be named, and a plain
+        // login signs for the other.
+        principal::remove(&store, &crew, &ada, &there).await?;
+        if principal::is_member(&store, &crew, &there).await? {
+            return Err(AntumbraError::other(
+                "the member was not removed; the test cannot go on",
+            ));
+        }
+        ask_to_sign_in(&ml, "dana@example.com", ask("s3", Some("ws:crew")))?;
+        follow_last().await?;
+        assert!(
+            collect_signin(&store, "s3", "machine-secret", None, &issuer())
+                .await
+                .is_err()
+        );
+        let SignedIn::Token { workspace, .. } =
+            collect_signin(&store, "s3", "machine-secret", Some(&own), &issuer()).await?
+        else {
+            return Err(AntumbraError::other(
+                "the remaining workspace gave no token",
+            ));
+        };
+        assert_eq!(workspace, own);
+        assert_eq!(verify(&login(&store, &id, &issuer()).await?)?.0, own);
+
+        // An address with no account: the link is sent, and following it is refused.
+        ask_to_sign_in(&ml, "nobody@example.com", ask("s4", None))?;
+        assert!(follow_last().await.is_err());
+        assert!(matches!(
+            collect_signin(&store, "s4", "machine-secret", None, &issuer()).await?,
+            SignedIn::Unverified
+        ));
+        // A digest that is not one is refused before anything is sent.
+        let sent = mailer.links().len();
+        assert!(ask_to_sign_in(
+            &ml,
+            "dana@example.com",
+            SigninAsk {
+                secret_digest: "short".into(),
+                ..ask("s5", None)
+            }
+        )
+        .is_err());
+        assert_eq!(mailer.links().len(), sent);
         Ok(())
     }
 }

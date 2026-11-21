@@ -241,6 +241,10 @@ pub enum Command {
     /// collect your token once you are let in (`join --status`). Asking
     /// changes nothing about this machine's own setup.
     Join(crate::join::JoinArgs),
+    /// Sign this machine in again to a workspace your account is in, where a
+    /// control plane signs its tokens: `login <server> --email <address>`
+    /// sends a link to follow, and `login --status` collects the token.
+    Login(crate::login::LoginArgs),
     /// Copy the memories you chose, on the Bring page of your own dashboard,
     /// to a workspace this machine joined. They are copies, and land in a
     /// compartment of yours there. `--dry-run` says how many and sends none.

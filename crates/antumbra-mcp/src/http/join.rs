@@ -60,6 +60,7 @@ pub(super) fn routes() -> Router<Arc<HttpState>> {
         .route("/join/decide", post(decide))
         .route("/join/request", post(request))
         .route("/join/collect", post(collect))
+        .route("/join/where", post(where_to_ask))
 }
 
 async fn body<T: serde::de::DeserializeOwned>(req: Request<Body>) -> Result<T, Response> {
@@ -447,6 +448,19 @@ async fn request(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Res
         }
         Err(e) => failed("/join/request", &e),
     }
+}
+
+/// Where someone asks to join this server's workspaces, or signs in to one
+/// again: here, when it signs its own tokens, or at its control plane.
+async fn where_to_ask(State(state): State<Arc<HttpState>>) -> Response {
+    if let Some(response) = over_the_rate(&state) {
+        return response;
+    }
+    Json(json!({
+        "signs_here": state.issuer.is_some(),
+        "control_plane": state.control_plane,
+    }))
+    .into_response()
 }
 
 #[derive(Deserialize)]

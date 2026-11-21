@@ -39,5 +39,6 @@ pub mod revocation;
 pub mod reward;
 pub mod router;
 pub mod shadow;
+pub mod signin;
 pub mod sync;
 pub mod verifier;
