@@ -183,6 +183,7 @@ function clearSections() {
   byId("browse").textContent = "List all";
   byId("recall").reset();
   clearShell();
+  clearManage();
 }
 
 async function open(token) {
@@ -240,6 +241,7 @@ async function refresh() {
     }
     byId("updated").textContent = `Updated ${clock.format(new Date())}`;
     renderAttention();
+    showAgentWhenAsked();
     return true;
   } finally {
     button.disabled = false;
@@ -1055,7 +1057,8 @@ function memoryItem(m) {
     { class: "memory" },
     h("p", { class: "content" }, m.content),
     memoryMeta(m),
-    h("div", { class: "actions-row" }, toggle, relate),
+    // Reinforce, penalize, forget (manage.js).
+    h("div", { class: "actions-row" }, toggle, relate, ...memoryActions(m)),
     relations,
   );
   toggle.addEventListener("click", () => {
@@ -1156,6 +1159,7 @@ async function memoryAction(view) {
 
 function start() {
   startShell();
+  startManage();
   byId("gate-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const token = byId("token").value.trim().replace(/^Bearer\s+/i, "");

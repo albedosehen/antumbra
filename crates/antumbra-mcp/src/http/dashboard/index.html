@@ -13,6 +13,7 @@
 <script src="dashboard/app.js" defer></script>
 <script src="dashboard/behaviors.js" defer></script>
 <script src="dashboard/shell.js" defer></script>
+<script src="dashboard/manage.js" defer></script>
 </head>
 <body>
 
@@ -56,6 +57,7 @@
       <p class="nav-group">You</p>
         <a class="nav-item" href="#/account" data-nav="account" title="Account"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="6.5" r="1.8"/><path d="M4.6 12.2c.7-1.5 1.900-2.2 3.400-2.2s2.7.7 3.400 2.2"/></svg><span>Account</span></a>
         <a class="nav-item" href="#/devices" data-nav="devices" title="Devices"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v7h-11zM6 13.5h4M8 10.5v3"/></svg><span>Devices</span><span id="nav-handoffs" class="count" hidden></span></a>
+        <a class="nav-item" href="#/agent" data-nav="agent" title="Agent"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5V5a4 4 0 0 1 8 0v1.5M3 6.5h10v5.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 12zM6.2 9.500h.01M9.8 9.500h.01"/></svg><span>Agent</span></a>
       <p class="nav-group">Workspace settings</p>
         <a class="nav-item" href="#/settings" data-nav="settings" title="Policy"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/></svg><span>Policy</span></a>
     </nav>
@@ -153,6 +155,23 @@
         <h3 id="h-memory">Recall and browse</h3>
         <p id="memory-summary" class="muted small" aria-live="polite"></p>
       </div>
+      <details class="compose">
+        <summary>Write a memory</summary>
+        <form id="memory-new" class="write">
+          <label for="memory-content">What to remember</label>
+          <textarea id="memory-content" name="content" rows="3" required></textarea>
+          <div class="write-row">
+            <fieldset class="segmented">
+              <legend class="visually-hidden">Network</legend>
+              <input id="new-world" type="radio" name="network" value="world" checked><label for="new-world">Fact</label>
+              <input id="new-bank" type="radio" name="network" value="bank"><label for="new-bank">Experience</label>
+              <input id="new-opinion" type="radio" name="network" value="opinion"><label for="new-opinion">Judgment</label>
+            </fieldset>
+            <button type="submit">Store</button>
+            <span class="small muted" role="status"></span>
+          </div>
+        </form>
+      </details>
       <form id="recall" class="recall" role="search">
         <input id="query" name="query" type="search" placeholder="Recall by meaning" aria-label="What to recall">
         <fieldset class="segmented">
@@ -283,6 +302,21 @@
         </header>
         <div class="row even">
         <section aria-labelledby="h-documents">
+          <details class="compose">
+            <summary>Add a document</summary>
+            <form id="document-new" class="write">
+              <label for="document-title">Title</label>
+              <input id="document-title" name="title" type="text" required>
+              <label for="document-source">Where it is from (optional)</label>
+              <input id="document-source" name="source" type="text">
+              <label for="document-content">Its text</label>
+              <textarea id="document-content" name="content" rows="6" required></textarea>
+              <div class="write-row">
+                <button type="submit">Add</button>
+                <span class="small muted" role="status"></span>
+              </div>
+            </form>
+          </details>
           <div class="section-head">
             <h3 id="h-documents">Documents</h3>
             <p id="documents-summary" class="muted small"></p>
@@ -293,6 +327,17 @@
           <button id="documents-more" type="button" class="link more" hidden></button>
         </section>
         <section aria-labelledby="h-compartments">
+          <details class="compose">
+            <summary>New compartment</summary>
+            <form id="compartment-new" class="write">
+              <label for="compartment-name">Name</label>
+              <input id="compartment-name" name="name" type="text" required>
+              <div class="write-row">
+                <button type="submit">Make it</button>
+                <span class="small muted" role="status"></span>
+              </div>
+            </form>
+          </details>
           <div class="section-head">
             <h3 id="h-compartments">Compartments</h3>
           </div>
@@ -397,6 +442,42 @@
         </section>
       </div>
 
+      <div class="view" data-view="agent" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Agent</h2>
+          <p class="view-lede">What your coding agent uses and what it is told: the skills its hooks count, and the rules it is given.</p>
+        </header>
+        <section aria-labelledby="h-skills">
+          <div class="section-head">
+            <h3 id="h-skills">Skills</h3>
+            <p id="skills-summary" class="muted small" aria-live="polite"></p>
+          </div>
+          <div class="panel">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Skill</th>
+                    <th scope="col" class="num">Uses</th>
+                    <th scope="col">Last used</th>
+                  </tr>
+                </thead>
+                <tbody id="skills"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+        <section aria-labelledby="h-rules">
+          <div class="section-head">
+            <h3 id="h-rules">Rules</h3>
+            <p id="rules-summary" class="muted small"></p>
+          </div>
+          <div class="panel">
+            <ul id="rules" class="list rules"></ul>
+          </div>
+        </section>
+      </div>
+
       <div class="view" data-view="devices" hidden>
         <header class="view-head">
           <h2 class="view-title">Devices and handoffs</h2>
@@ -422,6 +503,22 @@
               </table>
             </div>
           </div>
+        </section>
+        <section aria-labelledby="h-handoff-new">
+          <div class="section-head">
+            <h3 id="h-handoff-new">Tell an agent</h3>
+            <p class="muted small">A note for the agent on one of your machines. It is told when it next starts a session, and it can answer with a handoff of its own.</p>
+          </div>
+          <form id="handoff-new" class="panel write padded">
+            <label for="handoff-for">For</label>
+            <select id="handoff-for" name="for_host"></select>
+            <label for="handoff-content">The note. Its first line is its title.</label>
+            <textarea id="handoff-content" name="content" rows="4" required></textarea>
+            <div class="write-row">
+              <button type="submit">Leave it</button>
+              <span class="small muted" role="status"></span>
+            </div>
+          </form>
         </section>
         <section aria-labelledby="h-handoffs">
           <div class="section-head">
