@@ -154,7 +154,7 @@ async fn make_code(State(state): State<Arc<HttpState>>, req: Request<Body>) -> R
         Ok(who) => who,
         Err(response) => return response,
     };
-    if state.issuer.is_none() {
+    if state.issuer.is_none() && state.control_plane.is_none() {
         return bad_request(
             "this server verifies tokens with a public key and cannot sign one for a new member",
         );
@@ -216,7 +216,9 @@ async fn codes(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Respo
     {
         Ok(all) => Json(json!({
             "codes": all.iter().map(code_view).collect::<Vec<_>>(),
-            "can_sign": state.issuer.is_some(),
+            "can_sign": state.issuer.is_some() || state.control_plane.is_some(),
+            // Where someone with a code asks, when it is not here.
+            "control_plane": state.control_plane,
         }))
         .into_response(),
         Err(e) => failed("/join/codes", &e),
@@ -352,6 +354,24 @@ fn over_the_rate(state: &HttpState) -> Option<Response> {
     None
 }
 
+/// The answer of a server that signs nothing: where to ask instead, when a
+/// control plane signs for it, in words and as a field a client can follow.
+fn elsewhere(state: &HttpState) -> Response {
+    match &state.control_plane {
+        Some(url) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": format!("this workspace's tokens are signed at {url}: ask to join there, with your email address"),
+                "control_plane": url,
+            })),
+        )
+            .into_response(),
+        None => bad_request(
+            "this server verifies tokens with a public key and takes no requests to join",
+        ),
+    }
+}
+
 #[derive(Deserialize)]
 struct Asked {
     code: String,
@@ -372,9 +392,7 @@ async fn request(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Res
         return response;
     }
     if state.issuer.is_none() {
-        return bad_request(
-            "this server verifies tokens with a public key and takes no requests to join",
-        );
+        return elsewhere(&state);
     }
     let asked: Asked = match body(req).await {
         Ok(asked) => asked,
@@ -442,9 +460,7 @@ async fn collect(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Res
         return response;
     }
     let Some(secret) = state.issuer.clone() else {
-        return bad_request(
-            "this server verifies tokens with a public key and takes no requests to join",
-        );
+        return elsewhere(&state);
     };
     let collecting: Collecting = match body(req).await {
         Ok(collecting) => collecting,

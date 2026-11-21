@@ -56,6 +56,7 @@ async fn state(github: Option<GithubConfig>) -> anyhow::Result<Arc<HttpState>> {
         removed: std::sync::RwLock::new(std::collections::HashSet::new()),
         issuer: Some(b"test-secret".to_vec()),
         members_only: false,
+        control_plane: None,
         join_minute: std::sync::Mutex::new((std::time::Instant::now(), 0)),
         limits: Limits::default(),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),

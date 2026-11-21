@@ -366,6 +366,8 @@ function drawAsking(out) {
       const meta = h(
         "p",
         { class: "meta small muted" },
+        // An address is on a request only when a control plane verified it.
+        r.email ? h("span", { class: "tag", title: "They followed a link sent to this address" }, `verified ${r.email}`) : null,
         r.host ? h("span", {}, `from ${r.host}`) : null,
         h("span", { title: r.created_at }, `asked ${ago(r.created_at)}`),
         h("span", { title: r.expires_at }, `expires ${dates.format(new Date(r.expires_at))}`),

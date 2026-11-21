@@ -284,6 +284,10 @@ struct HttpState {
     /// Whether only members are served: a signed token for a pair the
     /// workspace does not hold is refused, where it was provisioned.
     members_only: bool,
+    /// The control plane that signs this server's tokens, by its address,
+    /// where there is one: who asks to join here is sent there, to have an
+    /// address verified and a token signed.
+    control_plane: Option<String>,
     /// The minute the public join routes are counted in, and how many
     /// requests it has had ([`join::PUBLIC_PER_MINUTE`]).
     join_minute: std::sync::Mutex<(std::time::Instant, u32)>,
@@ -339,6 +343,7 @@ pub async fn serve(
     // a token for someone its admins let in. None where it verifies RS256.
     issuer: Option<Vec<u8>>,
     members_only: bool,
+    control_plane: Option<String>,
 ) -> Result<()> {
     let mut store = crate::connect(&url, &db).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
@@ -393,6 +398,9 @@ pub async fn serve(
         removed: std::sync::RwLock::new(std::collections::HashSet::new()),
         issuer,
         members_only,
+        control_plane: control_plane
+            .map(|url| url.trim().trim_end_matches('/').to_string())
+            .filter(|url| !url.is_empty()),
         join_minute: std::sync::Mutex::new((std::time::Instant::now(), 0)),
         limits: Limits::default(),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),

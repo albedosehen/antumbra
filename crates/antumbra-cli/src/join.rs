@@ -39,6 +39,11 @@ pub struct JoinArgs {
     /// Ask how the request stands, and collect the token once it is approved.
     #[arg(long, conflicts_with_all = ["code", "handle", "name", "note", "forget"])]
     pub status: bool,
+    /// Your email address, where the workspace has a control plane: it sends
+    /// a link there, and the workspace's admins see your request once you
+    /// have followed it.
+    #[arg(long, conflicts_with_all = ["status", "forget"])]
+    pub email: Option<String>,
     /// Drop the request this machine is waiting on, without collecting it.
     #[arg(long, conflicts_with_all = ["code", "handle", "name", "note"])]
     pub forget: bool,
@@ -80,6 +85,9 @@ struct Waiting {
     secret: String,
     /// The request's id, once the server has answered with one.
     request: Option<String>,
+    /// The control plane the request was made at and is collected from,
+    /// where the workspace's own server signs nothing.
+    through: Option<String>,
 }
 
 impl Waiting {
@@ -89,6 +97,7 @@ impl Waiting {
             "handle": self.handle,
             "secret": self.secret,
             "request": self.request,
+            "through": self.through,
         })
     }
 
@@ -99,6 +108,7 @@ impl Waiting {
             handle: text("handle")?,
             secret: text("secret")?,
             request: text("request"),
+            through: text("through"),
         })
     }
 }
@@ -188,28 +198,56 @@ fn ask(antumbra: &Path, args: &JoinArgs, send: Send<'_>) -> anyhow::Result<Vec<S
             handle: handle.clone(),
             secret: new_secret()?,
             request: None,
+            through: None,
         },
     };
     // Kept before it is sent: an answer lost on the way is asked for again
     // with the same secret, and is the same request.
     keep_waiting(antumbra, &waiting)?;
-    let (status, answer) = send(
-        &server,
-        "/join/request",
-        json!({
-            "code": code.trim(),
-            "handle": handle,
-            "display": args.name,
-            "note": args.note,
-            "host": antumbra_http::host_id(),
-            "secret_digest": join::digest(&waiting.secret),
-        }),
-    )?;
-    if status != 200 {
+    let asking = json!({
+        "code": code.trim(),
+        "handle": handle,
+        "display": args.name,
+        "note": args.note,
+        "host": antumbra_http::host_id(),
+        "secret_digest": join::digest(&waiting.secret),
+    });
+    let nothing_asked = || {
         // Nothing was asked: nothing is waited on.
         if waiting.request.is_none() {
             let _ = std::fs::remove_file(waiting_file(antumbra));
         }
+    };
+    let (mut status, mut answer) = send(&server, "/join/request", asking.clone())?;
+    // A workspace whose tokens a control plane signs says where that is: the
+    // request is made there, with an address it verifies.
+    let through = answer
+        .get("control_plane")
+        .and_then(Value::as_str)
+        .map(|url| url.trim().trim_end_matches('/').to_string())
+        .filter(|url| status != 200 && !url.is_empty());
+    if let Some(through) = &through {
+        let Some(email) = args
+            .email
+            .as_deref()
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+        else {
+            nothing_asked();
+            anyhow::bail!(
+                "this workspace verifies an address before its admins see a request. Ask again with: --email <your address>"
+            );
+        };
+        if let Err(why) = crate::setup::may_carry_the_token(through, args.allow_http) {
+            nothing_asked();
+            return Err(why);
+        }
+        let mut with_address = asking;
+        with_address["email"] = json!(email);
+        (status, answer) = send(through, "/join/request", with_address)?;
+    }
+    if status != 200 {
+        nothing_asked();
         anyhow::bail!("{}", said(status, &answer));
     }
     let request = answer
@@ -220,6 +258,7 @@ fn ask(antumbra: &Path, args: &JoinArgs, send: Send<'_>) -> anyhow::Result<Vec<S
         antumbra,
         &Waiting {
             request: Some(request.to_string()),
+            through: through.clone(),
             ..waiting
         },
     )?;
@@ -228,6 +267,14 @@ fn ask(antumbra: &Path, args: &JoinArgs, send: Send<'_>) -> anyhow::Result<Vec<S
         .and_then(Value::as_str)
         .unwrap_or("pending");
     Ok(match standing {
+        "unverified" => vec![
+            format!(
+                "A link was sent to {}. Follow it: the workspace's admins see your request to join as `{handle}` once you have.",
+                args.email.as_deref().unwrap_or("your address").trim()
+            ),
+            "Then see how it stands, and collect your token once approved, with: antumbra join --status".to_string(),
+            "Nothing about this machine's setup has changed.".to_string(),
+        ],
         "approved" => vec![
             format!("You are let in as `{handle}`: that code asks no one."),
             "Collect your token with: antumbra join --status".to_string(),
@@ -250,7 +297,7 @@ fn status(antumbra: &Path, send: Send<'_>) -> anyhow::Result<Vec<String>> {
         anyhow::bail!("the request was never answered by the server. Ask again with the same server and handle");
     };
     let (status, answer) = send(
-        &waiting.server,
+        waiting.through.as_deref().unwrap_or(&waiting.server),
         "/join/collect",
         json!({ "request": request, "secret": waiting.secret }),
     )?;
@@ -263,6 +310,10 @@ fn status(antumbra: &Path, send: Send<'_>) -> anyhow::Result<Vec<String>> {
         .and_then(Value::as_str)
         .unwrap_or_default()
     {
+        "unverified" => Ok(vec![
+            "The link sent to your address has not been followed yet: the workspace's admins see your request once it has.".to_string(),
+            "If no link came, drop this with `antumbra join --forget` and ask again.".to_string(),
+        ]),
         "pending" => Ok(vec![format!(
             "Still waiting: no admin of the workspace has decided the request for `{}` yet.",
             waiting.handle
@@ -745,6 +796,7 @@ mod tests {
             handle: Some(handle.to_string()),
             name: Some("Bodil Lindqvist".to_string()),
             note: None,
+            email: None,
             status: false,
             forget: false,
             connect: false,
@@ -1164,5 +1216,114 @@ mod tests {
             &told,
             &failed
         ));
+    }
+
+    /// A workspace whose tokens a control plane signs: the request is made
+    /// there with an address, the link has to be followed first, and the
+    /// token is collected there and kept for the workspace's own server.
+    #[test]
+    fn a_workspace_with_a_control_plane_is_joined_through_it() -> anyhow::Result<()> {
+        let home = crate::agents::scratch::Scratch::new("join-through")?;
+        let antumbra = home.path().join(".antumbra");
+        let standing = RefCell::new("unverified");
+        let asked = RefCell::new(Vec::new());
+        let send = |server: &str, path: &str, body: Value| -> anyhow::Result<(u16, Value)> {
+            asked
+                .borrow_mut()
+                .push((server.to_string(), path.to_string(), body.clone()));
+            Ok(match (server, path) {
+                ("https://memory.example", _) => (
+                    400,
+                    json!({ "error": "ask to join there, with your email address", "control_plane": "https://accounts.example/" }),
+                ),
+                ("https://accounts.example", "/join/request") => {
+                    (200, json!({ "request": "r9", "standing": "unverified" }))
+                }
+                ("https://accounts.example", "/join/collect") => match *standing.borrow() {
+                    "approved" => (
+                        200,
+                        json!({ "standing": "approved", "workspace": "ws:crew", "user": "user:bodil", "token": "the.rs256.token" }),
+                    ),
+                    other => (200, json!({ "standing": other })),
+                },
+                _ => (404, json!({})),
+            })
+        };
+        let server = "https://memory.example";
+
+        // No address: said, and nothing is waited on.
+        let Err(why) = run_in(&antumbra, &args(server, "Bodil"), &send) else {
+            anyhow::bail!("asked without an address");
+        };
+        assert!(why.to_string().contains("--email"), "{why}");
+        assert!(read_waiting(&antumbra).is_none());
+        assert!(
+            asked.borrow().iter().all(|(s, ..)| s == server),
+            "the control plane was asked without an address"
+        );
+
+        let with_email = JoinArgs {
+            email: Some(" bodil@example.com ".into()),
+            ..args(server, "Bodil")
+        };
+        let said = run_in(&antumbra, &with_email, &send)?;
+        assert!(
+            said[0].contains("A link was sent to bodil@example.com"),
+            "{said:?}"
+        );
+        let waiting = read_waiting(&antumbra).ok_or_else(|| anyhow::anyhow!("nothing kept"))?;
+        assert_eq!(
+            (
+                waiting.server.as_str(),
+                waiting.through.as_deref(),
+                waiting.request.as_deref()
+            ),
+            (server, Some("https://accounts.example"), Some("r9"))
+        );
+        let (to, _, sent) = asked
+            .borrow()
+            .last()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("nothing sent"))?;
+        assert_eq!(to, "https://accounts.example");
+        assert_eq!(sent["email"], "bodil@example.com");
+        assert!(
+            sent.get("secret").is_none() && sent["secret_digest"] == join::digest(&waiting.secret)
+        );
+
+        // Not followed, then waiting on an admin: both keep the request.
+        let said = run_in(&antumbra, &asking_status(), &send)?;
+        assert!(said[0].contains("has not been followed"), "{said:?}");
+        *standing.borrow_mut() = "pending";
+        assert!(run_in(&antumbra, &asking_status(), &send)?[0].contains("Still waiting"));
+        assert!(read_waiting(&antumbra).is_some());
+        assert_eq!(
+            asked
+                .borrow()
+                .last()
+                .map(|(s, p, _)| (s.clone(), p.clone())),
+            Some((
+                "https://accounts.example".to_string(),
+                "/join/collect".to_string()
+            ))
+        );
+
+        // Approved: collected from the control plane, kept for the workspace's server.
+        *standing.borrow_mut() = "approved";
+        let said = run_in(&antumbra, &asking_status(), &send)?;
+        assert!(
+            said[0].contains("user:bodil in ws:crew at https://memory.example"),
+            "{said:?}"
+        );
+        let dir = antumbra.join("workspaces/memory.example__ws_crew");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("token.txt"))?.trim(),
+            "the.rs256.token"
+        );
+        let kept: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("workspace.json"))?)?;
+        assert_eq!(kept["url"], server);
+        assert!(read_waiting(&antumbra).is_none());
+        Ok(())
     }
 }

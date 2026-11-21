@@ -116,6 +116,7 @@ async fn state_bounded(
         removed: std::sync::RwLock::new(std::collections::HashSet::new()),
         issuer: Some(b"test-secret".to_vec()),
         members_only: false,
+        control_plane: None,
         join_minute: std::sync::Mutex::new((std::time::Instant::now(), 0)),
         limits,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
@@ -1512,6 +1513,111 @@ async fn what_to_share_is_suggested_from_what_was_shared_before() -> anyhow::Res
         left["total"] == 2 && said.iter().all(|t| t.starts_with("!!!!")),
         "{left}"
     );
+    Ok(())
+}
+
+/// A server whose tokens a control plane signs: its admins make join codes
+/// here, and whoever asks or collects here is told where to go instead. With
+/// no control plane and no secret, it makes none and says only that.
+#[tokio::test]
+async fn a_server_with_a_control_plane_makes_codes_and_sends_askers_there() -> anyhow::Result<()> {
+    let open = state().await?;
+    let ada = token("ws:crew", "user:ada")?;
+    let with = |st: Arc<HttpState>,
+                tok: Option<String>,
+                method: &'static str,
+                path: &'static str,
+                body: serde_json::Value| async move {
+        let mut req = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(tok) = tok {
+            req = req.header(header::AUTHORIZATION, format!("Bearer {tok}"));
+        }
+        let res = router(st)
+            .oneshot(req.body(Body::from(body.to_string()))?)
+            .await?;
+        let status = res.status();
+        let text = body_text(res).await?;
+        anyhow::Ok((
+            status,
+            serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default(),
+        ))
+    };
+    // Ada is the workspace's first person, so its owner.
+    with(
+        open.clone(),
+        Some(ada.clone()),
+        "GET",
+        "/members",
+        serde_json::Value::Null,
+    )
+    .await?;
+    let signs_nothing = |control_plane: Option<&str>| {
+        let (store, control_plane) = (open.store.clone(), control_plane.map(str::to_string));
+        async move {
+            let mut made = state_with(store).await;
+            let Some(inner) = Arc::get_mut(&mut made) else {
+                anyhow::bail!("the state is shared before it is served");
+            };
+            inner.issuer = None;
+            inner.control_plane = control_plane;
+            anyhow::Ok(made)
+        }
+    };
+    let asking =
+        serde_json::json!({ "code": "aj1_x", "handle": "bodil", "secret_digest": "0".repeat(64) });
+    let collecting = serde_json::json!({ "request": "r1", "secret": "s" });
+
+    let alone = signs_nothing(None).await?;
+    let (status, why) = with(
+        alone.clone(),
+        Some(ada.clone()),
+        "POST",
+        "/join/codes",
+        serde_json::json!({}),
+    )
+    .await?;
+    anyhow::ensure!(status == StatusCode::BAD_REQUEST, "{status} {why}");
+    let (status, why) = with(alone, None, "POST", "/join/request", asking.clone()).await?;
+    anyhow::ensure!(
+        status == StatusCode::BAD_REQUEST && why.get("control_plane").is_none(),
+        "{status} {why}"
+    );
+
+    let through = signs_nothing(Some("https://accounts.example")).await?;
+    let (status, made) = with(
+        through.clone(),
+        Some(ada.clone()),
+        "POST",
+        "/join/codes",
+        serde_json::json!({}),
+    )
+    .await?;
+    anyhow::ensure!(
+        status == StatusCode::OK && made["code"].as_str().is_some_and(|c| c.starts_with("aj1_")),
+        "{status} {made}"
+    );
+    let (_, listed) = with(
+        through.clone(),
+        Some(ada),
+        "GET",
+        "/join/codes",
+        serde_json::Value::Null,
+    )
+    .await?;
+    anyhow::ensure!(
+        listed["can_sign"] == true && listed["control_plane"] == "https://accounts.example",
+        "{listed}"
+    );
+    for (path, body) in [("/join/request", asking), ("/join/collect", collecting)] {
+        let (status, why) = with(through.clone(), None, "POST", path, body).await?;
+        anyhow::ensure!(
+            status == StatusCode::BAD_REQUEST && why["control_plane"] == "https://accounts.example",
+            "{path}: {status} {why}"
+        );
+    }
     Ok(())
 }
 
