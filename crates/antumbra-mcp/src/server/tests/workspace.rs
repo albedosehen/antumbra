@@ -860,6 +860,80 @@ async fn answer_escalates_when_the_routed_expert_is_not_servable() -> anyhow::Re
     Ok(())
 }
 
+// An engine still fetching its base, as a server is before its first answer
+// through an expert, or one whose fetch failed. `act` is never reached: it
+// answers with an error, which `answer` would pass on.
+struct NotYet(antumbra_core::ports::Readiness);
+#[async_trait::async_trait]
+impl antumbra_core::ports::Serve for NotYet {
+    async fn act(
+        &self,
+        _req: ActRequest,
+    ) -> antumbra_core::Result<antumbra_core::ports::ActOutput> {
+        Err(antumbra_core::AntumbraError::other(
+            "act must not be called before the base is here",
+        ))
+    }
+    fn prepare(&self) -> antumbra_core::ports::Readiness {
+        self.0.clone()
+    }
+}
+
+/// A first answer on a server whose base has never been downloaded escalates
+/// at once and says the base is coming, where it used to wait out a 3 GB
+/// download and time out; a failed download says why.
+#[tokio::test]
+async fn answer_escalates_while_the_base_is_fetched() -> anyhow::Result<()> {
+    use antumbra_core::ports::Readiness;
+    for (readiness, said) in [
+        (
+            Readiness::Fetching("the base model (Qwen/x)".into()),
+            "the base model (Qwen/x) is downloading",
+        ),
+        (
+            Readiness::Failed("no network".into()),
+            "could not fetch its base model (no network)",
+        ),
+    ] {
+        let store = mem_store().await?;
+        router::save(
+            &store,
+            &LearnedRouter {
+                weights: vec![1.0; EMBED_DIM],
+                experts: vec![RouterExpert {
+                    id: ExpertId::new("expert:adder"),
+                    centroid: vec![0.0; EMBED_DIM],
+                }],
+                temperature: 0.1,
+                floor: -1.0,
+            },
+        )
+        .await?;
+        let s = McpServer::new(
+            store,
+            Arc::new(FixedEmbedder::new(EMBED_DIM)),
+            TenantId::new("ws:test"),
+            UserId::new("user:test"),
+            "h".into(),
+            CompartmentId::new("comp:test:default"),
+            Some(Arc::new(NotYet(readiness))),
+        );
+        let out = s
+            .answer(Parameters(AnswerParams {
+                task: "add two numbers".into(),
+                repo: None,
+                standing_only: false,
+            }))
+            .await?;
+        assert!(out.0.escalate, "a base not yet here escalates");
+        assert_eq!(out.0.expert_id.as_deref(), Some("expert:adder"));
+        assert!(out.0.answer.is_empty());
+        let note = out.0.note.unwrap_or_default();
+        assert!(note.contains(said), "{note}");
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn answer_without_a_serving_engine_reports_not_configured() -> anyhow::Result<()> {
     let s = server().await?; // serve = None

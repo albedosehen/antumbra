@@ -73,6 +73,23 @@ pub struct MultiAdapterServe {
     /// Where requests go: the thread that owns the resident model, started
     /// by the first of them.
     worker: std::sync::Mutex<Option<std::sync::mpsc::Sender<engine::Job>>>,
+    /// Whether the base's files are on this machine, and the download that
+    /// fetches them when they are not ([`Serve::prepare`]).
+    fetch: std::sync::Arc<std::sync::Mutex<Fetch>>,
+}
+
+/// Where the base's files are, as [`Serve::prepare`] found them.
+#[cfg(feature = "models")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Fetch {
+    /// Not asked yet.
+    Unknown,
+    /// In the Hugging Face cache.
+    Here,
+    /// Being downloaded on a thread of its own.
+    Fetching,
+    /// The download failed, for this reason; the next ask starts it again.
+    Failed(String),
 }
 
 /// How many adapters one request may blend: a routed expert and the user's
@@ -272,6 +289,7 @@ impl MultiAdapterServe {
             config,
             registry: std::sync::RwLock::new(std::collections::HashMap::new()),
             worker: std::sync::Mutex::new(None),
+            fetch: std::sync::Arc::new(std::sync::Mutex::new(Fetch::Unknown)),
         }
     }
 
@@ -383,6 +401,59 @@ impl Serve for MultiAdapterServe {
             base: quant.map_or("dense", ServeQuant::name).to_string(),
             kernels,
         })
+    }
+
+    /// Ready once the base's files are in the cache. Asked the first time,
+    /// the cache is looked at without the network; where the files are not
+    /// there, they are downloaded on a thread of their own, and every ask
+    /// until that ends says so. A failed download is said once and tried
+    /// again by the next ask.
+    fn prepare(&self) -> antumbra_core::ports::Readiness {
+        use antumbra_core::ports::Readiness;
+        let fetching = || Readiness::Fetching(format!("the base model ({})", self.base_model));
+        let mut state = self
+            .fetch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match &*state {
+            Fetch::Here => return Readiness::Ready,
+            Fetch::Fetching => return fetching(),
+            Fetch::Failed(why) => {
+                let said = Readiness::Failed(why.clone());
+                *state = Fetch::Unknown;
+                return said;
+            }
+            Fetch::Unknown => {}
+        }
+        if antumbra_train::models::base_is_cached(&self.base_model) {
+            *state = Fetch::Here;
+            return Readiness::Ready;
+        }
+        *state = Fetch::Fetching;
+        let (base, fetch) = (self.base_model.clone(), self.fetch.clone());
+        let started = std::thread::Builder::new()
+            .name("antumbra-fetch".into())
+            .spawn(move || {
+                eprintln!("antumbra-serve: fetching the base model {base}, about 3 GB, for the first answer through an expert");
+                let done = match antumbra_train::models::fetch_base(&base) {
+                    Ok(()) => {
+                        eprintln!("antumbra-serve: the base model {base} is fetched");
+                        Fetch::Here
+                    }
+                    Err(e) => {
+                        eprintln!("antumbra-serve: fetching the base model {base} failed: {e}");
+                        Fetch::Failed(e.to_string())
+                    }
+                };
+                *fetch.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = done;
+            });
+        match started {
+            Ok(_) => fetching(),
+            Err(e) => {
+                *state = Fetch::Unknown;
+                Readiness::Failed(format!("the download thread did not start: {e}"))
+            }
+        }
     }
 
     async fn act(

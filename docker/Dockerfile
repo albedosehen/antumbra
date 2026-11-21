@@ -19,7 +19,11 @@ COPY . .
 # `--build-arg FEATURES=` builds the light server, whose every answer
 # escalates.
 ARG FEATURES=models
-RUN cargo build --release -p antumbra-mcp --locked ${FEATURES:+--features "$FEATURES"}
+# `--build-arg JOBS=8` holds cargo to that many compilers at once, for a host
+# whose memory the model backend's crates fill at one per core. Unset, cargo
+# runs one per core.
+ARG JOBS
+RUN cargo build --release -p antumbra-mcp --locked ${FEATURES:+--features "$FEATURES"} ${JOBS:+--jobs "$JOBS"}
 # The two places the server writes, made here because the runtime image has
 # no shell: base weights (the Hugging Face cache) and adapters. Owned by the
 # nonroot user, so a named volume mounted on either starts out writable.
