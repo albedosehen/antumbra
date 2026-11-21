@@ -81,12 +81,12 @@ There are two kinds of expert today. **Standing experts** are trained from your 
 
 A server built with the `models` feature answers through the experts (the `answer` tool, `antumbra serve`, `antumbra ask`). With a CUDA GPU it serves the dense base from the GPU. With none, and on a Mac, it serves a quantized base from the CPU through kernels of its own, Q6_K unless told otherwise:
 
-- x86-64 with AVX-512 VNNI, x86-64 with AVX2, and aarch64 with NEON each decode through them, and a CPU with AVX2 writes the answer a CPU with AVX-512 writes, token for token.
+- x86-64 with AVX-512 VNNI, x86-64 with AVX2, and aarch64 with NEON each decode through them. A CPU with AVX2 writes the answer a CPU with AVX-512 writes, token for token, and a Windows build writes the answer a Linux build writes.
 - Requests waiting on the server are answered in shared passes, each with its own blend of experts and each as it would be answered alone. Workspaces take turns, and a request past the server's bound is refused as busy.
 - A pass also carries the tokens guessed to follow and keeps each that is the model's own, so a prompt like one answered before is answered sooner, with the same answer.
 - A server with no GPU serves the experts another one trained (`--expert-source`).
 
-Measured with a 1.5B base and one expert. An Apple M4 Pro decodes 136 tokens a second from Q6_K. One 8-core laptop CPU, clocking about half its rating, decoded an expert's 78 held-out tasks at 26.8 tokens a second a token a pass, at 33.6 reading ahead, and at 105.7 when the same tasks were asked again, where llama.cpp (build b12359) decoded the same prompts with the same expert as a LoRA at about 18. The conditions, and the figures for requests answered together, are in the [changelog](CHANGELOG.md) and in [Running the trainer](docs/running-the-trainer.md#the-gpu-server-serving--standing-experts).
+Measured with a 1.5B base and one expert. An Apple M4 Pro decodes 136 tokens a second from Q6_K. One 8-core laptop CPU, clocking about half its rating, decoded an expert's 78 held-out tasks at 26.8 tokens a second a token a pass, at 33.6 reading ahead, and at 105.7 when the same tasks were asked again, where llama.cpp (build b12359) decoded the same prompts with the same expert as a LoRA at about 18. A desktop CPU with AVX2 alone (an Intel Core i9-12900KS) decodes 46.5 tokens a second from Q6_K a token a pass and reads a 2,300-token pair of prompts at 582, where llama.cpp on that machine decodes 39.5 and reads them at 406. The conditions, and the figures for requests answered together, are in the [changelog](CHANGELOG.md) and in [Running the trainer](docs/running-the-trainer.md#the-gpu-server-serving--standing-experts).
 
 The prebuilt binaries and the published image are the light build, which does everything but train and serve: see [Builds](#builds).
 
