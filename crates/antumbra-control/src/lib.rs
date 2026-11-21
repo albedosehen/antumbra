@@ -15,7 +15,7 @@ use chrono::Utc;
 
 use antumbra_auth::mint_rs256;
 use antumbra_core::{AntumbraError, Result, TenantId, UserId};
-use antumbra_store::repo::account::{self, Account};
+use antumbra_store::repo::account::{self, Account, Membership};
 use antumbra_store::repo::{invite, magic_use, principal};
 use antumbra_store::Store;
 
@@ -124,8 +124,29 @@ pub async fn signup(
         },
     )
     .await?;
+    // The first of the workspaces this account is in; joining another adds
+    // a row beside it.
+    account::add_membership(
+        store,
+        &Membership {
+            subject: identity.subject.clone(),
+            tenant: tenant.as_str().to_string(),
+            user: user.as_str().to_string(),
+            joined_at: now,
+        },
+    )
+    .await?;
 
     issuer.mint(tenant.as_str(), user.as_str())
+}
+
+/// The workspaces a registered identity is in, the first joined first.
+/// Errors if the identity has no account.
+pub async fn workspaces(store: &Store, identity: &VerifiedIdentity) -> Result<Vec<Membership>> {
+    let account = account::get_by_subject(store, &identity.subject)
+        .await?
+        .ok_or_else(|| AntumbraError::rejected("no account for this identity; sign up first"))?;
+    account::memberships(store, &account).await
 }
 
 /// Log an already-registered identity in: look up its account and issue a token.
@@ -249,6 +270,21 @@ mod tests {
         let (tenant2, user2) = verify(&signup(&store, &other, "second", &issuer()).await?)?;
         assert_ne!(tenant2, tenant);
         assert_ne!(user2, user, "every signup's first user had been user:owner");
+
+        // Each account is in the workspace it was made with, and that one
+        // only; an identity with no account is in none and is told so.
+        let mine = workspaces(&store, &id).await?;
+        assert_eq!(mine.len(), 1);
+        assert_eq!(
+            (mine[0].tenant.clone(), mine[0].user.clone()),
+            (tenant, user)
+        );
+        let theirs = workspaces(&store, &other).await?;
+        assert_eq!(theirs.len(), 1);
+        assert_eq!(theirs[0].tenant, tenant2);
+        assert!(workspaces(&store, &VerifiedIdentity::new("github:44"))
+            .await
+            .is_err());
         Ok(())
     }
 

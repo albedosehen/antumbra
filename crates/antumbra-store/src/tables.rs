@@ -5,6 +5,7 @@
 //! schema is held to: every table it defines is here, and nothing else is.
 
 pub const ACCOUNT: &str = "account";
+pub const ACCOUNT_MEMBERSHIP: &str = "account_membership";
 pub const BEHAVIOR_TUNING: &str = "behavior_tuning";
 pub const COMPARTMENT: &str = "compartment";
 pub const CONTRIBUTION: &str = "contribution";
@@ -57,6 +58,7 @@ pub const VERIFIER_TRANSITION: &str = "verifier_transition";
 /// Every table the schema defines, in the schema's order.
 pub const ALL: &[&str] = &[
     ACCOUNT,
+    ACCOUNT_MEMBERSHIP,
     BEHAVIOR_TUNING,
     COMPARTMENT,
     CONTRIBUTION,
@@ -119,6 +121,6 @@ mod tests {
         let mut named: Vec<String> = ALL.iter().map(|n| (*n).to_owned()).collect();
         named.sort();
         assert_eq!(named, defined);
-        assert_eq!(ALL.len(), 45, "every name is distinct");
+        assert_eq!(ALL.len(), 46, "every name is distinct");
     }
 }
