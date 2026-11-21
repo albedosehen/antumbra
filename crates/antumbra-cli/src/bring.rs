@@ -30,6 +30,10 @@ pub struct BringArgs {
     /// Say what would be brought, and bring nothing.
     #[arg(long)]
     pub dry_run: bool,
+    /// Also offer the compartment they land in to the whole workspace: one of
+    /// its admins decides, and until then it stays yours alone.
+    #[arg(long)]
+    pub offer: bool,
 }
 
 /// One call of a tool on a server: its name and arguments, and its answer.
@@ -181,6 +185,9 @@ fn copy(own: Call<'_>, team: Call<'_>, into: &str) -> anyhow::Result<Brought> {
     }
 }
 
+/// Offer a compartment to the workspace's shared pool: what the answer said.
+type Offer<'a> = &'a dyn Fn(&str) -> anyhow::Result<String>;
+
 /// The flow, with both servers given.
 fn run_with(
     args: &BringArgs,
@@ -188,6 +195,7 @@ fn run_with(
     host: &str,
     own: Call<'_>,
     team: Call<'_>,
+    offer: Offer<'_>,
 ) -> anyhow::Result<Vec<String>> {
     let chosen = own(
         "bring_candidates",
@@ -226,10 +234,21 @@ fn run_with(
         lines.push(format!(
             "They are in your compartment \"brought from {host}\" there, and are copies: yours stay where they were."
         ));
-        lines.push(
-            "A compartment is its owner's until it is shared: your teammates read them once you share it with them."
-                .to_string(),
-        );
+        if args.offer {
+            // Brought either way: an offer that could not be made is said.
+            lines.push(match offer(&into) {
+                Ok(status) if status == "accepted" => {
+                    "That compartment is already shared with the workspace: your teammates read them now.".to_string()
+                }
+                Ok(_) => "It is offered to the workspace: your teammates read them once one of its admins accepts.".to_string(),
+                Err(why) => format!("It could not be offered to the workspace ({why}); it is yours alone there."),
+            });
+        } else {
+            lines.push(
+                "A compartment is its owner's until it is shared: offer it to the workspace with --offer, or on the Knowledge page of the workspace's dashboard."
+                    .to_string(),
+            );
+        }
     }
     if !done.failed.is_empty() {
         lines.push(format!(
@@ -282,7 +301,26 @@ pub fn run(args: BringArgs) -> anyhow::Result<()> {
             .call(tool, arguments)
             .map_err(anyhow::Error::from)
     };
-    for line in run_with(&args, &to, &host, &own, &team)? {
+    let agent = antumbra_http::agent(patience);
+    let offer = |compartment: &str| -> anyhow::Result<String> {
+        let mut response = agent
+            .post(format!("{}/pool/offer", to.url))
+            .header("content-type", "application/json")
+            .header("authorization", format!("Bearer {team_token}"))
+            .send_json(json!({ "compartment": compartment }))
+            .map_err(|e| anyhow::anyhow!("could not reach {}: {e}", to.url))?;
+        let status = response.status().as_u16();
+        let answer: Value = response.body_mut().read_json().unwrap_or(Value::Null);
+        let said = |name: &str| answer.get(name).and_then(Value::as_str).map(str::to_string);
+        match status {
+            200 => Ok(said("status").unwrap_or_default()),
+            _ => anyhow::bail!(
+                "{}",
+                said("error").unwrap_or_else(|| format!("the workspace answered {status}"))
+            ),
+        }
+    };
+    for line in run_with(&args, &to, &host, &own, &team, &offer)? {
         println!("{line}");
     }
     Ok(())
@@ -386,7 +424,16 @@ mod tests {
     }
 
     fn args(dry_run: bool) -> BringArgs {
-        BringArgs { to: None, dry_run }
+        BringArgs {
+            to: None,
+            dry_run,
+            offer: false,
+        }
+    }
+
+    /// No offer is asked for in these: one that is made fails the test.
+    fn no_offer(_: &str) -> anyhow::Result<String> {
+        anyhow::bail!("an offer was made that nobody asked for")
     }
 
     /// Every chosen memory arrives whole, in one compartment named for the
@@ -400,6 +447,7 @@ mod tests {
             "laptop",
             &|t, a| own.call(t, a),
             &|t, a| team.call(t, a),
+            &no_offer,
         )?;
         assert!(
             said[0].contains("Brought 57 memories to ws:crew"),
@@ -430,6 +478,7 @@ mod tests {
             "laptop",
             &|t, a| own.call(t, a),
             &|t, a| team.call(t, a),
+            &no_offer,
         )?;
         assert!(again[0].contains("Nothing is chosen"), "{again:?}");
         assert_eq!(team.compartments.borrow().len(), 1);
@@ -450,6 +499,7 @@ mod tests {
             "laptop",
             &|t, a| own.call(t, a),
             &|t, a| team.call(t, a),
+            &no_offer,
         )?;
         assert!(said[0].contains("Brought 3 memories"), "{said:?}");
         assert!(
@@ -472,6 +522,7 @@ mod tests {
             "laptop",
             &|t, a| own.call(t, a),
             &|t, a| team.call(t, a),
+            &no_offer,
         )?;
         assert!(
             said[0].contains("3 chosen memories would be copied")
@@ -514,6 +565,54 @@ mod tests {
         );
         assert!(target(&all, Some("ws:other")).is_err());
         assert_eq!(target(&all[..1], None)?.workspace, "ws:crew");
+        Ok(())
+    }
+
+    /// With `--offer` the compartment they landed in is offered, and what
+    /// came of it is said; an offer that fails leaves them brought.
+    #[test]
+    fn the_compartment_is_offered_when_asked() -> anyhow::Result<()> {
+        let offering = BringArgs {
+            offer: true,
+            ..args(false)
+        };
+        let (own, team) = (Own::with(2), Team::default());
+        let asked = RefCell::new(Vec::new());
+        let offer = |compartment: &str| {
+            asked.borrow_mut().push(compartment.to_string());
+            Ok("offered".to_string())
+        };
+        let said = run_with(
+            &offering,
+            &crew(),
+            "laptop",
+            &|t, a| own.call(t, a),
+            &|t, a| team.call(t, a),
+            &offer,
+        )?;
+        assert_eq!(*asked.borrow(), ["comp:0"]);
+        assert!(
+            said.iter()
+                .any(|l| l.contains("once one of its admins accepts")),
+            "{said:?}"
+        );
+
+        let (own, team) = (Own::with(1), Team::default());
+        let refused = |_: &str| -> anyhow::Result<String> { anyhow::bail!("the pool is closed") };
+        let said = run_with(
+            &offering,
+            &crew(),
+            "laptop",
+            &|t, a| own.call(t, a),
+            &|t, a| team.call(t, a),
+            &refused,
+        )?;
+        assert!(said[0].contains("Brought 1 memory"), "{said:?}");
+        assert!(
+            said.iter()
+                .any(|l| l.contains("could not be offered") && l.contains("the pool is closed")),
+            "{said:?}"
+        );
         Ok(())
     }
 }
