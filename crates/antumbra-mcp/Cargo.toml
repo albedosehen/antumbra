@@ -55,6 +55,8 @@ jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
 # The relic viewer's PDF download is printed by a Gotenberg service; the same
 # blocking client the copal archive uses.
 ureq = "3"
+# A profile's image travels as base64.
+base64 = "0.22"
 # The token a tool call is cancelled by, as rmcp hands it to a tool.
 tokio-util = { version = "0.7", default-features = false }
 # The `Embedder` port (and the answer-escalate test fake) are `#[async_trait]`.

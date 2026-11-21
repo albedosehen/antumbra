@@ -247,6 +247,7 @@ impl McpServer {
             + Self::listing_router()
             + Self::handoff_router()
             + Self::device_router()
+            + Self::profile_router()
             + Self::behavior_router()
             + Self::candidates_router()
             + Self::answer_router()
@@ -575,6 +576,8 @@ impl McpServer {
             "handoffs" => dispatch!(HandoffsParams, handoffs),
             "complete_handoff" => dispatch!(CompleteHandoffParams, complete_handoff),
             "register_device" => dispatch!(device::RegisterDeviceParams, register_device),
+            "profiles" => dispatch!(member_profile::ProfilesParams, profiles),
+            "set_profile" => dispatch!(member_profile::SetProfileParams, set_profile),
             "devices" => {
                 let Json(out) = self.devices().await?;
                 serde_json::to_value(out)

@@ -39,6 +39,7 @@ pub mod orchestration;
 pub mod penumbra;
 pub mod platt;
 pub mod ports;
+pub mod profile;
 pub mod provenance;
 pub mod query;
 pub mod recipe;

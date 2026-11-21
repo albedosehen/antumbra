@@ -271,6 +271,7 @@ mod engine;
 mod handoff;
 pub(crate) mod heavy;
 mod listing;
+mod member_profile;
 mod params;
 mod provenance;
 pub(crate) mod pull;
