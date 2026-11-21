@@ -15,6 +15,7 @@ const VIEWS = {
   dependencies: "Dependencies",
   knowledge: "Knowledge",
   account: "Account",
+  agent: "Agent",
   devices: "Devices and handoffs",
   settings: "Policy",
 };
@@ -235,6 +236,7 @@ async function loadDevices() {
   const out = await call("devices");
   const devices = out.devices ?? [];
   state.shell.devices = devices;
+  offerDevices();
   byId("devices-summary").textContent = devices.length
     ? `${numbers.format(devices.length)} registered`
     : "";
