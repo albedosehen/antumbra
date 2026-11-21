@@ -177,12 +177,16 @@ pub enum SurfaceError {
         reason: String,
     },
     /// `401` or `403`: the token was not accepted, with the server's words
-    /// when it gave any.
+    /// when it gave any. `presented` says whether there was a token to
+    /// refuse: a call that carried none was turned away for want of one, and
+    /// saying its token "may have expired" sends the reader looking for a
+    /// token that was never sent.
     TokenRefused {
         tool: String,
         url: String,
         status: u16,
         said: Option<String>,
+        presented: bool,
     },
     /// The server answered with an `error`: its own words, whatever the status.
     Refused {
@@ -207,13 +211,25 @@ impl std::fmt::Display for SurfaceError {
                 write!(f, "{tool}: could not reach {url}: {reason}")
             }
             Self::TokenRefused {
-                tool, url, said, ..
+                tool,
+                url,
+                said,
+                presented,
+                ..
             } => {
-                write!(
-                    f,
-                    "{tool}: the server at {url} refused the token; it may have expired, or be \
-                     for another server"
-                )?;
+                if *presented {
+                    write!(
+                        f,
+                        "{tool}: the server at {url} refused the token; it may have expired, \
+                         or be for another server"
+                    )?;
+                } else {
+                    write!(
+                        f,
+                        "{tool}: the server at {url} wants a token and none was given; set \
+                         ANTUMBRA_TOKEN, or run `antumbra setup`"
+                    )?;
+                }
                 match said {
                     Some(said) => write!(f, " ({said})"),
                     None => Ok(()),
@@ -311,6 +327,7 @@ impl SurfaceClient {
                 url: self.url.clone(),
                 status: status.as_u16(),
                 said,
+                presented: self.token.is_some(),
             });
         }
         if let Some(said) = said {
@@ -536,6 +553,59 @@ mod tests {
         Ok(())
     }
 
+    /// A `401` to a call that carried no token is for want of one, and one to
+    /// a call that carried a token is that token's: the client knows which it
+    /// sent, and the two read differently to whoever has to act on them.
+    #[test]
+    fn a_call_that_carried_no_token_is_told_none_was_given() -> anyhow::Result<()> {
+        let (url, served) = serve(1, 401, r#"{"error":"missing bearer token"}"#)?;
+        let Err(e) = SurfaceClient::new(&url, None, PATIENCE).call("route", json!({})) else {
+            bail!("a 401 was taken for an answer");
+        };
+        ensure!(
+            matches!(
+                e,
+                SurfaceError::TokenRefused {
+                    presented: false,
+                    ..
+                }
+            ),
+            "{e:?}"
+        );
+        ensure!(
+            e.to_string().contains("wants a token and none was given"),
+            "{e}"
+        );
+        let request = served
+            .requests()?
+            .into_iter()
+            .next()
+            .context("one request")?;
+        ensure!(
+            !request.to_lowercase().contains("authorization:"),
+            "no token, no header: {request}"
+        );
+
+        let (url, served) = serve(1, 401, r#"{"error":"token expired"}"#)?;
+        let Err(e) = SurfaceClient::new(&url, Some("t0ken"), PATIENCE).call("route", json!({}))
+        else {
+            bail!("a 401 was taken for an answer");
+        };
+        ensure!(
+            matches!(
+                e,
+                SurfaceError::TokenRefused {
+                    presented: true,
+                    ..
+                }
+            ),
+            "{e:?}"
+        );
+        ensure!(e.to_string().contains("refused the token"), "{e}");
+        served.requests()?;
+        Ok(())
+    }
+
     #[test]
     fn the_request_carries_the_token_the_machine_and_the_call() -> anyhow::Result<()> {
         let (url, served) = serve(1, 200, "{}")?;
@@ -610,7 +680,8 @@ mod tests {
                 tool: tool(),
                 url: url(),
                 status: 401,
-                said: None
+                said: None,
+                presented: true
             }
             .to_string(),
             "route: the server at http://workspace.example refused the token; it may have \
@@ -621,11 +692,25 @@ mod tests {
                 tool: tool(),
                 url: url(),
                 status: 401,
-                said: Some("token expired".into())
+                said: Some("token expired".into()),
+                presented: true
             }
             .to_string(),
             "route: the server at http://workspace.example refused the token; it may have \
              expired, or be for another server (token expired)"
+        );
+        // A call that carried no token is told so, not that its token expired.
+        assert_eq!(
+            SurfaceError::TokenRefused {
+                tool: tool(),
+                url: url(),
+                status: 401,
+                said: Some("missing bearer token".into()),
+                presented: false
+            }
+            .to_string(),
+            "route: the server at http://workspace.example wants a token and none was given; \
+             set ANTUMBRA_TOKEN, or run `antumbra setup` (missing bearer token)"
         );
         assert_eq!(
             SurfaceError::Refused {
