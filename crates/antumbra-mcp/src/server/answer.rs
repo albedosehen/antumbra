@@ -102,16 +102,17 @@ impl McpServer {
             )));
         };
         // A server that has never answered through an expert may not have its
-        // base yet, and fetching it (about 3 GB) outlasts any caller. It is
-        // fetched in the background and the task escalates until it is here.
+        // base yet, and fetching it (about 3 GB) outlasts any caller, as can
+        // loading it on a slow CPU. Both happen in the background and the task
+        // escalates until the base is ready.
         match serve.prepare() {
             Readiness::Ready => {}
-            Readiness::Fetching(what) => {
+            Readiness::NotYet(why) => {
                 return Ok(Json(escalation(
                     Some(served_by.as_str().to_string()),
                     format!(
-                        "{what} is downloading to this server for its first answer through an \
-                         expert; escalate, and this server answers through experts once it is in"
+                        "{why}; escalate, and this server answers through experts once it is \
+                         ready"
                     ),
                 )));
             }

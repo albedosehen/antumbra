@@ -171,7 +171,7 @@ then add the lifecycle hooks. **[`scripts/hooks/README.md`](../scripts/hooks/REA
 
 ## Optional: answers from experts, and training your own
 
-The stack above serves answers from trained experts (the `answer` tool) on its CPU: the published image is built with the `models` feature. The base model, about 3 GB, is downloaded into the stack's `antumbra-weights` volume the first time the server is asked to answer through an expert, so a server with none never fetches it. While it downloads, `answer` escalates and says so, and your agent does the task as it would have anyway. `antumbra setup check` says whether the server serves experts, on what, and from which form.
+The stack above serves answers from trained experts (the `answer` tool) on its CPU: the published image is built with the `models` feature. The base model, about 3 GB, is downloaded into the stack's `antumbra-weights` volume the first time the server is asked to answer through an expert, so a server with none never fetches it. While it downloads, and then while the server loads it, `answer` escalates and says so, and your agent does the task as it would have anyway. `antumbra setup check` says whether the server serves experts, on what, and from which form.
 
 What it does not do is train. Turning the behaviors you accept into your own standing expert takes a GPU, so the experts a server with no GPU serves are the ones a GPU server trained, which it fetches from that server (`--expert-source`) or reads back from the archive.
 

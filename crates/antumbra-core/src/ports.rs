@@ -118,12 +118,13 @@ pub trait Serve: Send + Sync {
         None
     }
 
-    /// Start fetching what [`Serve::act`] reads when it is not here yet, and
-    /// say whether an answer can be served now. A first answer on a server
-    /// whose base has never been downloaded would otherwise wait out a 3 GB
-    /// download, longer than any caller waits; the `answer` tool escalates
-    /// instead and says why. `Ready`, the default, is an engine with nothing
-    /// to fetch.
+    /// Start making ready what [`Serve::act`] reads, fetching and loading it,
+    /// and say whether an answer can be served now. A first answer on a
+    /// server whose base has never been downloaded would otherwise wait out
+    /// a 3 GB download, and one whose base is not loaded yet a load of a
+    /// minute on a slow CPU, longer than a caller should wait; the `answer`
+    /// tool escalates instead and says why. `Ready`, the default, is an
+    /// engine with nothing to make ready.
     fn prepare(&self) -> Readiness {
         Readiness::Ready
     }
@@ -132,12 +133,13 @@ pub trait Serve: Send + Sync {
 /// Whether an engine can answer now, from [`Serve::prepare`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Readiness {
-    /// What it reads is here.
+    /// What it reads is here and loaded.
     Ready,
-    /// It is fetching what it reads, named here, which this ask or an
-    /// earlier one started.
-    Fetching(String),
-    /// Fetching failed, for the reason given. The next ask starts it again.
+    /// Not yet, for the reason given: what it reads is downloading or
+    /// loading, started by this ask or an earlier one.
+    NotYet(String),
+    /// Making it ready failed, for the reason given. The next ask starts
+    /// again.
     Failed(String),
 }
 

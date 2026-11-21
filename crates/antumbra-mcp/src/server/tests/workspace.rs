@@ -887,8 +887,12 @@ async fn answer_escalates_while_the_base_is_fetched() -> anyhow::Result<()> {
     use antumbra_core::ports::Readiness;
     for (readiness, said) in [
         (
-            Readiness::Fetching("the base model (Qwen/x)".into()),
-            "the base model (Qwen/x) is downloading",
+            Readiness::NotYet("the base model (Qwen/x) is downloading to this server".into()),
+            "the base model (Qwen/x) is downloading to this server; escalate",
+        ),
+        (
+            Readiness::NotYet("the base model (Qwen/x) is loading on this server".into()),
+            "is loading on this server; escalate",
         ),
         (
             Readiness::Failed("no network".into()),
