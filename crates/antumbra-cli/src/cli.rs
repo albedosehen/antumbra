@@ -241,6 +241,10 @@ pub enum Command {
     /// collect your token once you are let in (`join --status`). Asking
     /// changes nothing about this machine's own setup.
     Join(crate::join::JoinArgs),
+    /// Copy the memories you chose, on the Bring page of your own dashboard,
+    /// to a workspace this machine joined. They are copies, and land in a
+    /// compartment of yours there. `--dry-run` says how many and sends none.
+    Bring(crate::bring::BringArgs),
     /// Claude Code with its telemetry off: what that silently costs,
     /// and what is done about it.
     Claude {

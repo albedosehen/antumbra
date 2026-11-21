@@ -66,6 +66,11 @@ pub(super) struct BringCandidatesParams {
     pub(super) limit: Option<u32>,
     #[serde(default)]
     pub(super) offset: Option<u32>,
+    /// Send each memory whole, with its confidence and its git anchor: what
+    /// copying it elsewhere needs. Left out, a memory's text is cut to what a
+    /// page choosing among many shows.
+    #[serde(default)]
+    pub(super) full: bool,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -88,6 +93,15 @@ pub(super) struct CandidateView {
     /// Why it is held back, when it is: `housekeeping` or `looks_secret`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) held: Option<String>,
+    /// With `full`: how sure its writer was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) confidence: Option<f32>,
+    /// With `full`: whether it changes over time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) volatile: Option<bool>,
+    /// With `full`: where it was learned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) provenance: Option<ProvenanceView>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -301,7 +315,8 @@ impl McpServer {
             .skip(offset)
             .take(limit)
             .map(|m| {
-                let shown: String = m.memory.content.chars().take(SHOWN_CHARS).collect();
+                let most = if p.full { usize::MAX } else { SHOWN_CHARS };
+                let shown: String = m.memory.content.chars().take(most).collect();
                 CandidateView {
                     id: m.memory.id.as_str().to_string(),
                     truncated: shown.len() < m.memory.content.len(),
@@ -314,6 +329,11 @@ impl McpServer {
                     reinforcement: m.memory.reinforcement,
                     state: m.choice.map(|c| c.as_str().to_string()),
                     held: m.held.map(|h| h.as_str().to_string()),
+                    confidence: p.full.then_some(m.memory.confidence),
+                    volatile: p.full.then_some(m.memory.volatile),
+                    provenance: GitProvenance::from_evidence(&m.memory.evidence)
+                        .filter(|_| p.full)
+                        .map(|anchor| ProvenanceView::from(&anchor)),
                 }
             })
             .collect();
