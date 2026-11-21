@@ -1088,7 +1088,7 @@ fn finish(
     // A setup run from a session Unity Gateway started inherits what `ug`
     // set for the agent it started, which is not the user's own.
     let env = agents::gateway::outside(home, &variable);
-    let find = |name: &str| find_program(name);
+    let find = |name: &str| find_running(name);
     let ground = agents::Ground {
         home,
         antumbra: agents::Program::this(find_program("antumbra").is_some()),
@@ -1096,6 +1096,18 @@ fn finish(
         find: &find,
     };
     let chosen = chosen(common, &ground)?;
+    // A command that is there and does not run is said, so an agent left out
+    // for it is not a silence.
+    for agent in Agent::ALL {
+        if let Some(path) = find_program(agent.program()).filter(|path| !runs(path)) {
+            steps.info(format!(
+                "{} was found at {} and does not run (`{} --version` fails), so it is not taken as installed",
+                agent.title(),
+                path.display(),
+                agent.program()
+            ));
+        }
+    }
     // Claude Code's own settings, as they stand when they are asked for.
     let settings = || -> Value {
         json_at(
@@ -1850,7 +1862,7 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
     };
     let variable = |name: &str| std::env::var(name).ok();
     let env = agents::gateway::outside(&home, &variable);
-    let find = |name: &str| find_program(name);
+    let find = |name: &str| find_running(name);
     let ground = agents::Ground {
         home: &home,
         antumbra: agents::Program::this(find_program("antumbra").is_some()),
@@ -2262,6 +2274,69 @@ fn secret(n: usize, url_safe: bool) -> anyhow::Result<String> {
 
 /// A program on the PATH. On Windows, `.exe`, `.cmd` and `.bat` count, and
 /// the native Claude Code installer's `~/.local/bin` is looked in too.
+/// How long a program is given to say its version before it is taken to run.
+const VERSION_WAIT: Duration = Duration::from_secs(5);
+
+/// Whether the program at `path` runs: `--version` exits with success. A
+/// file by an agent's name on the PATH is not always the agent: a wrapper
+/// another tool installs can be there and fail for want of the real thing.
+/// One that has not answered in [`VERSION_WAIT`] is stopped and taken to run:
+/// slowness is not a failure. Asked once for a path in a run.
+pub(crate) fn runs(path: &Path) -> bool {
+    static ASKED: std::sync::Mutex<Option<std::collections::HashMap<PathBuf, bool>>> =
+        std::sync::Mutex::new(None);
+    // A poisoned lock holds a whole map: each entry is written in one step.
+    let known = |path: &Path| {
+        ASKED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_or_insert_with(Default::default)
+            .get(path)
+            .copied()
+    };
+    if let Some(known) = known(path) {
+        return known;
+    }
+    let answer = match Command::new(path)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Err(_) => false,
+        Ok(mut child) => {
+            let started = std::time::Instant::now();
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => break status.success(),
+                    Ok(None) if started.elapsed() < VERSION_WAIT => {
+                        std::thread::sleep(Duration::from_millis(25));
+                    }
+                    Ok(None) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break true;
+                    }
+                    Err(_) => break false,
+                }
+            }
+        }
+    };
+    ASKED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_or_insert_with(Default::default)
+        .insert(path.to_path_buf(), answer);
+    answer
+}
+
+/// [`find_program`], for a program that also runs ([`runs`]): how an agent
+/// is found on this machine.
+pub(crate) fn find_running(name: &str) -> Option<PathBuf> {
+    find_program(name).filter(|path| runs(path))
+}
+
 pub(crate) fn find_program(name: &str) -> Option<PathBuf> {
     let exts: &[&str] = if cfg!(windows) {
         &[".exe", ".cmd", ".bat"]
@@ -3048,6 +3123,36 @@ mod tests {
         };
         anyhow::ensure!(problem.contains("644"), "{problem}");
         std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    /// A file by an agent's name that fails is not the agent; one that
+    /// answers is; and one that is not a program at all is not.
+    #[cfg(unix)]
+    #[test]
+    fn a_command_that_is_there_and_fails_does_not_run() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::agents::scratch::Scratch::new("runs")?;
+        let program = |name: &str, body: &str| -> anyhow::Result<PathBuf> {
+            let path = dir.path().join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n"))?;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+            Ok(path)
+        };
+        let wrapper = program(
+            "wrapper",
+            "echo 'Error: codex not found in PATH' >&2; exit 1",
+        )?;
+        let real = program("real", "echo 'codex 1.2.3'")?;
+        let text = dir.path().join("notes.txt");
+        std::fs::write(&text, "not a program")?;
+        assert!(!runs(&wrapper));
+        assert!(runs(&real));
+        assert!(!runs(&text));
+        assert!(!runs(&dir.path().join("nothing-here")));
+        // Asked once: the answer stands though the file has changed.
+        std::fs::write(&wrapper, "#!/bin/sh\nexit 0\n")?;
+        assert!(!runs(&wrapper));
         Ok(())
     }
 }
