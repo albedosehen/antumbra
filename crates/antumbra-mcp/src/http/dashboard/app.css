@@ -2229,3 +2229,95 @@ select.role {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Bring: choosing among many */
+
+.bring-filter {
+  display: grid;
+  gap: 16px;
+  padding: 16px 20px;
+}
+
+.bring-facets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px 16px;
+}
+
+.bring-facets .write {
+  padding: 0;
+}
+
+.bring-filter .write-row {
+  margin: 0;
+  gap: 8px 24px;
+}
+
+.bring-filter .check {
+  margin: 0;
+}
+
+.bring-bar {
+  position: sticky;
+  top: 60px;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin: 16px 0 8px;
+  padding: 10px 12px 10px 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-l);
+  background: var(--raised);
+}
+
+.bring-total {
+  margin: 0;
+  font-weight: 600;
+}
+
+#bring-status {
+  min-height: 1.4em;
+  margin: 0 4px 8px;
+}
+
+.bring-list > li {
+  display: block;
+  padding: 14px 16px;
+}
+
+.bring-row p {
+  margin: 0;
+}
+
+.bring-row .content {
+  max-width: 96ch;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.bring-row .meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  margin-top: 8px;
+}
+
+.bring-row .actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 18px;
+  margin-top: 8px;
+}
+
+button.link.strong {
+  font-weight: 700;
+}
+
+.held {
+  color: var(--danger);
+}

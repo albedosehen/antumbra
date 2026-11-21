@@ -13,6 +13,7 @@ pub mod contribution;
 pub mod device;
 pub mod document;
 pub mod edge;
+pub mod elevation;
 pub mod embedder_config;
 pub mod evaluation;
 pub mod expert;

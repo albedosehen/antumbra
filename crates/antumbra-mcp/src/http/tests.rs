@@ -1400,3 +1400,181 @@ async fn a_members_only_server_serves_no_one_it_did_not_let_in() -> anyhow::Resu
     anyhow::ensure!(status == StatusCode::OK, "the invited member: {status}");
     Ok(())
 }
+
+/// Choosing what to bring to a workspace: a person's own memories are
+/// narrowed and counted on the server, the hooks' own and secret-looking ones
+/// are held back until asked for, a choice is recorded for some or for
+/// everything a filter matches, and nobody decides about another's memory.
+#[tokio::test]
+async fn memories_are_chosen_to_bring_by_filter_and_by_hand() -> anyhow::Result<()> {
+    let st = state().await?;
+    let (dana, eli) = (token("ws:own", "user:dana")?, token("ws:own", "user:eli")?);
+    let ask = |tok: &str, tool: &str, arguments: serde_json::Value| {
+        let (st, tok) = (st.clone(), tok.to_string());
+        let body = serde_json::json!({ "tool": tool, "arguments": arguments }).to_string();
+        async move {
+            let res = router(st).oneshot(call_request(Some(&tok), &body)?).await?;
+            let status = res.status();
+            let text = body_text(res).await?;
+            anyhow::ensure!(status == StatusCode::OK, "{status}: {text}");
+            anyhow::Ok(serde_json::from_str::<serde_json::Value>(&text)?)
+        }
+    };
+    let billing = serde_json::json!({ "repo": "github.com/acme/billing", "commit": "3f9c2ab", "branch": "main" });
+    let search = serde_json::json!({ "repo": "github.com/acme/search", "commit": "91aa0de", "branch": "main" });
+    let mut ids = Vec::new();
+    for (content, network, provenance) in [
+        (
+            "Billing retries a failed charge three times.",
+            "world",
+            Some(&billing),
+        ),
+        (
+            "Invoices are numbered per legal entity.",
+            "world",
+            Some(&billing),
+        ),
+        (
+            "A Friday deploy took checkout down for eleven minutes.",
+            "bank",
+            Some(&billing),
+        ),
+        (
+            "The search tier's limit was the connection pool.",
+            "bank",
+            Some(&search),
+        ),
+        ("Prefer small pull requests.", "opinion", None),
+        ("the staging password: Tr0ub4dor&3xyz", "world", None),
+        ("[skill-use:dataviz] dataviz", "world", None),
+    ] {
+        let mut arguments = serde_json::json!({ "content": content, "network": network });
+        if let Some(provenance) = provenance {
+            arguments["provenance"] = provenance.clone();
+        }
+        let stored = ask(&dana, "store_memory", arguments).await?;
+        ids.push(stored["id"].as_str().unwrap_or_default().to_string());
+    }
+    let theirs = ask(
+        &eli,
+        "store_memory",
+        serde_json::json!({ "content": "Eli's own note.", "network": "world" }),
+    )
+    .await?;
+
+    // What is offered: her own, with the two held back counted and left out.
+    let all = ask(&dana, "bring_candidates", serde_json::json!({})).await?;
+    anyhow::ensure!(all["total"] == 5 && all["held_back"] == 2, "{all}");
+    anyhow::ensure!(
+        !all.to_string().contains("Eli's own note"),
+        "another member's memory was offered"
+    );
+    anyhow::ensure!(
+        !all.to_string().contains("Tr0ub4dor"),
+        "a secret was offered"
+    );
+    let repos = serde_json::json!([
+        ["github.com/acme/billing", 3],
+        ["github.com/acme/search", 1],
+        ["none", 1]
+    ]);
+    anyhow::ensure!(all["facets"]["repo"] == repos, "{}", all["facets"]);
+    let held = ask(
+        &dana,
+        "bring_candidates",
+        serde_json::json!({ "filter": { "include_held": true } }),
+    )
+    .await?;
+    anyhow::ensure!(held["total"] == 7, "{held}");
+    let why: Vec<&str> = held["memories"]
+        .as_array()
+        .map(|m| m.iter().filter_map(|m| m["held"].as_str()).collect())
+        .unwrap_or_default();
+    anyhow::ensure!(
+        why.contains(&"looks_secret") && why.contains(&"housekeeping"),
+        "{why:?}"
+    );
+
+    // Narrowed on the server, and a page is a page of the whole.
+    let narrow = serde_json::json!({ "repo": "github.com/acme/billing", "network": "world" });
+    let page = ask(
+        &dana,
+        "bring_candidates",
+        serde_json::json!({ "filter": narrow, "limit": 1 }),
+    )
+    .await?;
+    anyhow::ensure!(
+        page["total"] == 2 && page["memories"].as_array().is_some_and(|m| m.len() == 1),
+        "{page}"
+    );
+    let found = ask(
+        &dana,
+        "bring_candidates",
+        serde_json::json!({ "filter": { "contains": "CHECKOUT" } }),
+    )
+    .await?;
+    anyhow::ensure!(found["total"] == 1, "{found}");
+
+    // Everything a filter matches is chosen in one call, with nothing listed.
+    let chose = ask(
+        &dana,
+        "bring_choose",
+        serde_json::json!({ "choice": "chosen", "filter": { "repo": "github.com/acme/billing" } }),
+    )
+    .await?;
+    anyhow::ensure!(chose["changed"] == 3, "{chose}");
+    let after = ask(&dana, "bring_candidates", serde_json::json!({})).await?;
+    anyhow::ensure!(
+        after["total"] == 2 && after["states"]["chosen"] == 3,
+        "{after}"
+    );
+    let chosen = ask(
+        &dana,
+        "bring_candidates",
+        serde_json::json!({ "filter": { "state": "chosen" } }),
+    )
+    .await?;
+    anyhow::ensure!(chosen["total"] == 3, "{chosen}");
+
+    // By hand: one declined, one undone, and another member's left alone.
+    let by_hand =
+        serde_json::json!({ "choice": "never", "ids": [ids[4], theirs["id"], "memory:nope"] });
+    anyhow::ensure!(ask(&dana, "bring_choose", by_hand).await?["changed"] == 1);
+    anyhow::ensure!(
+        ask(
+            &dana,
+            "bring_choose",
+            serde_json::json!({ "choice": "clear", "ids": [ids[0]] })
+        )
+        .await?["changed"]
+            == 1
+    );
+    let states = ask(&dana, "bring_candidates", serde_json::json!({})).await?["states"].clone();
+    anyhow::ensure!(states["chosen"] == 2 && states["never"] == 1, "{states}");
+    // "Choose all" leaves what is held back alone unless told to take it.
+    let rest = ask(
+        &dana,
+        "bring_choose",
+        serde_json::json!({ "choice": "chosen" }),
+    )
+    .await?;
+    anyhow::ensure!(rest["changed"] == 2, "{rest}");
+    let states = ask(&dana, "bring_candidates", serde_json::json!({})).await?["states"].clone();
+    anyhow::ensure!(
+        states["chosen"] == 4 && states["undecided"] == 2,
+        "{states}"
+    );
+
+    // Eli's choices are Eli's: none yet, and Dana's are not his to see.
+    let his = ask(
+        &eli,
+        "bring_candidates",
+        serde_json::json!({ "filter": { "state": "any" } }),
+    )
+    .await?;
+    anyhow::ensure!(
+        his["total"] == 1 && his["states"]["undecided"] == 1,
+        "{his}"
+    );
+    Ok(())
+}

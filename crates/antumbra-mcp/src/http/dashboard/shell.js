@@ -16,6 +16,7 @@ const VIEWS = {
   knowledge: "Knowledge",
   account: "Account",
   agent: "Agent",
+  bring: "Bring",
   devices: "Devices and handoffs",
   members: "Members",
   settings: "Policy",

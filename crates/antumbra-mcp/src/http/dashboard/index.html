@@ -14,6 +14,7 @@
 <script src="dashboard/behaviors.js" defer></script>
 <script src="dashboard/shell.js" defer></script>
 <script src="dashboard/manage.js" defer></script>
+<script src="dashboard/bring.js" defer></script>
 </head>
 <body>
 
@@ -58,6 +59,7 @@
         <a class="nav-item" href="#/account" data-nav="account" title="Account"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="6.5" r="1.8"/><path d="M4.6 12.2c.7-1.5 1.900-2.2 3.400-2.2s2.7.7 3.400 2.2"/></svg><span>Account</span></a>
         <a class="nav-item" href="#/devices" data-nav="devices" title="Devices"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v7h-11zM6 13.5h4M8 10.5v3"/></svg><span>Devices</span><span id="nav-handoffs" class="count" hidden></span></a>
         <a class="nav-item" href="#/agent" data-nav="agent" title="Agent"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5V5a4 4 0 0 1 8 0v1.5M3 6.5h10v5.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 12zM6.2 9.500h.01M9.8 9.500h.01"/></svg><span>Agent</span></a>
+        <a class="nav-item" href="#/bring" data-nav="bring" title="Bring to a workspace"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 9.5v3h11v-3M8 2.5v7.5M5 5.5l3-3 3 3"/></svg><span>Bring</span><span id="nav-chosen" class="count" hidden></span></a>
       <p class="nav-group">Workspace settings</p>
         <a class="nav-item" href="#/members" data-nav="members" title="Members"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5.5" r="2.2"/><path d="M2 13c.5-2.2 2-3.3 4-3.3s3.5 1.1 4 3.3"/><circle cx="11.5" cy="6" r="1.7"/><path d="M11.2 9.8c1.5.1 2.5 1 2.8 2.7"/></svg><span>Members</span><span id="nav-asking" class="count" hidden></span></a>
         <a class="nav-item" href="#/settings" data-nav="settings" title="Policy"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/></svg><span>Policy</span></a>
@@ -476,6 +478,54 @@
           <div class="panel">
             <ul id="rules" class="list rules"></ul>
           </div>
+        </section>
+      </div>
+
+      <div class="view" data-view="bring" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Bring to a workspace</h2>
+          <p class="view-lede">Nothing you remember here reaches a workspace by itself. Choose what goes: narrow your memories, take a whole group at once, and look over what you chose. What you bring is copied; the original stays yours.</p>
+        </header>
+        <section aria-labelledby="h-bring">
+          <div class="section-head">
+            <h3 id="h-bring">Your memories</h3>
+            <p id="bring-states" class="muted small" aria-live="polite"></p>
+          </div>
+          <form id="bring-filter" class="panel bring-filter">
+            <fieldset class="segmented">
+              <legend class="visually-hidden">Which</legend>
+              <input id="bring-undecided" type="radio" name="state" value="undecided" checked><label for="bring-undecided">To decide</label>
+              <input id="bring-chosen" type="radio" name="state" value="chosen"><label for="bring-chosen">Chosen</label>
+              <input id="bring-declined" type="radio" name="state" value="declined"><label for="bring-declined">Left out</label>
+              <input id="bring-never" type="radio" name="state" value="never"><label for="bring-never">Never</label>
+              <input id="bring-brought" type="radio" name="state" value="brought"><label for="bring-brought">Brought</label>
+            </fieldset>
+            <div class="bring-facets">
+              <div class="write"><label for="bring-network">Kind</label><select id="bring-network" name="network"></select></div>
+              <div class="write"><label for="bring-repo">Repository</label><select id="bring-repo" name="repo"></select></div>
+              <div class="write"><label for="bring-compartment">Compartment</label><select id="bring-compartment" name="compartment"></select></div>
+              <div class="write"><label for="bring-host">Written on</label><select id="bring-host" name="host"></select></div>
+              <div class="write"><label for="bring-month">Month</label><select id="bring-month" name="month"></select></div>
+              <div class="write"><label for="bring-contains">Says</label><input id="bring-contains" name="contains" type="text" placeholder="words it holds"></div>
+            </div>
+            <div class="write-row">
+              <label class="check"><input id="bring-used" name="used" type="checkbox"> Only what has been used since it was written</label>
+              <label class="check"><input id="bring-held" name="include_held" type="checkbox"> Show what is held back <span id="bring-held-count" class="muted"></span></label>
+              <button id="bring-reset" type="button" class="link">Clear the filters</button>
+            </div>
+          </form>
+          <div class="bring-bar">
+            <p id="bring-total" class="bring-total" aria-live="polite"></p>
+            <div class="save-actions">
+              <button id="bring-all-second" type="button" class="quiet"></button>
+              <button id="bring-all" type="button"></button>
+            </div>
+          </div>
+          <p id="bring-status" class="small muted" role="status"></p>
+          <div class="panel">
+            <ul id="bring-list" class="list bring-list"></ul>
+          </div>
+          <button id="bring-more" type="button" class="quiet more" hidden></button>
         </section>
       </div>
 

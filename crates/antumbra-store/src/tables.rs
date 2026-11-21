@@ -10,6 +10,8 @@ pub const COMPARTMENT: &str = "compartment";
 pub const CONTRIBUTION: &str = "contribution";
 pub const DEVICE_PROFILE: &str = "device_profile";
 pub const DOCUMENT_CHUNK: &str = "document_chunk";
+/// What a person decided about bringing a memory to a workspace.
+pub const MEMORY_CHOICE: &str = "memory_choice";
 /// A member's name and image.
 pub const MEMBER_PROFILE: &str = "member_profile";
 pub const EMBEDDER_CONFIG: &str = "embedder_config";
@@ -80,6 +82,7 @@ pub const ALL: &[&str] = &[
     MAGIC_LINK_USE,
     MANIFEST_SET,
     MEMBER_PROFILE,
+    MEMORY_CHOICE,
     MEMORY,
     MEMORY_CHUNK,
     MEMORY_EDGE,
@@ -116,6 +119,6 @@ mod tests {
         let mut named: Vec<String> = ALL.iter().map(|n| (*n).to_owned()).collect();
         named.sort();
         assert_eq!(named, defined);
-        assert_eq!(ALL.len(), 44, "every name is distinct");
+        assert_eq!(ALL.len(), 45, "every name is distinct");
     }
 }

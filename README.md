@@ -103,7 +103,7 @@ The same engine runs two ways. **Offline**: an embedded store on your disk and M
 
 | Surface | Where | For |
 | --- | --- | --- |
-| MCP | `/mcp`, or stdio | agents. 40 tools; `--tools agent` gives a coding session the 21 it needs and keeps operator actions out of its reach |
+| MCP | `/mcp`, or stdio | agents. 42 tools; `--tools agent` gives a coding session the 21 it needs and keeps operator actions out of its reach |
 | Tool calls over REST | `POST /mcp/call` | the hooks, the CLI and scripts |
 | Dashboard | `/dashboard` | you: memory, behaviors, experts, dependencies, knowledge, devices, and the workspace's policy |
 | Relics | `/relics` | the pages an agent published, with a gallery, a sandboxed viewer and downloads |

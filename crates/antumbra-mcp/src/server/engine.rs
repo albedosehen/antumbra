@@ -248,6 +248,7 @@ impl McpServer {
             + Self::handoff_router()
             + Self::device_router()
             + Self::profile_router()
+            + Self::bring_router()
             + Self::behavior_router()
             + Self::candidates_router()
             + Self::answer_router()
@@ -576,6 +577,8 @@ impl McpServer {
             "handoffs" => dispatch!(HandoffsParams, handoffs),
             "complete_handoff" => dispatch!(CompleteHandoffParams, complete_handoff),
             "register_device" => dispatch!(device::RegisterDeviceParams, register_device),
+            "bring_candidates" => dispatch!(bring::BringCandidatesParams, bring_candidates),
+            "bring_choose" => dispatch!(bring::BringChooseParams, bring_choose),
             "profiles" => dispatch!(member_profile::ProfilesParams, profiles),
             "set_profile" => dispatch!(member_profile::SetProfileParams, set_profile),
             "devices" => {

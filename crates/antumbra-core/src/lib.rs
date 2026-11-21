@@ -21,6 +21,7 @@ pub mod critic;
 pub mod depgraph;
 pub mod device;
 pub mod document;
+pub mod elevation;
 pub mod error;
 pub mod evaluation;
 pub mod expert;
