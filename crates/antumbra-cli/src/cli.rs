@@ -236,6 +236,11 @@ pub enum Command {
         #[command(subcommand)]
         mode: Option<crate::setup::SetupMode>,
     },
+    /// Ask to join a workspace someone else hosts, with a join code one of its
+    /// admins gave you (`join <server> --code <code> --handle <handle>`), and
+    /// collect your token once you are let in (`join --status`). Asking
+    /// changes nothing about this machine's own setup.
+    Join(crate::join::JoinArgs),
     /// Claude Code with its telemetry off: what that silently costs,
     /// and what is done about it.
     Claude {

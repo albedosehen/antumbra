@@ -327,7 +327,7 @@ async function loadJoining() {
 
 /** Decide a request and redraw the page from the server. */
 async function decideRequest(key, approve, reason, status, name) {
-  const done = approve ? `${name} may join: their token is theirs to collect, once.` : `${name} was refused.`;
+  const done = approve ? `${name} may join: they collect their token with antumbra join --status.` : `${name} was refused.`;
   const ok = await attempt(status, approve ? "Approving" : "Refusing", done, () =>
     consoleFetch("join/decide", { key, approve, reason }),
   );

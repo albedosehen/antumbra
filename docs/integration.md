@@ -480,6 +480,15 @@ A server that holds an HS256 secret can let people into its workspaces without a
 3. The workspace's admins see the request (`GET /join/requests`, the Members page) and decide it (`POST /join/decide`). The first decision stands.
 4. The person asks how it stands with `POST /join/collect` `{request, secret}`. Approved, the answer carries their token, **once**: they are `user:<handle>` in the workspace, a member, with the name they asked under. A refusal comes with what the admin said. A request nobody decides expires with its code, and an approval nobody collects lapses after seven days.
 
+From a machine, that is two commands. Asking changes nothing about the machine's own setup:
+
+```sh
+antumbra join https://memory.example --code aj1_... --handle dana --name "Dana Whitfield" --note "I work on checkout."
+antumbra join --status   # how it stands; collects the token once approved
+```
+
+The first keeps `~/.antumbra/join.json`, the owner's alone, with a secret made on the machine; the server is sent the secret's digest. `--status` shows the secret to collect, writes the token to `~/.antumbra/workspaces/<server>__<workspace>/token.txt`, and leaves the token the machine already uses where it is: your private memories stay yours and stay in use. `antumbra join --forget` drops a request that is waited on. Like `setup hosted`, it refuses a plain `http://` address that is not this machine unless `--allow-http` says the network is trusted.
+
 The two routes that take no token are counted together, 60 a minute. A server that verifies RS256 holds no key to sign with and takes no requests.
 
 `--members-only` (`ANTUMBRA_MEMBERS_ONLY=true`) makes a server serve only members: a signed token for a pair a workspace does not hold is refused where it was provisioned on its first call. Turn it on once the workspaces a server holds have their owners.

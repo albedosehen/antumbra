@@ -30,6 +30,7 @@ mod gate_sweep;
 mod generation_report;
 mod gitctx;
 mod gitfacts;
+mod join;
 #[cfg(feature = "models")]
 mod learned_gate;
 mod machine;
@@ -163,6 +164,10 @@ async fn run() -> anyhow::Result<()> {
         Command::Setup { mode } => {
             // Files, Docker, HTTP and prompts: all blocking, so off the runtime.
             tokio::task::spawn_blocking(move || setup::run(mode)).await??;
+        }
+        Command::Join(args) => {
+            // Files and HTTP: blocking, so off the runtime.
+            tokio::task::spawn_blocking(move || join::run(args)).await??;
         }
         Command::Claude { action } => {
             // Blocking work (files, git, an HTTP surface): keep it off the runtime.
