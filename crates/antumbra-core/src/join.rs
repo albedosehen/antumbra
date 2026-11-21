@@ -151,6 +151,11 @@ pub struct JoinRequest {
     pub decided_by: Option<UserId>,
     /// What the admin who decided said, shown to the person.
     pub reason: Option<String>,
+    /// The address they asked from, when a control plane verified it by a
+    /// link they followed before the request was made. `None` where an
+    /// admin's approval is the only verification.
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 impl JoinRequest {

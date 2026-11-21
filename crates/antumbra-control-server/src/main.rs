@@ -256,6 +256,10 @@ async fn serve(a: ServeArgs) -> anyhow::Result<()> {
             crate::http::LINKS_PER_CLIENT,
             crate::http::LINKS_EVERYONE,
         )),
+        collects: Arc::new(antumbra_core::limit::Limiter::new(
+            crate::http::COLLECTS_PER_CLIENT,
+            crate::http::COLLECTS_EVERYONE,
+        )),
     };
     let app = router(state);
     let listener = tokio::net::TcpListener::bind(&a.addr).await?;
@@ -640,6 +644,10 @@ mod tests {
             limits: Arc::new(antumbra_core::limit::Limiter::new(
                 crate::http::LINKS_PER_CLIENT,
                 crate::http::LINKS_EVERYONE,
+            )),
+            collects: Arc::new(antumbra_core::limit::Limiter::new(
+                crate::http::COLLECTS_PER_CLIENT,
+                crate::http::COLLECTS_EVERYONE,
             )),
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;

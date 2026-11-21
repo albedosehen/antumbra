@@ -131,6 +131,8 @@ fn request_view(request: &JoinRequest) -> serde_json::Value {
         "decided_at": request.decided_at.map(|at| at.to_rfc3339()),
         "decided_by": request.decided_by.as_ref().map(|by| by.as_str().to_string()),
         "reason": request.reason,
+        // An address a control plane verified they hold, when one did.
+        "email": request.email,
     })
 }
 
@@ -402,6 +404,7 @@ async fn request(State(state): State<Arc<HttpState>>, req: Request<Body>) -> Res
                 note,
                 host,
                 secret_digest: &digest,
+                email: None,
             },
             Utc::now(),
         )
