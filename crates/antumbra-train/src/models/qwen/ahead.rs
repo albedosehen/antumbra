@@ -32,8 +32,8 @@
 //! one width, the rest of the width padding, because that is what the
 //! device's library computes a row the same way in. A row there costs
 //! nothing more, so every guess offered rides; what it costs is that every
-//! pass is a wide one, about two fifths dearer than a pass of one row on
-//! the card it was measured on.
+//! pass is a wide one, about a fifth dearer than a pass of one row on the
+//! card it was measured on.
 //!
 //! Requests answered together read ahead too ([`pass`]): each carries its
 //! own guesses in the passes they share, as far as a pass has rows beside
@@ -362,7 +362,7 @@ pub(in crate::models::qwen) fn decode(
     // Where rows are read as tensors, every pass is read against as many
     // positions as the generation may come to; one that may come to more
     // than can be turned is decoded a token at a time.
-    if model.reads_ahead_as_tensors() && !model.read_within(prompt_len + most) {
+    if model.reads_ahead_as_tensors() && !model.read_within(prompt_len + most)? {
         return Ok(None);
     }
     // The prompt, and the first token after it.

@@ -31,6 +31,16 @@
 //! taught, and that one asked the same tasks again wrote the same 78
 //! answers, at 1.4, 1.8 and 12.5 tokens a pass.
 //!
+//! A pass of this shape is not the plain steps a row at a time made wide.
+//! Those are thousands of launches, and a launch costs what it costs
+//! however little it multiplies: as first built a wide pass took two fifths
+//! longer than a pass of one row. So the adapters of projections that read
+//! one input are joined when a generation begins and multiplied as two
+//! products for the group, and a norm's steps up to its first rounding are
+//! one kernel ([`super::layers`]). That is a fifth longer than a pass of
+//! one row, and reading ahead is the faster of the two with nothing
+//! remembered as well.
+//!
 //! That is a property of a library that is not ours, so it is asked of the
 //! device a model is on before anything is read this way
 //! ([`QwenLora::keeps_rows_apart`]), and a device that does not keep to it
@@ -39,7 +49,7 @@
 //! A model that is not set to read ahead decodes a row a pass there too, as
 //! it always has. That is the other rounding: its answer and a reader's to
 //! the same prompt can differ in a word where two tokens are all but tied
-//! (34 of those 78 did), so a model reads ahead or does not for as long as
+//! (33 of those 78 did), so a model reads ahead or does not for as long as
 //! its answers are to be the same answers, and whatever admits an expert
 //! decodes as whatever serves it.
 
@@ -68,18 +78,39 @@ impl QwenLora {
                 .get_or_init(|| self.keeps_rows_apart().unwrap_or(false))
     }
 
-    /// The most positions the generation about to be read may come to: its
-    /// prompt and the most tokens it may write. Every pass read ahead as
-    /// tensors attends over that many positions and a pass's width more,
-    /// whatever the cache holds by then. `false` where the rotary table does
-    /// not reach that far: such a generation is not read this way.
-    pub(in crate::models::qwen) fn read_within(&mut self, positions: usize) -> bool {
+    /// A generation is about to be read ahead as tensors, and may come to
+    /// `positions` positions: its prompt and the most tokens it may write.
+    /// Every pass of it attends over that many positions and a pass's width
+    /// more, whatever the cache holds by then; and every pass multiplies
+    /// the adapters as they are joined here, as they are now
+    /// ([`super::layers`]' `Joined`): they may be set or trained between
+    /// generations, never within one. `false`, with nothing joined, where
+    /// the rotary table does not reach that far: such a generation is not
+    /// read this way.
+    pub(in crate::models::qwen) fn read_within(&mut self, positions: usize) -> CResult<bool> {
         let reach = self
             .layers
             .first()
             .map_or(0, |layer| layer.positions_most());
         self.room = positions;
-        positions + WIDE <= reach
+        if positions + WIDE > reach {
+            return Ok(false);
+        }
+        for layer in &mut self.layers {
+            layer.join()?;
+        }
+        Ok(true)
+    }
+
+    /// Whether the pass about to be read is one read ahead as tensors: its
+    /// norms in one kernel and its adapters as they were joined, in every
+    /// layer and before the head. Set for the pass and unset after it,
+    /// whatever it came to: nothing else is read that way.
+    fn set_fused(&mut self, on: bool) {
+        for layer in &mut self.layers {
+            layer.set_fused(on);
+        }
+        self.norm.set_fused(on);
     }
 
     /// The token the head ranks first after the last of `tokens`, the first
@@ -96,12 +127,19 @@ impl QwenLora {
         if tokens.is_empty() || !self.reads_ahead_as_tensors() {
             return Ok(None);
         }
+        self.set_fused(true);
+        let first = self.first_fused(tokens, position);
+        self.set_fused(false);
+        first.map(Some)
+    }
+
+    fn first_fused(&mut self, tokens: &[u32], position: usize) -> CResult<u32> {
         let input = Tensor::new(tokens, &self.device)?.unsqueeze(0)?;
         let hidden = self.hidden(&input, position, true)?;
         let last = hidden.narrow(1, tokens.len() - 1, 1)?;
         let firsts = first_places(&self.logits(&last)?.squeeze(0)?)?;
         match firsts.first() {
-            Some(first) => Ok(Some(*first)),
+            Some(first) => Ok(*first),
             None => bail!("the head gave no row for the last of a prompt"),
         }
     }
@@ -122,12 +160,19 @@ impl QwenLora {
         tokens: &[u32],
         position: usize,
     ) -> CResult<Option<Vec<u32>>> {
-        let Some(last) = tokens.last() else {
-            return Ok(None);
-        };
-        if tokens.len() > WIDE || !self.reads_ahead_as_tensors() {
+        if tokens.is_empty() || tokens.len() > WIDE || !self.reads_ahead_as_tensors() {
             return Ok(None);
         }
+        self.set_fused(true);
+        let firsts = self.firsts_fused(tokens, position);
+        self.set_fused(false);
+        firsts.map(Some)
+    }
+
+    fn firsts_fused(&mut self, tokens: &[u32], position: usize) -> CResult<Vec<u32>> {
+        let Some(last) = tokens.last() else {
+            bail!("a pass of no tokens")
+        };
         // Padding is the last token again: any token would do, since no row
         // that is kept attends to a row after it.
         let mut rows = tokens.to_vec();
@@ -156,7 +201,7 @@ impl QwenLora {
             )
         }
         self.truncate(position + tokens.len())?;
-        Ok(Some(firsts))
+        Ok(firsts)
     }
 
     /// Whether the device this model is on computes a row of a pass the same
@@ -164,8 +209,9 @@ impl QwenLora {
     /// attention the same way whatever lies where it may not look: asked of
     /// the device with this model's own weights, rows of its own embeddings
     /// and passes of the width read here. Every kind of product a pass is
-    /// made of is asked once: each of the first layer's projections, the
-    /// head, and attention's two.
+    /// made of is asked once: each of the first layer's projections, an
+    /// adapter's two at the widths a joined group's are, the head, and
+    /// attention's two.
     ///
     /// It is what reading ahead as tensors rests on, and it is the
     /// library's to keep or not. A yes here is a few dozen products that
@@ -226,6 +272,25 @@ impl QwenLora {
         }
         if !apart(&one, &other, &self.lm_head_w)? {
             return Ok(false);
+        }
+        // An adapter's two products, as wide as three projections' joined
+        // at the usual rank: into few columns, and out of them again. The
+        // factors themselves may be nothing yet, so rows of the table and of
+        // a base stand for them.
+        const JOINED: usize = 48;
+        if hidden > JOINED && vocabulary >= 2 * WIDE + JOINED {
+            let first = table.narrow(0, 2 * WIDE, JOINED)?.contiguous()?;
+            if !apart(&one, &other, &first)? {
+                return Ok(false);
+            }
+            let few = |text: &Tensor| text.narrow(2, 0, JOINED)?.contiguous();
+            let second = table
+                .narrow(0, 0, 1024.min(vocabulary))?
+                .narrow(1, 0, JOINED)?
+                .contiguous()?;
+            if !apart(&few(&one)?, &few(&other)?, &second)? {
+                return Ok(false);
+            }
         }
         // Attention: the rows of a pass against positions of one count,
         // whose last half no row may see and holds one thing or another.
