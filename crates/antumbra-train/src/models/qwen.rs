@@ -296,6 +296,7 @@ impl QwenLora {
     fn adapters_changed(&mut self) {
         for l in self.layers.iter_mut() {
             l.forget_packs();
+            l.unjoin();
         }
     }
 

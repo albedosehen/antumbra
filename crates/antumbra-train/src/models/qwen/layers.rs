@@ -11,6 +11,11 @@ use super::*;
 mod step;
 pub(super) use step::{Next, Scratch, Stepped};
 
+/// What a pass read ahead as tensors says where nothing joined its
+/// adapters for it: never the plain steps in their place, which round
+/// otherwise.
+const NOT_JOINED: &str = "a pass read ahead as tensors found its adapters not joined";
+
 // --- linear-algebra helpers ------------------------------------------------
 
 /// `x · Wᵀ` with candle's broadcast-over-batch-dims convention (mirrors
@@ -389,6 +394,33 @@ impl LoraLinear {
             .map_err(|_| candle_core::Error::msg("a projection group lost an output"))
     }
 
+    /// Every projection in `group` applied to the same `x` in a pass read
+    /// ahead as tensors ([`tensors`]): each base's product, and every
+    /// adapter's delta from the group's factors joined ([`Joined`]). What
+    /// [`LoraLinear::forward_group`] gives each, by fewer and other steps,
+    /// so not to the bit: such a pass is its own arithmetic throughout.
+    pub(super) fn forward_joined<const N: usize>(
+        x: &Tensor,
+        group: [&LoraLinear; N],
+        joined: &Joined,
+    ) -> CResult<[Tensor; N]> {
+        let bases = Self::base_products(x, group)?;
+        let deltas = joined.deltas(x, N)?;
+        let outs: Vec<Tensor> = group
+            .iter()
+            .zip(bases)
+            .zip(deltas)
+            .map(|((l, base), delta)| {
+                l.with_bias(match delta {
+                    Some(delta) => (base + delta)?,
+                    None => base,
+                })
+            })
+            .collect::<CResult<_>>()?;
+        outs.try_into()
+            .map_err(|_| candle_core::Error::msg("a projection group lost an output"))
+    }
+
     /// The adapter's delta as tensor ops, with its gradient when training;
     /// nothing when the adapter is off.
     fn delta(&self, x: &Tensor) -> CResult<Option<Tensor>> {
@@ -465,11 +497,113 @@ impl LoraLinear {
     }
 }
 
+/// The adapters of projections that read one input, joined for the passes of
+/// one generation read ahead as tensors ([`tensors`]).
+///
+/// Alone, a projection's delta is two small products, a scaling and an add,
+/// and on a GPU each of those is a launch that costs what it costs however
+/// little it multiplies: the deltas were a third of a pass. Joined, the
+/// group's first factors lie one under another and are multiplied once, and
+/// its second factors, with the scale already in them, lie each in its own
+/// columns of one matrix that is nothing elsewhere and are multiplied once:
+/// two products for the group, and each projection's delta a part of what
+/// comes out.
+///
+/// It is made when a generation begins and used only by that generation's
+/// passes: the factors it was made from can be set or trained between
+/// generations, never within one.
+pub(super) struct Joined {
+    /// `(members * rank, in)` and `(sum of outs, members * rank)`; nothing
+    /// where the adapters are off.
+    factors: Option<(Tensor, Tensor)>,
+    /// Where each member's part of the second product begins, and how wide
+    /// it is.
+    places: Vec<(usize, usize)>,
+}
+
+impl Joined {
+    /// The adapters of `group`, joined as they are now.
+    fn of(group: &[&LoraLinear]) -> CResult<Self> {
+        let mut places = Vec::with_capacity(group.len());
+        let (mut outs, mut ranks) = (0, 0);
+        for l in group {
+            let (out, rank) = l.b.dims2()?;
+            places.push((outs, out));
+            outs += out;
+            ranks += rank;
+        }
+        if !group.iter().all(|l| l.enabled) {
+            return Ok(Self {
+                factors: None,
+                places,
+            });
+        }
+        let firsts: Vec<Tensor> = group.iter().map(|l| l.a.detach()).collect();
+        let a = Tensor::cat(&firsts, 0)?;
+        let mut rows = Vec::with_capacity(group.len());
+        let mut before = 0;
+        for l in group {
+            let (out, rank) = l.b.dims2()?;
+            let scaled = l.b.detach().affine(l.scale, 0.0)?;
+            let none = |width: usize| Tensor::zeros((out, width), scaled.dtype(), scaled.device());
+            let mut parts = Vec::with_capacity(3);
+            if before > 0 {
+                parts.push(none(before)?);
+            }
+            parts.push(scaled.clone());
+            if ranks > before + rank {
+                parts.push(none(ranks - before - rank)?);
+            }
+            rows.push(match parts.len() {
+                1 => scaled,
+                _ => Tensor::cat(&parts, 1)?,
+            });
+            before += rank;
+        }
+        let b = match rows.len() {
+            1 => rows.remove(0),
+            _ => Tensor::cat(&rows, 0)?,
+        };
+        Ok(Self {
+            factors: Some((a, b)),
+            places,
+        })
+    }
+
+    /// Each member's delta for `x`, of `members` members: nothing for any
+    /// where the adapters are off.
+    fn deltas(&self, x: &Tensor, members: usize) -> CResult<Vec<Option<Tensor>>> {
+        if self.places.len() != members {
+            candle_core::bail!(
+                "adapters joined for {} projections were asked for {members}",
+                self.places.len()
+            )
+        }
+        let Some((a, b)) = &self.factors else {
+            return Ok(vec![None; members]);
+        };
+        let all = matmul_t(&matmul_t(x, a)?, b)?;
+        self.places
+            .iter()
+            .map(|(from, out)| match members {
+                1 => Ok(Some(all.clone())),
+                _ => all.narrow(D::Minus1, *from, *out).map(Some),
+            })
+            .collect()
+    }
+}
+
 // --- RMSNorm (frozen) ------------------------------------------------------
 
 pub(super) struct RmsNorm {
     weight: Tensor,
     eps: f64,
+    /// In a pass read ahead as tensors: the steps up to the first rounding
+    /// in one kernel.
+    fused: bool,
+    /// A weight of ones in f32, for that kernel: made the first time a pass
+    /// is read that way.
+    unit: Option<Tensor>,
 }
 
 impl RmsNorm {
@@ -477,7 +611,18 @@ impl RmsNorm {
         Ok(Self {
             weight: vb.get(size, "weight")?,
             eps,
+            fused: false,
+            unit: None,
         })
+    }
+
+    /// Whether the passes that follow are read ahead as tensors.
+    pub(super) fn set_fused(&mut self, on: bool) {
+        self.fused = on;
+        if on && self.unit.is_none() {
+            // Without it the norm is its plain steps, which is no error.
+            self.unit = Tensor::ones(self.weight.dims(), DType::F32, self.weight.device()).ok();
+        }
     }
 
     pub(super) fn forward(&self, x: &Tensor) -> CResult<Tensor> {
@@ -488,6 +633,26 @@ impl RmsNorm {
             && !x.track_op()
         {
             return rowwise::rms_norm(x, &self.weight, self.eps);
+        }
+        // In a pass read ahead as tensors, the steps below as far as their
+        // first rounding are candle's one kernel: a row's mean square and
+        // its scaling in f32, by one block of the device's threads to a
+        // row. On a GPU the steps are nine launches and a pass's norms were
+        // a sixth of it; this is four. The rounding to the model's
+        // precision and the weight after it are the steps' own, so a value
+        // comes out as they give it but for a last place of the f32 scale.
+        // (The kernel can also take the weight and round once. That is the
+        // more exact norm and half a millisecond less of a pass, and it is
+        // not the arithmetic the experts were trained through: tried, it
+        // reworded half again as many answers.)
+        if let (true, Some(unit)) = (self.fused, &self.unit) {
+            let in_dtype = x.dtype();
+            let scaled = candle_nn::ops::rms_norm(
+                &x.to_dtype(DType::F32)?.contiguous()?,
+                unit,
+                self.eps as f32,
+            )?;
+            return scaled.to_dtype(in_dtype)?.broadcast_mul(&self.weight);
         }
         let in_dtype = x.dtype();
         let x = x.to_dtype(DType::F32)?;
@@ -627,6 +792,11 @@ pub(super) struct Attention {
     head_dim: usize,
     hidden_size: usize,
     rotary: Arc<RotaryEmbedding>,
+    /// Its adapters joined for the generation in hand, where that is read
+    /// ahead as tensors: q, k and v's, which read one input, and o's.
+    joined: Option<(Joined, Joined)>,
+    /// Whether the pass in hand is one read ahead as tensors.
+    fused: bool,
     kv_cache: Option<(Tensor, Tensor)>,
     /// The cache as tensors with room, in place of `kv_cache`, from the
     /// first pass read under a mask wider than what it holds.
@@ -697,6 +867,8 @@ impl Attention {
             head_dim,
             hidden_size: h,
             rotary,
+            joined: None,
+            fused: false,
             kv_cache: None,
             kv_room: None,
             kv_store: (base.device().is_cpu() && base.dtype() == DType::F32)
@@ -713,7 +885,12 @@ impl Attention {
         use_cache: bool,
     ) -> CResult<Tensor> {
         let (b, q_len, _) = xs.dims3()?;
-        let [q, k, v] = LoraLinear::forward_group(xs, [&self.q_proj, &self.k_proj, &self.v_proj])?;
+        let qkv = [&self.q_proj, &self.k_proj, &self.v_proj];
+        let [q, k, v] = match (self.fused, &self.joined) {
+            (false, _) => LoraLinear::forward_group(xs, qkv)?,
+            (true, Some((joined, _))) => LoraLinear::forward_joined(xs, qkv, joined)?,
+            (true, None) => candle_core::bail!("{NOT_JOINED}"),
+        };
 
         let q = q
             .reshape((b, q_len, self.num_heads, self.head_dim))?
@@ -821,8 +998,22 @@ impl Attention {
             }
         };
         let out = out.transpose(1, 2)?.reshape((b, q_len, self.hidden_size))?;
-        let [out] = LoraLinear::forward_group(&out, [&self.o_proj])?;
+        let [out] = match (self.fused, &self.joined) {
+            (false, _) => LoraLinear::forward_group(&out, [&self.o_proj])?,
+            (true, Some((_, joined))) => LoraLinear::forward_joined(&out, [&self.o_proj], joined)?,
+            (true, None) => candle_core::bail!("{NOT_JOINED}"),
+        };
         Ok(out)
+    }
+
+    /// Join its adapters as they are now, for the generation about to be
+    /// read ahead as tensors.
+    fn join(&mut self) -> CResult<()> {
+        self.joined = Some((
+            Joined::of(&[&self.q_proj, &self.k_proj, &self.v_proj])?,
+            Joined::of(&[&self.o_proj])?,
+        ));
+        Ok(())
     }
 
     pub(super) fn clear_cache(&mut self) {
@@ -921,6 +1112,12 @@ pub(super) struct Mlp {
     up_proj: LoraLinear,
     down_proj: LoraLinear,
     act: Activation,
+    /// Its adapters joined for the generation in hand, where that is read
+    /// ahead as tensors: the gate's and the way up's, which read one input,
+    /// and the way down's.
+    joined: Option<(Joined, Joined)>,
+    /// Whether the pass in hand is one read ahead as tensors.
+    fused: bool,
 }
 
 impl Mlp {
@@ -961,11 +1158,18 @@ impl Mlp {
                 scale,
             )?,
             act: cfg.hidden_act,
+            joined: None,
+            fused: false,
         })
     }
 
     pub(super) fn forward(&self, xs: &Tensor) -> CResult<Tensor> {
-        let [gate, up] = LoraLinear::forward_group(xs, [&self.gate_proj, &self.up_proj])?;
+        let wide = [&self.gate_proj, &self.up_proj];
+        let [gate, up] = match (self.fused, &self.joined) {
+            (false, _) => LoraLinear::forward_group(xs, wide)?,
+            (true, Some((joined, _))) => LoraLinear::forward_joined(xs, wide, joined)?,
+            (true, None) => candle_core::bail!("{NOT_JOINED}"),
+        };
         // In f32 on the CPU with nothing to differentiate, the gate is one
         // pass over both sides.
         let one_pass = matches!(self.act, Activation::Silu)
@@ -978,8 +1182,24 @@ impl Mlp {
         } else {
             (self.act.forward(&gate)? * up)?
         };
-        let [out] = LoraLinear::forward_group(&gated, [&self.down_proj])?;
+        let [out] = match (self.fused, &self.joined) {
+            (false, _) => LoraLinear::forward_group(&gated, [&self.down_proj])?,
+            (true, Some((_, joined))) => {
+                LoraLinear::forward_joined(&gated, [&self.down_proj], joined)?
+            }
+            (true, None) => candle_core::bail!("{NOT_JOINED}"),
+        };
         Ok(out)
+    }
+
+    /// Join its adapters as they are now, for the generation about to be
+    /// read ahead as tensors.
+    fn join(&mut self) -> CResult<()> {
+        self.joined = Some((
+            Joined::of(&[&self.gate_proj, &self.up_proj])?,
+            Joined::of(&[&self.down_proj])?,
+        ));
+        Ok(())
     }
 
     pub(super) fn set_lora(&mut self, on: bool) {
@@ -1094,6 +1314,29 @@ impl DecoderLayer {
 
     pub(super) fn truncate(&mut self, len: usize) -> CResult<()> {
         self.self_attn.truncate(len)
+    }
+
+    /// Join the layer's adapters as they are now: what the passes of the
+    /// generation about to be read ahead as tensors multiply
+    /// ([`Joined`]).
+    pub(super) fn join(&mut self) -> CResult<()> {
+        self.self_attn.join()?;
+        self.mlp.join()
+    }
+
+    /// Let go of the joined adapters: their factors are about to change.
+    pub(super) fn unjoin(&mut self) {
+        self.self_attn.joined = None;
+        self.mlp.joined = None;
+    }
+
+    /// Whether the pass about to go through the layer is one read ahead as
+    /// tensors: its norms in one kernel, its adapters as they were joined.
+    pub(super) fn set_fused(&mut self, on: bool) {
+        self.self_attn.fused = on;
+        self.mlp.fused = on;
+        self.input_ln.set_fused(on);
+        self.post_attn_ln.set_fused(on);
     }
 
     /// The most positions a sequence read through this layer may come to.
@@ -1445,6 +1688,63 @@ mod tests {
         let drawn = factor(&one, "q.lora_a")?;
         let sd = (drawn.iter().map(|x| x * x).sum::<f32>() / drawn.len() as f32).sqrt();
         assert!((0.01..0.03).contains(&sd), "spread {sd}");
+        Ok(())
+    }
+
+    /// The norm in one kernel is the norm: in sixteen bits, where the kernel
+    /// is, it comes within a last place or two of the steps it stands for.
+    #[test]
+    fn the_norm_in_one_kernel_is_the_norm() -> CResult<()> {
+        let dev = Device::Cpu;
+        let width = 64;
+        let weight: Vec<f32> = (0..width)
+            .map(|i| 1.0 + 0.1 * (i as f32 * 0.9).sin())
+            .collect();
+        let values: Vec<f32> = (0..3 * width)
+            .map(|i| 4.0 * (i as f32 * 0.37).sin())
+            .collect();
+        let mut norm = RmsNorm {
+            weight: Tensor::from_vec(weight, width, &dev)?.to_dtype(DType::F16)?,
+            eps: 1e-6,
+            fused: false,
+            unit: None,
+        };
+        let x = Tensor::from_vec(values, (1, 3, width), &dev)?.to_dtype(DType::F16)?;
+        let plain = norm.forward(&x)?;
+        norm.set_fused(true);
+        assert!(norm.unit.is_some());
+        let fused = norm.forward(&x)?;
+        assert_eq!(plain.dims(), fused.dims());
+        assert_eq!(fused.dtype(), DType::F16);
+        // The same two roundings: a value is the steps' value, or its
+        // neighbor where the f32 scale fell the other side of a rounding.
+        let differ = plain
+            .to_dtype(DType::F32)?
+            .ne(&fused.to_dtype(DType::F32)?)?
+            .to_dtype(DType::F32)?
+            .sum_all()?
+            .to_scalar::<f32>()?;
+        assert!(differ <= 4.0, "{differ} of {} values differ", 3 * width);
+        let gap = largest_gap(&plain.to_dtype(DType::F32)?, &fused.to_dtype(DType::F32)?)?;
+        assert!(gap < 4e-3, "{gap}");
+        // And in f64, which the tests of these passes are read in.
+        let mut norm = RmsNorm {
+            weight: norm.weight.to_dtype(DType::F64)?,
+            eps: 1e-6,
+            fused: false,
+            unit: None,
+        };
+        let x = x.to_dtype(DType::F64)?;
+        let plain = norm.forward(&x)?;
+        norm.set_fused(true);
+        let fused = norm.forward(&x)?;
+        assert_eq!(fused.dtype(), DType::F64);
+        let gap = (plain - fused)?
+            .abs()?
+            .flatten_all()?
+            .max(0)?
+            .to_scalar::<f64>()?;
+        assert!(gap < 1e-5, "{gap}");
         Ok(())
     }
 
