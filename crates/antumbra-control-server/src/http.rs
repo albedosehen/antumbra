@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use axum::extract::rejection::ExtensionRejection;
 use axum::extract::{ConnectInfo, Query, State};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -246,15 +246,101 @@ async fn login_handler(
     send_link(&st, &client_of(peer), req.email, None).await
 }
 
-async fn verify_handler(State(st): State<AppState>, Query(q): Query<VerifyQuery>) -> Response {
+/// Text as it may stand in a page: nothing in it is read as markup.
+fn escaped(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// A page for the person who followed a link: a heading, what happened in a
+/// sentence or two, and, when there is one, a value to copy. It runs no
+/// script and loads nothing; it is not kept by the browser or sent on as a
+/// referrer, since it may hold a token.
+fn page(status: StatusCode, heading: &str, lines: &[&str], copy: Option<&str>) -> Response {
+    let mut body = String::new();
+    for line in lines {
+        body.push_str(&format!("<p>{}</p>", escaped(line)));
+    }
+    if let Some(copy) = copy {
+        body.push_str(&format!("<pre>{}</pre>", escaped(copy)));
+    }
+    let html = format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+         <meta name=\"color-scheme\" content=\"light dark\"><title>{title} · Antumbra</title>\
+         <style>body{{font:16px/1.55 system-ui,sans-serif;max-width:34rem;margin:12vh auto;padding:0 16px}}\
+         h1{{font-size:1.4rem}}pre{{padding:12px;border:1px solid;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem}}</style>\
+         </head><body><h1>{title}</h1>{body}</body></html>",
+        title = escaped(heading),
+    );
+    (
+        status,
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+            (header::REFERRER_POLICY, "no-referrer"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'",
+            ),
+        ],
+        html,
+    )
+        .into_response()
+}
+
+/// A followed link, answered as JSON to a program and as a page to a
+/// browser: a browser says it takes `text/html`, and nothing else here does.
+async fn verify_handler(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<VerifyQuery>,
+) -> Response {
+    let to_a_browser = headers
+        .get(header::ACCEPT)
+        .and_then(|accept| accept.to_str().ok())
+        .is_some_and(|accept| accept.contains("text/html"));
     let ml = MagicLink::new(
         &st.magic_secret,
         st.magic_ttl,
         &st.base_url,
         st.mailer.as_ref(),
     );
+    const ASKED: &str = "Your address is verified and the workspace's admins have your request. Run `antumbra join --status` on the machine you asked from.";
+    const SIGNING_IN: &str = "Your address is verified. The machine that asked can collect its token now: run `antumbra login --status` there.";
     match follow(&st.store, &ml, &q.token, &st.issuer).await {
+        Ok(Followed::Token(token)) if to_a_browser => page(
+            StatusCode::OK,
+            "You are signed in",
+            &[
+                "This is your token. It is shown once: keep it somewhere only you can read, and give it to `antumbra setup hosted`.",
+            ],
+            Some(&token),
+        ),
         Ok(Followed::Token(token)) => Json(json!({ "token": token })).into_response(),
+        Ok(Followed::Asked {
+            workspace, handle, ..
+        }) if to_a_browser => page(
+            StatusCode::OK,
+            "Your address is verified",
+            &[
+                &format!("You asked to join {workspace} as {handle}. Its admins have your request now."),
+                "On the machine you asked from, run `antumbra join --status` to see how it stands and to collect your token once you are let in.",
+                "You can close this page.",
+            ],
+            None,
+        ),
         Ok(Followed::Asked {
             request,
             workspace,
@@ -266,15 +352,39 @@ async fn verify_handler(State(st): State<AppState>, Query(q): Query<VerifyQuery>
             "workspace": workspace,
             "handle": handle,
             "standing": standing,
-            "next": "Your address is verified and the workspace's admins have your request. Run `antumbra join --status` on the machine you asked from.",
+            "next": ASKED,
         }))
         .into_response(),
+        Ok(Followed::SigningIn { .. }) if to_a_browser => page(
+            StatusCode::OK,
+            "Your address is verified",
+            &[
+                "The machine that asked to sign in can collect its token now: run `antumbra login --status` there.",
+                "Nothing was given to this browser. You can close this page.",
+            ],
+            None,
+        ),
         Ok(Followed::SigningIn { request }) => Json(json!({
             "signing_in": true,
             "request": request,
-            "next": "Your address is verified. The machine that asked can collect its token now: run `antumbra login --status` there.",
+            "next": SIGNING_IN,
         }))
         .into_response(),
+        Err(e) if to_a_browser && e.is_rejection() => page(
+            StatusCode::BAD_REQUEST,
+            "This link cannot be used",
+            &[&e.to_string(), "A link works once and for a short time. Ask for another from where you asked for this one."],
+            None,
+        ),
+        Err(e) if to_a_browser => {
+            eprintln!("antumbra-control-server: {e}");
+            page(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Something went wrong here",
+                &["A link works once, so this one may be spent. Ask for another from where you asked for this one."],
+                None,
+            )
+        }
         Err(e) => fail(e),
     }
 }
@@ -820,6 +930,120 @@ mod tests {
         let again = collect().await?;
         assert_eq!(again["standing"], "collected");
         assert!(again.get("token").is_none());
+        Ok(())
+    }
+
+    /// A browser that follows a link is given a page, with nothing read as
+    /// markup and nothing kept: what happened for a request to join, the
+    /// token for a signup, and why for a link already used. A program is
+    /// still given JSON.
+    #[tokio::test]
+    async fn a_browser_that_follows_a_link_is_given_a_page() -> Result<()> {
+        use antumbra_core::join::{digest, JoinCode};
+        use antumbra_core::{TenantId, UserId};
+        let store = mem_store().await?;
+        antumbra_store::repo::invite::mint(&store, "inv", None).await?;
+        let now = Utc::now();
+        antumbra_store::repo::join::make_code(
+            &store,
+            &JoinCode {
+                key: digest("crew-code"),
+                tenant: TenantId::new("ws:crew"),
+                label: None,
+                created_by: UserId::new("user:ada"),
+                created_at: now,
+                expires_at: now + chrono::Duration::days(14),
+                uses_left: 1,
+                needs_approval: true,
+                revoked: false,
+            },
+        )
+        .await?;
+        let capture = Arc::new(Capture(Mutex::new(Vec::new())));
+        let app = router(state_with(store, capture.clone(), Duration::ZERO));
+        let browse = |n: usize| {
+            let (app, capture) = (app.clone(), capture.clone());
+            async move {
+                let token = capture.sent()[n]
+                    .split("token=")
+                    .nth(1)
+                    .context("the link carries no token")?
+                    .to_string();
+                let resp = app
+                    .oneshot(
+                        Request::get(format!("/magic/verify?token={token}"))
+                            .header(header::ACCEPT, "text/html,application/xhtml+xml,*/*;q=0.8")
+                            .body(Body::empty())?,
+                    )
+                    .await?;
+                let status = resp.status();
+                let kind = resp
+                    .headers()
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string();
+                let kept = resp
+                    .headers()
+                    .get(header::CACHE_CONTROL)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default()
+                    .to_string();
+                let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await?;
+                anyhow::Ok((
+                    status,
+                    kind,
+                    kept,
+                    String::from_utf8_lossy(&bytes).to_string(),
+                ))
+            }
+        };
+
+        let asking = json!({ "email": "bodil@example.com", "code": "crew-code", "handle": "bodil", "secret_digest": digest("s") }).to_string();
+        assert_eq!(
+            app.clone()
+                .oneshot(post_json("/join/request", &asking)?)
+                .await?
+                .status(),
+            StatusCode::OK
+        );
+        let (status, kind, kept, html) = browse(0).await?;
+        assert_eq!((status, kept.as_str()), (StatusCode::OK, "no-store"));
+        assert!(kind.starts_with("text/html"), "{kind}");
+        assert!(
+            html.contains("You asked to join ws:crew as bodil")
+                && html.contains("antumbra join --status"),
+            "{html}"
+        );
+        assert!(!html.contains("<script"), "{html}");
+        // Followed again: a page that says why, not JSON and not a token.
+        let (status, _, _, html) = browse(0).await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            html.contains("This link cannot be used") && html.contains("already used"),
+            "{html}"
+        );
+
+        // A signup's token is on the page, once.
+        assert_eq!(
+            app.clone()
+                .oneshot(post_json(
+                    "/signup",
+                    r#"{"email":"dana@example.com","invite":"inv"}"#
+                )?)
+                .await?
+                .status(),
+            StatusCode::OK
+        );
+        let (status, _, _, html) = browse(1).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert!(html.contains("<pre>ey"), "{html}");
+
+        // What a page holds is text, whatever it is.
+        assert_eq!(
+            escaped(r#"<b a="1">&'x'</b>"#),
+            "&lt;b a=&quot;1&quot;&gt;&amp;&#39;x&#39;&lt;/b&gt;"
+        );
         Ok(())
     }
 
