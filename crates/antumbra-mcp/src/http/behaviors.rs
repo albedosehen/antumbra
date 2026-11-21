@@ -440,7 +440,10 @@ mod keeper {
                         state.store.signin_root().await?;
                         state.embedder_for(tenant).await
                     };
-                    let cfg = behave::standing_config(&state.recipe);
+                    let cfg = antumbra_serve::RaftConfig {
+                        read_ahead: state.serve_ahead,
+                        ..behave::standing_config(&state.recipe)
+                    };
                     // What the expert in place holds: a retrained one that
                     // did not learn all of it is refused, and this one stays.
                     let in_place = current

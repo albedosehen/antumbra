@@ -249,6 +249,13 @@ pub struct RaftConfig {
     /// model wrote for earlier requests through the same blend of experts,
     /// which it remembers between them. Off unless a caller sets it;
     /// serving sets it.
+    ///
+    /// On a CUDA device it also chooses the passes a greedy answer is
+    /// decoded through: sixteen rows wide with it, one without, which the
+    /// device's library rounds differently. With it, what is guessed
+    /// decides nothing; between with and without, an answer can differ in
+    /// a word where two tokens were all but tied. So whatever admits an
+    /// expert is set as whatever serves it.
     pub read_ahead: bool,
 }
 

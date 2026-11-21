@@ -223,6 +223,11 @@ struct HttpState {
     /// with the models feature.
     #[cfg_attr(not(feature = "models"), allow(dead_code))]
     recipe: antumbra_core::behavior::Recipe,
+    /// Whether answers are read ahead (`--serve-ahead`): the keeper trains
+    /// and audits decoding as the serving engine does, so that admission
+    /// reads the answers that will be served.
+    #[cfg_attr(not(feature = "models"), allow(dead_code))]
+    serve_ahead: bool,
     /// Whether the keeper tunes the recipe's regression confidence, per
     /// workspace, from the audits of the experts it admitted.
     #[cfg_attr(not(feature = "models"), allow(dead_code))]
@@ -371,6 +376,7 @@ pub async fn serve(
         auth: Arc::new(Mutex::new(())),
         auto_propose,
         recipe,
+        serve_ahead,
         tune_confidence,
         behave_drift,
         serve,
