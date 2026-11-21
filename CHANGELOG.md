@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 - unreleased
+
+### Accounts
+
+- **A followed link is answered with a page** ([#568](https://github.com/albedosehen/antumbra/pull/568), [#PRNUM](https://github.com/albedosehen/antumbra/pull/PRNUM)). A browser that follows a link from the control plane is told what happened and what to run next, in a page that runs no script, loads nothing and is not kept; a signup's token is shown on it once. A program is still answered with JSON. It was written for 0.5.1 and merged after that release was cut.
+
 ## 0.5.1 - 2026-11-21
 
 A workspace has members: each with a name and an image, a role, and a way in that an admin opens and a newcomer asks through. On a CPU, an Arm server and a Mac take the rest of a token's steps through NEON, a served answer no longer depends on the operating system a server was built for, and the AVX2 kernels are measured on a CPU that has only them. The `antumbra claude` commands find a set-up machine's server by themselves, and the dashboard gains an Agent page and the writes that are a user's own.
