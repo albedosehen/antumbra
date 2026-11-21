@@ -460,7 +460,7 @@ fn connect(
             ));
         } else {
             lines.push(format!(
-                "{workspace}: the claude command is not on your PATH. Once it is:"
+                "{workspace}: no agent that takes a server by name was found (Claude Code, Codex, Copilot CLI). For Claude Code, once it is installed:"
             ));
             lines.push(format!(
                 "  claude mcp add-json {name} --scope user '{server}'"
@@ -525,6 +525,143 @@ fn with_claude(name: &str, server: Option<&str>) -> anyhow::Result<bool> {
     Ok(true)
 }
 
+/// The bridge a server's definition runs, as its program and its arguments
+/// for `agent`: the definition is Claude Code's, and names it.
+fn bridge_for(server: &str, agent: &str) -> anyhow::Result<(String, Vec<String>)> {
+    let server: Value = serde_json::from_str(server)?;
+    let command = server["command"].as_str().unwrap_or("antumbra").to_string();
+    let args = server["args"]
+        .as_array()
+        .map(|args| {
+            args.iter()
+                .filter_map(Value::as_str)
+                .map(|arg| if arg == "claude" { agent } else { arg }.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok((command, args))
+}
+
+/// Register with Codex, by its own command.
+fn with_codex(name: &str, server: Option<&str>) -> anyhow::Result<bool> {
+    let Some(codex) = crate::setup::find_program("codex") else {
+        return Ok(false);
+    };
+    let _ = std::process::Command::new(&codex)
+        .args(["mcp", "remove", name])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    if let Some(server) = server {
+        let (command, args) = bridge_for(server, "codex")?;
+        let out = std::process::Command::new(&codex)
+            .args(["mcp", "add", name, "--"])
+            .arg(command)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .output()?;
+        if !out.status.success() {
+            anyhow::bail!(
+                "registering the MCP server with Codex failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+    }
+    Ok(true)
+}
+
+/// Register with Copilot CLI, whose config is in `dir`: one entry in its
+/// `mcp-config.json`, the rest of the file left as it is. `Ok(false)` when
+/// Copilot CLI has no config on this machine.
+fn with_copilot_at(dir: &Path, name: &str, server: Option<&str>) -> anyhow::Result<bool> {
+    if !dir.is_dir() {
+        return Ok(false);
+    }
+    let path = dir.join("mcp-config.json");
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let edited = match server {
+        Some(server) => {
+            let (command, args) = bridge_for(server, "copilot")?;
+            let entry =
+                json!({ "type": "local", "command": command, "args": args, "tools": ["*"] });
+            // An entry of this name from before is replaced, not kept.
+            let without = without_server(&text, name)?.unwrap_or(text.clone());
+            crate::setup::settings::put(&without, "mcp-config.json", &["mcpServers"], name, &entry)?
+                .or((without != text).then_some(without))
+        }
+        None => without_server(&text, name)?,
+    };
+    if let Some(edited) = edited {
+        if path.exists() {
+            std::fs::copy(
+                &path,
+                path.with_file_name(format!(
+                    "mcp-config.json.antumbra-backup-{}",
+                    chrono::Utc::now().format("%Y%m%d%H%M%S")
+                )),
+            )?;
+        }
+        std::fs::write(&path, edited)?;
+    }
+    Ok(true)
+}
+
+/// `text` (Copilot CLI's `mcp-config.json`) without the server `name`, or
+/// nothing when it holds none. The file is written again from what it says,
+/// so its spacing may change; a copy is kept beside it first.
+fn without_server(text: &str, name: &str) -> anyhow::Result<Option<String>> {
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    let mut config: Value = serde_json::from_str(text)
+        .map_err(|e| anyhow::anyhow!("mcp-config.json is not JSON ({e}); left as it is"))?;
+    let had = config
+        .get_mut("mcpServers")
+        .and_then(Value::as_object_mut)
+        .is_some_and(|servers| servers.remove(name).is_some());
+    Ok(had
+        .then(|| serde_json::to_string_pretty(&config).map(|t| t + "\n"))
+        .transpose()?)
+}
+
+/// Where Copilot CLI keeps its config: `COPILOT_HOME`, or `.copilot` in the
+/// user's home.
+fn copilot_home(antumbra: &Path) -> Option<PathBuf> {
+    std::env::var("COPILOT_HOME")
+        .ok()
+        .map(|h| h.trim().to_string())
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+        // `antumbra` is `.antumbra` in the user's home.
+        .or_else(|| antumbra.parent().map(|home| home.join(".copilot")))
+}
+
+/// Note which agents were told and which could not be, and say whether any
+/// was: one agent that fails does not keep the others from being told.
+fn tell_each<const N: usize>(
+    results: [(&'static str, anyhow::Result<bool>); N],
+    told: &std::cell::RefCell<std::collections::BTreeSet<&'static str>>,
+    failed: &std::cell::RefCell<std::collections::BTreeSet<String>>,
+) -> bool {
+    let mut any = false;
+    for (agent, result) in results {
+        match result {
+            Ok(true) => {
+                told.borrow_mut().insert(agent);
+                any = true;
+            }
+            Ok(false) => {}
+            Err(why) => {
+                failed
+                    .borrow_mut()
+                    .insert(format!("{agent} could not be told: {why}"));
+            }
+        }
+    }
+    any
+}
+
 /// The flow, with the network and the home given.
 fn run_in(antumbra: &Path, args: &JoinArgs, send: Send<'_>) -> anyhow::Result<Vec<String>> {
     if let Some(write) = &args.write {
@@ -534,13 +671,39 @@ fn run_in(antumbra: &Path, args: &JoinArgs, send: Send<'_>) -> anyhow::Result<Ve
         let program = std::env::current_exe()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "antumbra".to_string());
-        return connect(
+        // Every agent on this machine that takes a server by name: Claude
+        // Code and Codex by their own commands, Copilot CLI by its file.
+        let told = std::cell::RefCell::new(std::collections::BTreeSet::new());
+        let failed = std::cell::RefCell::new(std::collections::BTreeSet::new());
+        let register = |name: &str, server: Option<&str>| {
+            let results = [
+                ("Claude Code", with_claude(name, server)),
+                ("Codex", with_codex(name, server)),
+                (
+                    "Copilot CLI",
+                    match copilot_home(antumbra) {
+                        Some(dir) => with_copilot_at(&dir, name, server),
+                        None => Ok(false),
+                    },
+                ),
+            ];
+            Ok(tell_each(results, &told, &failed))
+        };
+        let mut lines = connect(
             antumbra,
             args.to.as_deref(),
             args.connect,
             &program,
-            &with_claude,
-        );
+            &register,
+        )?;
+        let told: Vec<&str> = told.into_inner().into_iter().collect();
+        // Taking a server out is asked of every agent found, and none says
+        // whether it had it, so only a registration is reported by name.
+        if args.connect && !told.is_empty() {
+            lines.push(format!("Told: {}.", told.join(", ")));
+        }
+        lines.extend(failed.into_inner());
+        return Ok(lines);
     }
     if args.forget {
         return forget(antumbra);
@@ -870,5 +1033,136 @@ mod tests {
         assert_eq!(recorded_as(&antumbra, "b__ws_lab")?["write"], "ask");
         assert!(set_write(&antumbra, Some("ws:nowhere"), "ask").is_err());
         Ok(())
+    }
+
+    /// Copilot CLI is told by one entry in its own file: the bridge under
+    /// its own name, whatever else the file holds left there; told again, the
+    /// entry is replaced; and taken out, only that entry goes.
+    #[test]
+    fn copilot_is_told_by_one_entry_in_its_file() -> anyhow::Result<()> {
+        let home = crate::agents::scratch::Scratch::new("join-copilot")?;
+        let dir = home.path().join(".copilot");
+        let server = |url: &str| {
+            json!({ "type": "stdio", "command": "/bin/antumbra",
+                "args": ["mcp", "bridge", "--agent", "claude", "--surface", url, "--token-file", "/t", "--file-token-only"] })
+            .to_string()
+        };
+        // No Copilot CLI on this machine: nothing is made for it.
+        assert!(!with_copilot_at(
+            &dir,
+            "antumbra-crew",
+            Some(&server("https://a.example"))
+        )?);
+        assert!(!dir.exists());
+
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("mcp-config.json");
+        std::fs::write(
+            &path,
+            "{ \"mcpServers\": { \"context7\": { \"type\": \"local\", \"command\": \"npx\" } } }",
+        )?;
+        assert!(with_copilot_at(
+            &dir,
+            "antumbra-crew",
+            Some(&server("https://a.example"))
+        )?);
+        let read = || -> anyhow::Result<Value> {
+            Ok(serde_json::from_str(&std::fs::read_to_string(&path)?)?)
+        };
+        let entry = read()?["mcpServers"]["antumbra-crew"].clone();
+        assert_eq!(entry["command"], "/bin/antumbra");
+        assert_eq!(entry["tools"], json!(["*"]));
+        let args: Vec<&str> = entry["args"]
+            .as_array()
+            .map(|a| a.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        assert!(
+            args.windows(2).any(|w| w == ["--agent", "copilot"]),
+            "{args:?}"
+        );
+        assert!(
+            args.contains(&"--file-token-only") && !args.contains(&"claude"),
+            "{args:?}"
+        );
+        assert_eq!(read()?["mcpServers"]["context7"]["command"], "npx");
+
+        // Told again with another address: one entry, the new one.
+        assert!(with_copilot_at(
+            &dir,
+            "antumbra-crew",
+            Some(&server("https://b.example"))
+        )?);
+        let text = std::fs::read_to_string(&path)?;
+        assert!(
+            text.contains("https://b.example") && !text.contains("https://a.example"),
+            "{text}"
+        );
+
+        // Taken out: only that entry goes, and taking it out twice is quiet.
+        assert!(with_copilot_at(&dir, "antumbra-crew", None)?);
+        assert!(read()?["mcpServers"].get("antumbra-crew").is_none());
+        assert_eq!(read()?["mcpServers"]["context7"]["command"], "npx");
+        assert!(with_copilot_at(&dir, "antumbra-crew", None)?);
+
+        // A file that is not JSON is left as it is, and said.
+        std::fs::write(&path, "not json")?;
+        assert!(
+            with_copilot_at(&dir, "antumbra-crew", Some(&server("https://a.example"))).is_err()
+        );
+        assert_eq!(std::fs::read_to_string(&path)?, "not json");
+        Ok(())
+    }
+
+    /// The bridge an agent runs names that agent, and is otherwise the one
+    /// Claude Code is given.
+    #[test]
+    fn the_bridge_names_the_agent_it_is_for() -> anyhow::Result<()> {
+        let server = json!({ "command": "/bin/antumbra", "args": ["mcp", "bridge", "--agent", "claude", "--surface", "https://a.example"] }).to_string();
+        let (command, args) = bridge_for(&server, "codex")?;
+        assert_eq!(command, "/bin/antumbra");
+        assert_eq!(
+            args,
+            [
+                "mcp",
+                "bridge",
+                "--agent",
+                "codex",
+                "--surface",
+                "https://a.example"
+            ]
+        );
+        Ok(())
+    }
+
+    /// An agent that cannot be told is said, and the others are told still.
+    #[test]
+    fn one_agent_failing_does_not_keep_the_others_from_being_told() {
+        let told = RefCell::new(std::collections::BTreeSet::new());
+        let failed = RefCell::new(std::collections::BTreeSet::new());
+        let any = tell_each(
+            [
+                ("Claude Code", Ok(true)),
+                ("Codex", Err(anyhow::anyhow!("codex not found in PATH"))),
+                ("Copilot CLI", Ok(false)),
+            ],
+            &told,
+            &failed,
+        );
+        assert!(any);
+        assert_eq!(
+            told.into_inner().into_iter().collect::<Vec<_>>(),
+            ["Claude Code"]
+        );
+        let failed: Vec<String> = failed.into_inner().into_iter().collect();
+        assert_eq!(failed, ["Codex could not be told: codex not found in PATH"]);
+        let (told, failed) = (
+            RefCell::new(Default::default()),
+            RefCell::new(Default::default()),
+        );
+        assert!(!tell_each(
+            [("Codex", Err(anyhow::anyhow!("no")))],
+            &told,
+            &failed
+        ));
     }
 }
