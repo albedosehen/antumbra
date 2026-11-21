@@ -120,6 +120,24 @@ Per session:
   badly; a run that fails for a reason outside the agent (the provider down, a
   crash of the harness) is recorded as such and run again.
 
+## Pilot
+
+One run of each arm through the first series, on 2026-11-21, with Claude Code
+2.1.330 and Sonnet. A pilot, reported as one and not pooled with the study:
+
+| Arm | Conventions broken, sessions 2 to 5 | Still broken after the correction | Hidden tests | Cost | Tokens | Agent time |
+| --- | --- | --- | --- | --- | --- | --- |
+| None | 8: the ledger and the commit, in every session | 0 | 5 of 5 | $0.73, $0.40 of it corrections | 1.00 M | 118 s |
+| Antumbra | 0 | 0 | 5 of 5 | $0.77, no corrections | 1.73 M | 225 s |
+| Instructions | 4: no commit, in every session | 0 | 5 of 5 | $1.05, $0.51 of it corrections | 1.31 M | 140 s |
+
+The pilot found the instructions arm's file under-stated one convention. It
+said how to commit, and not to commit each change, which session 1's prompt
+does; Claude Code commits only when it is asked, so in sessions 2 to 5 it did
+not. For the study, the file states the four conventions as session 1 does
+("When you finish a change: ... commit it as ..."). The pilot's instructions
+row is of the old wording.
+
 ## What it does not claim
 
 - One agent and one model. Codex is the next agent to run it.
