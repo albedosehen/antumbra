@@ -33,7 +33,25 @@ fn project(dir: Option<PathBuf>) -> anyhow::Result<PathBuf> {
 /// stamps what the command writes with it. A refusal comes back with the
 /// surface's own words, since "400" tells a user nothing they can act on.
 fn surface_client(surface: &str, token: Option<&str>, patience: Duration) -> SurfaceClient {
-    SurfaceClient::new(surface, token, patience).from_machine(antumbra_http::host_id())
+    let kept = token.is_none().then(kept_token).flatten();
+    SurfaceClient::new(surface, token.or(kept.as_deref()), patience)
+        .from_machine(antumbra_http::host_id())
+}
+
+/// The token setup kept for this user, when no flag and no `ANTUMBRA_TOKEN`
+/// gave one. Setup keeps the token in a file and out of every agent's
+/// settings, so a hook is run with the surface's address in its environment
+/// and no token: without this, `skill-used` asked a networked server with no
+/// token, was refused, and failed as silently as a hook must, counting
+/// nothing.
+fn kept_token() -> Option<String> {
+    token_kept_for(home().as_deref()?, |name| std::env::var(name).ok())
+}
+
+/// [`kept_token`] for the user whose home is `home`: the file setup named, as
+/// the hooks and the bridge read it ([`crate::agents::Reach`]).
+fn token_kept_for(home: &Path, env: impl Fn(&str) -> Option<String>) -> Option<String> {
+    crate::agents::Reach::read(home, env).ok()?.token().ok()
 }
 
 /// A working tree's `origin` URL, when it has one.
@@ -385,4 +403,36 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A hook is run with the surface's address and no token: the token it
+    /// presents is the one setup kept in its file. One the environment gives
+    /// still comes first, and a machine that was never set up has none.
+    #[test]
+    fn a_command_given_no_token_presents_the_one_setup_kept() -> anyhow::Result<()> {
+        let home = crate::agents::scratch::Scratch::new("surface-token")?;
+        assert_eq!(token_kept_for(home.path(), |_| None), None);
+
+        let antumbra = home.path().join(".antumbra");
+        std::fs::create_dir_all(&antumbra)?;
+        std::fs::write(
+            antumbra.join("setup.json"),
+            r#"{"mode":"hosted","url":"https://memory.example"}"#,
+        )?;
+        std::fs::write(antumbra.join("token.txt"), "kept-token\n")?;
+        assert_eq!(
+            token_kept_for(home.path(), |_| None).as_deref(),
+            Some("kept-token")
+        );
+        let said = |name: &str| (name == "ANTUMBRA_TOKEN").then(|| "said-token".to_string());
+        assert_eq!(
+            token_kept_for(home.path(), said).as_deref(),
+            Some("said-token")
+        );
+        Ok(())
+    }
 }
