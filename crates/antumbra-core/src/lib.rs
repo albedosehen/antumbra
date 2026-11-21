@@ -30,6 +30,7 @@ pub mod grow;
 pub mod handoff;
 pub mod hive;
 pub mod ids;
+pub mod join;
 pub mod keyed;
 pub mod lifecycle;
 pub mod limit;
