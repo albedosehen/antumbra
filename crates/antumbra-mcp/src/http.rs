@@ -76,6 +76,7 @@ mod console;
 mod dashboard;
 mod experts;
 mod github;
+mod members;
 mod relics;
 mod revocation;
 pub(crate) mod sync;
@@ -265,6 +266,10 @@ struct HttpState {
     /// The ids of the tokens revoked before their expiry, as the store's
     /// `revoked_token` table had them at the last refresh ([`revocation`]).
     revoked: std::sync::RwLock<std::collections::HashSet<String>>,
+    /// The (workspace, user) pairs whose member was removed, as the store had
+    /// them at the last refresh, and as this server's own removals made them
+    /// since ([`members`]). A token for one is refused like a revoked one.
+    removed: std::sync::RwLock<std::collections::HashSet<(String, String)>>,
     /// What one identity, one session and one connection may hold open.
     limits: Limits,
     /// One MCP service per identity (provisioned once), all sharing `store`,
@@ -363,6 +368,7 @@ pub async fn serve(
         profile,
         github: github.map(Arc::new),
         revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
+        removed: std::sync::RwLock::new(std::collections::HashSet::new()),
         limits: Limits::default(),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
@@ -596,6 +602,7 @@ fn router(state: Arc<HttpState>) -> Router {
         .route("/mcp/call", post(handle_call))
         .route("/github/webhook", post(github::handle))
         .merge(console::routes())
+        .merge(members::routes())
         .merge(dashboard::routes())
         .merge(relics::routes())
         .merge(experts::routes())
@@ -700,7 +707,32 @@ impl HttpState {
                 return Err(AuthError::Invalid("token revoked".into()));
             }
         }
+        // A member removed from their workspace holds a token that is still
+        // signed and unexpired: it is refused here, on every route.
+        let removed = self
+            .removed
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let pair = (access.identity.tenant.clone(), access.identity.user.clone());
+        if removed.contains(&pair) {
+            return Err(AuthError::Invalid("removed from this workspace".into()));
+        }
+        drop(removed);
         Ok(access)
+    }
+
+    /// Note on this server, at once, that a member was removed (`gone`) or
+    /// let back in: the next refresh reads the same from the store.
+    fn forget_member(&self, pair: (String, String), gone: bool) {
+        let mut removed = self
+            .removed
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if gone {
+            removed.insert(pair);
+        } else {
+            removed.remove(&pair);
+        }
     }
 
     /// [`Self::access_of`], as the identity alone.

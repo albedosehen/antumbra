@@ -112,6 +112,7 @@ async fn state_bounded(
         profile: None,
         github: None,
         revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
+        removed: std::sync::RwLock::new(std::collections::HashSet::new()),
         limits,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
@@ -955,5 +956,144 @@ async fn a_profile_is_its_own_users_to_write_and_the_workspaces_to_read() -> any
     }
     let (_, after) = ask(&dana, "profiles", serde_json::json!({})).await?;
     anyhow::ensure!(after["profiles"][0]["has_image"] == false, "{after}");
+    Ok(())
+}
+
+/// A workspace's first member owns it. Roles are the owner's to change, an
+/// admin removes a member and not the owner, a removed member's token is
+/// refused on every route at once, and the workspace keeps an owner.
+#[tokio::test]
+async fn members_are_listed_and_changed_by_role() -> anyhow::Result<()> {
+    let st = state().await?;
+    let (ada, bo, cy) = (
+        token("ws:crew", "user:ada")?,
+        token("ws:crew", "user:bo")?,
+        token("ws:crew", "user:cy")?,
+    );
+    let ask = |tok: &str, method: &str, path: &str, body: serde_json::Value| {
+        let (st, tok, method, path) = (
+            st.clone(),
+            tok.to_string(),
+            method.to_string(),
+            path.to_string(),
+        );
+        async move {
+            let req = Request::builder()
+                .method(method.as_str())
+                .uri(path)
+                .header(header::AUTHORIZATION, format!("Bearer {tok}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))?;
+            let res = router(st).oneshot(req).await?;
+            let status = res.status();
+            let text = body_text(res).await?;
+            anyhow::Ok((
+                status,
+                serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default(),
+            ))
+        }
+    };
+    let none = serde_json::Value::Null;
+    let roles = |listed: &serde_json::Value| -> Vec<(String, String)> {
+        listed["members"]
+            .as_array()
+            .map(|all| {
+                all.iter()
+                    .map(|m| {
+                        (
+                            m["user"].as_str().unwrap_or_default().to_string(),
+                            m["role"].as_str().unwrap_or_default().to_string(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let pair = |user: &str, role: &str| (user.to_string(), role.to_string());
+
+    // In the order they first call: the first owns the workspace.
+    let (status, first) = ask(&ada, "GET", "/members", none.clone()).await?;
+    anyhow::ensure!(status == StatusCode::OK, "{status} {first}");
+    anyhow::ensure!(
+        first["your_role"] == "owner" && first["you"] == "user:ada",
+        "{first}"
+    );
+    let (_, second) = ask(&bo, "GET", "/members", none.clone()).await?;
+    anyhow::ensure!(second["your_role"] == "member", "{second}");
+    ask(&cy, "GET", "/members", none.clone()).await?;
+
+    // A member changes no one's role; the owner makes an admin.
+    let change = |user: &str, role: &str| serde_json::json!({ "user": user, "role": role });
+    let (status, why) = ask(&bo, "POST", "/members/role", change("user:cy", "admin")).await?;
+    anyhow::ensure!(status == StatusCode::FORBIDDEN, "{status} {why}");
+    let (status, _) = ask(&ada, "POST", "/members/role", change("user:bo", "admin")).await?;
+    anyhow::ensure!(status == StatusCode::OK);
+    let (status, _) = ask(&ada, "POST", "/members/role", change("user:bo", "captain")).await?;
+    anyhow::ensure!(
+        status == StatusCode::BAD_REQUEST,
+        "an unknown role: {status}"
+    );
+
+    // An admin removes a member, and not the owner.
+    let who = |user: &str| serde_json::json!({ "user": user });
+    let (status, _) = ask(&bo, "POST", "/members/remove", who("user:ada")).await?;
+    anyhow::ensure!(
+        status == StatusCode::FORBIDDEN,
+        "an admin removed the owner: {status}"
+    );
+    let (status, _) = ask(&bo, "POST", "/members/remove", who("user:cy")).await?;
+    anyhow::ensure!(status == StatusCode::OK);
+
+    // The removed member's token is refused at once, on every route.
+    let (status, _) = ask(&cy, "GET", "/members", none.clone()).await?;
+    anyhow::ensure!(status == StatusCode::UNAUTHORIZED, "/members: {status}");
+    let call = router(st.clone())
+        .oneshot(call_request(
+            Some(&cy),
+            r#"{"tool":"workspace_stats","arguments":{}}"#,
+        )?)
+        .await?
+        .status();
+    anyhow::ensure!(call == StatusCode::UNAUTHORIZED, "/mcp/call: {call}");
+    let (_, listed) = ask(&ada, "GET", "/members", none.clone()).await?;
+    anyhow::ensure!(
+        roles(&listed) == [pair("user:ada", "owner"), pair("user:bo", "admin")],
+        "{listed}"
+    );
+
+    // The workspace keeps an owner.
+    let (status, why) = ask(&ada, "POST", "/members/role", change("user:ada", "member")).await?;
+    anyhow::ensure!(status == StatusCode::FORBIDDEN, "{status} {why}");
+    anyhow::ensure!(
+        why["error"]
+            .as_str()
+            .is_some_and(|w| w.contains("keeps an owner")),
+        "{why}"
+    );
+
+    // Let back in by an admin, as a member, and served again.
+    let (status, _) = ask(&bo, "POST", "/members/readmit", who("user:cy")).await?;
+    anyhow::ensure!(status == StatusCode::OK);
+    let (status, back) = ask(&cy, "GET", "/members", none.clone()).await?;
+    anyhow::ensure!(
+        status == StatusCode::OK && back["your_role"] == "member",
+        "{status} {back}"
+    );
+
+    // Another workspace's member sees none of this and changes none of it.
+    let other = token("ws:elsewhere", "user:dee")?;
+    let (_, theirs) = ask(&other, "GET", "/members", none.clone()).await?;
+    anyhow::ensure!(roles(&theirs) == [pair("user:dee", "owner")], "{theirs}");
+    let (status, _) = ask(&other, "POST", "/members/remove", who("user:bo")).await?;
+    anyhow::ensure!(
+        status == StatusCode::FORBIDDEN,
+        "across workspaces: {status}"
+    );
+    let (status, _) = ask(&ada, "GET", "/members", none).await?;
+    anyhow::ensure!(status == StatusCode::OK);
+
+    // No token, no list.
+    let bare = Request::builder().uri("/members").body(Body::empty())?;
+    anyhow::ensure!(router(st).oneshot(bare).await?.status() == StatusCode::UNAUTHORIZED);
     Ok(())
 }

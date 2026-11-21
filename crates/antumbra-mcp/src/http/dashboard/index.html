@@ -59,6 +59,7 @@
         <a class="nav-item" href="#/devices" data-nav="devices" title="Devices"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v7h-11zM6 13.5h4M8 10.5v3"/></svg><span>Devices</span><span id="nav-handoffs" class="count" hidden></span></a>
         <a class="nav-item" href="#/agent" data-nav="agent" title="Agent"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5V5a4 4 0 0 1 8 0v1.5M3 6.5h10v5.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 12zM6.2 9.500h.01M9.8 9.500h.01"/></svg><span>Agent</span></a>
       <p class="nav-group">Workspace settings</p>
+        <a class="nav-item" href="#/members" data-nav="members" title="Members"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5.5" r="2.2"/><path d="M2 13c.5-2.2 2-3.3 4-3.3s3.5 1.1 4 3.3"/><circle cx="11.5" cy="6" r="1.7"/><path d="M11.2 9.8c1.5.1 2.5 1 2.8 2.7"/></svg><span>Members</span></a>
         <a class="nav-item" href="#/settings" data-nav="settings" title="Policy"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/></svg><span>Policy</span></a>
     </nav>
     <a class="side-user" href="#/account" title="Account">
@@ -527,6 +528,44 @@
           </div>
           <div class="panel">
             <ul id="handoffs" class="list handoffs"></ul>
+          </div>
+        </section>
+      </div>
+
+      <div class="view" data-view="members" hidden>
+        <header class="view-head">
+          <h2 class="view-title">Members</h2>
+          <p class="view-lede">Who is in this workspace, and as what. An owner decides who its admins and owners are; an admin or an owner removes a member.</p>
+        </header>
+        <section aria-labelledby="h-members">
+          <div class="section-head">
+            <h3 id="h-members">In this workspace</h3>
+            <p id="members-summary" class="muted small" aria-live="polite"></p>
+          </div>
+          <div class="panel">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Member</th>
+                    <th scope="col">Role</th>
+                    <th scope="col">Joined</th>
+                    <th scope="col"><span class="visually-hidden">Changes</span></th>
+                  </tr>
+                </thead>
+                <tbody id="members"></tbody>
+              </table>
+            </div>
+          </div>
+          <p id="members-status" class="small muted" role="status"></p>
+        </section>
+        <section id="removed-section" aria-labelledby="h-removed" hidden>
+          <div class="section-head">
+            <h3 id="h-removed">Removed</h3>
+            <p class="muted small">Their tokens are refused. What they wrote stays.</p>
+          </div>
+          <div class="panel">
+            <ul id="removed" class="list"></ul>
           </div>
         </section>
       </div>

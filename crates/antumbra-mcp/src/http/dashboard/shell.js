@@ -17,6 +17,7 @@ const VIEWS = {
   account: "Account",
   agent: "Agent",
   devices: "Devices and handoffs",
+  members: "Members",
   settings: "Policy",
 };
 
@@ -576,6 +577,7 @@ function renderAttention() {
 function shellLoads() {
   return [
     section(byId("devices"), loadDevices),
+    section(byId("members"), loadMembers),
     // The member's name and image (manage.js), drawn after the identity the
     // token gave, which it then stands in for. A server from before profiles
     // does not have the tool: the initials stay.

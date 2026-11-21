@@ -2119,3 +2119,27 @@ input[type="file"] {
   font-size: var(--t-s);
   color: var(--ink-2);
 }
+
+/* Members */
+
+.member {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.member-text {
+  display: grid;
+  line-height: 1.3;
+}
+
+select.role {
+  width: auto;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 0.9rem;
+}
+
+#members-status {
+  margin: 12px 4px 0;
+}

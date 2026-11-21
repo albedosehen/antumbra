@@ -52,6 +52,7 @@ async fn state(github: Option<GithubConfig>) -> anyhow::Result<Arc<HttpState>> {
         profile: None,
         github: github.map(Arc::new),
         revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
+        removed: std::sync::RwLock::new(std::collections::HashSet::new()),
         limits: Limits::default(),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
