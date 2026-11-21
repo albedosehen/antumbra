@@ -1982,3 +1982,97 @@ button.icon-button:hover {
 .crumbs + .actions {
   margin-left: auto;
 }
+
+/* Writing: the forms a user changes things with. */
+
+.compose {
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+}
+
+.compose summary {
+  padding: 12px 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent-text);
+  cursor: pointer;
+}
+
+.compose[open] summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.write {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+
+.write.padded {
+  padding: 20px 24px;
+}
+
+.write label {
+  font-size: var(--t-s);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+textarea,
+select,
+input[type="text"] {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--raised);
+  color: var(--ink);
+  font: inherit;
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.write-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+button.link.danger {
+  color: var(--danger);
+}
+
+[role="status"].error {
+  color: var(--danger);
+}
+
+.memory .actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+
+.rules > li {
+  display: block;
+  padding: 14px 16px;
+}
+
+.rule-row p {
+  margin: 0;
+}
+
+.rule-row .meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
