@@ -76,6 +76,7 @@ mod console;
 mod dashboard;
 mod experts;
 mod github;
+mod join;
 mod members;
 mod relics;
 mod revocation;
@@ -270,6 +271,16 @@ struct HttpState {
     /// them at the last refresh, and as this server's own removals made them
     /// since ([`members`]). A token for one is refused like a revoked one.
     removed: std::sync::RwLock<std::collections::HashSet<(String, String)>>,
+    /// The secret this server signs a new member's token with, where it
+    /// holds one ([`join`]). A server that verifies RS256 holds a public key
+    /// and can let no one in by itself.
+    issuer: Option<Vec<u8>>,
+    /// Whether only members are served: a signed token for a pair the
+    /// workspace does not hold is refused, where it was provisioned.
+    members_only: bool,
+    /// The minute the public join routes are counted in, and how many
+    /// requests it has had ([`join::PUBLIC_PER_MINUTE`]).
+    join_minute: std::sync::Mutex<(std::time::Instant, u32)>,
     /// What one identity, one session and one connection may hold open.
     limits: Limits,
     /// One MCP service per identity (provisioned once), all sharing `store`,
@@ -318,6 +329,10 @@ pub async fn serve(
     serve_quant: &str,
     serve_ahead: bool,
     sync: Option<sync::Settings>,
+    // The HS256 secret, where the server verifies with one: what lets it mint
+    // a token for someone its admins let in. None where it verifies RS256.
+    issuer: Option<Vec<u8>>,
+    members_only: bool,
 ) -> Result<()> {
     let mut store = crate::connect(&url, &db).await?;
     // The scoped serving strategy. On an authenticated remote, requests must run
@@ -369,6 +384,9 @@ pub async fn serve(
         github: github.map(Arc::new),
         revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
         removed: std::sync::RwLock::new(std::collections::HashSet::new()),
+        issuer,
+        members_only,
+        join_minute: std::sync::Mutex::new((std::time::Instant::now(), 0)),
         limits: Limits::default(),
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
@@ -603,6 +621,7 @@ fn router(state: Arc<HttpState>) -> Router {
         .route("/github/webhook", post(github::handle))
         .merge(console::routes())
         .merge(members::routes())
+        .merge(join::routes())
         .merge(dashboard::routes())
         .merge(relics::routes())
         .merge(experts::routes())
@@ -813,6 +832,17 @@ impl HttpState {
                 .await;
             async {
                 self.store.signin_root().await?;
+                // A server that serves only members provisions no one: a
+                // signed token is not a membership there.
+                if self.members_only
+                    && !antumbra_store::repo::principal::is_member(&self.store, &tenant, &user)
+                        .await?
+                {
+                    return Err(antumbra_core::AntumbraError::rejected(
+                        "you are not a member of this workspace; ask one of its admins for a join code",
+                    )
+                    .into());
+                }
                 let dc = crate::provision_identity(&self.store, &tenant, &user).await?;
                 // This machine is a node in that user's fabric. A hosted server is
                 // not "nobody's machine": the agent's recall and store really are

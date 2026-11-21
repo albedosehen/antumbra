@@ -113,6 +113,9 @@ async fn state_bounded(
         github: None,
         revoked: std::sync::RwLock::new(std::collections::HashSet::new()),
         removed: std::sync::RwLock::new(std::collections::HashSet::new()),
+        issuer: Some(b"test-secret".to_vec()),
+        members_only: false,
+        join_minute: std::sync::Mutex::new((std::time::Instant::now(), 0)),
         limits,
         sessions: Mutex::new(Bounded::new(MAX_SESSIONS)),
         servers: Mutex::new(Bounded::new(MAX_SESSIONS)),
@@ -1095,5 +1098,305 @@ async fn members_are_listed_and_changed_by_role() -> anyhow::Result<()> {
     // No token, no list.
     let bare = Request::builder().uri("/members").body(Body::empty())?;
     anyhow::ensure!(router(st).oneshot(bare).await?.status() == StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+/// Joining: an admin makes a code; someone with no token asks with it,
+/// choosing a handle; the admins see the request and approve it; the token is
+/// collected once with the secret, and is the new member's. A code that will
+/// not do, a taken or reserved handle, a wrong secret and a member who is not
+/// an admin are each refused.
+#[tokio::test]
+async fn someone_asks_to_join_and_is_let_in_by_an_admin() -> anyhow::Result<()> {
+    let st = state().await?;
+    let ada = token("ws:crew", "user:ada")?;
+    let send = |tok: Option<&str>, method: &str, path: &str, body: serde_json::Value| {
+        let (st, tok, method, path) = (
+            st.clone(),
+            tok.map(str::to_string),
+            method.to_string(),
+            path.to_string(),
+        );
+        async move {
+            let mut req = Request::builder()
+                .method(method.as_str())
+                .uri(path)
+                .header(header::CONTENT_TYPE, "application/json");
+            if let Some(tok) = tok {
+                req = req.header(header::AUTHORIZATION, format!("Bearer {tok}"));
+            }
+            let res = router(st)
+                .oneshot(req.body(Body::from(body.to_string()))?)
+                .await?;
+            let status = res.status();
+            let text = body_text(res).await?;
+            anyhow::Ok((
+                status,
+                serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default(),
+            ))
+        }
+    };
+    let none = serde_json::Value::Null;
+    let digest = antumbra_core::join::digest;
+
+    // The workspace's first caller owns it, and makes a code for two people.
+    let (status, made) = send(
+        Some(&ada),
+        "POST",
+        "/join/codes",
+        serde_json::json!({ "uses": 2, "label": "the team" }),
+    )
+    .await?;
+    anyhow::ensure!(status == StatusCode::OK, "{status} {made}");
+    let code = made["code"].as_str().unwrap_or_default().to_string();
+    anyhow::ensure!(
+        code.starts_with("aj1_") && made["uses_left"] == 2 && made["needs_approval"] == true,
+        "{made}"
+    );
+    // The list holds its digest and never the code.
+    let (_, listed) = send(Some(&ada), "GET", "/join/codes", none.clone()).await?;
+    anyhow::ensure!(
+        !listed.to_string().contains(&code),
+        "the code is kept in the clear"
+    );
+    anyhow::ensure!(
+        listed["codes"][0]["key"] == digest(&code).as_str(),
+        "{listed}"
+    );
+
+    // Asking needs no token, and a code that will not do says nothing of why.
+    let ask = |code: &str, handle: &str, secret: &str| {
+        serde_json::json!({
+            "code": code, "handle": handle, "display": "Bodil Lindqvist",
+            "note": "I work on the checkout service.", "host": "Bodils-Laptop",
+            "secret_digest": antumbra_core::join::digest(secret),
+        })
+    };
+    let (status, why) = send(None, "POST", "/join/request", ask("aj1_nope", "bodil", "s")).await?;
+    anyhow::ensure!(status == StatusCode::FORBIDDEN, "{status} {why}");
+    anyhow::ensure!(
+        why["error"] == antumbra_store::repo::join::NO_SUCH_CODE,
+        "{why}"
+    );
+    for handle in ["default", "ada", "x"] {
+        let (status, _) = send(None, "POST", "/join/request", ask(&code, handle, "s")).await?;
+        anyhow::ensure!(status == StatusCode::FORBIDDEN, "{handle}: {status}");
+    }
+    let (status, asked) = send(
+        None,
+        "POST",
+        "/join/request",
+        ask(&code, "Bodil", "bodils-secret"),
+    )
+    .await?;
+    anyhow::ensure!(status == StatusCode::OK, "{status} {asked}");
+    anyhow::ensure!(
+        asked["standing"] == "pending" && asked["handle"] == "bodil",
+        "{asked}"
+    );
+    let request = asked["request"].as_str().unwrap_or_default().to_string();
+
+    // Waiting: no token yet, and none for a wrong secret or with none at all.
+    let collect = |secret: &str| serde_json::json!({ "request": request, "secret": secret });
+    let (_, waiting) = send(None, "POST", "/join/collect", collect("bodils-secret")).await?;
+    anyhow::ensure!(
+        waiting["standing"] == "pending" && waiting["token"].is_null(),
+        "{waiting}"
+    );
+    let (status, _) = send(None, "POST", "/join/collect", collect("a-guess")).await?;
+    anyhow::ensure!(status == StatusCode::FORBIDDEN, "a wrong secret: {status}");
+
+    // The admins see who asks: the handle, the name, the note, the machine.
+    let (_, queue) = send(Some(&ada), "GET", "/join/requests", none.clone()).await?;
+    anyhow::ensure!(queue["waiting"] == 1, "{queue}");
+    let seen = &queue["requests"][0];
+    anyhow::ensure!(
+        seen["handle"] == "bodil"
+            && seen["display"] == "Bodil Lindqvist"
+            && seen["host"] == "bodils-laptop",
+        "{seen}"
+    );
+    anyhow::ensure!(
+        !queue.to_string().contains(&digest("bodils-secret")),
+        "the secret's digest is shown"
+    );
+
+    // Approved by the owner; the token is given once and is Bodil's.
+    let (status, _) = send(
+        Some(&ada),
+        "POST",
+        "/join/decide",
+        serde_json::json!({ "key": request, "approve": true }),
+    )
+    .await?;
+    anyhow::ensure!(status == StatusCode::OK);
+    let (_, got) = send(None, "POST", "/join/collect", collect("bodils-secret")).await?;
+    anyhow::ensure!(
+        got["standing"] == "approved"
+            && got["user"] == "user:bodil"
+            && got["workspace"] == "ws:crew",
+        "{got}"
+    );
+    let bodil = got["token"].as_str().unwrap_or_default().to_string();
+    let (_, again) = send(None, "POST", "/join/collect", collect("bodils-secret")).await?;
+    anyhow::ensure!(
+        again["standing"] == "collected" && again["token"].is_null(),
+        "{again}"
+    );
+
+    // The token works, as a member, with the name asked under.
+    let (status, members) = send(Some(&bodil), "GET", "/members", none.clone()).await?;
+    anyhow::ensure!(
+        status == StatusCode::OK && members["your_role"] == "member",
+        "{status} {members}"
+    );
+    let hers = members["members"]
+        .as_array()
+        .and_then(|all| all.iter().find(|m| m["user"] == "user:bodil").cloned());
+    anyhow::ensure!(
+        hers.is_some_and(|m| m["display"] == "Bodil Lindqvist"),
+        "{members}"
+    );
+    // A member lets no one in, and reads no one's requests.
+    for (method, path) in [
+        ("POST", "/join/codes"),
+        ("GET", "/join/codes"),
+        ("GET", "/join/requests"),
+    ] {
+        let (status, _) = send(Some(&bodil), method, path, serde_json::json!({})).await?;
+        anyhow::ensure!(status == StatusCode::FORBIDDEN, "{method} {path}: {status}");
+    }
+
+    // A refusal is told with its reason; a revoked code admits no one.
+    let (_, second) = send(None, "POST", "/join/request", ask(&code, "cyrus", "s2")).await?;
+    let key = second["request"].clone();
+    send(
+        Some(&ada),
+        "POST",
+        "/join/decide",
+        serde_json::json!({ "key": key, "approve": false, "reason": "not this quarter" }),
+    )
+    .await?;
+    let (_, told) = send(
+        None,
+        "POST",
+        "/join/collect",
+        serde_json::json!({ "request": key, "secret": "s2" }),
+    )
+    .await?;
+    anyhow::ensure!(
+        told["standing"] == "denied" && told["reason"] == "not this quarter",
+        "{told}"
+    );
+    let (_, spare) = send(Some(&ada), "POST", "/join/codes", serde_json::json!({})).await?;
+    let (status, _) = send(
+        Some(&ada),
+        "POST",
+        "/join/codes/revoke",
+        serde_json::json!({ "key": spare["key"] }),
+    )
+    .await?;
+    anyhow::ensure!(status == StatusCode::OK);
+    let (status, _) = send(
+        None,
+        "POST",
+        "/join/request",
+        ask(spare["code"].as_str().unwrap_or_default(), "dee", "s3"),
+    )
+    .await?;
+    anyhow::ensure!(status == StatusCode::FORBIDDEN, "a revoked code: {status}");
+    Ok(())
+}
+
+/// A server that serves only members provisions no one: a signed token for a
+/// pair the workspace does not hold is refused, and one let in by a code is
+/// served.
+#[tokio::test]
+async fn a_members_only_server_serves_no_one_it_did_not_let_in() -> anyhow::Result<()> {
+    let open = state().await?;
+    // Ada opens her workspace and makes an invitation while the server is open.
+    let ada = token("ws:shut", "user:ada")?;
+    let with = |st: Arc<HttpState>,
+                tok: Option<String>,
+                method: &'static str,
+                path: &'static str,
+                body: serde_json::Value| async move {
+        let mut req = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(tok) = tok {
+            req = req.header(header::AUTHORIZATION, format!("Bearer {tok}"));
+        }
+        let res = router(st)
+            .oneshot(req.body(Body::from(body.to_string()))?)
+            .await?;
+        let status = res.status();
+        let text = body_text(res).await?;
+        anyhow::Ok((
+            status,
+            serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default(),
+        ))
+    };
+    let (_, made) = with(
+        open.clone(),
+        Some(ada.clone()),
+        "POST",
+        "/join/codes",
+        serde_json::json!({ "needs_approval": false }),
+    )
+    .await?;
+    let code = made["code"].as_str().unwrap_or_default().to_string();
+
+    // The same store, served to members only.
+    let mut shut = state_with(open.store.clone()).await;
+    let Some(inner) = Arc::get_mut(&mut shut) else {
+        anyhow::bail!("the state is shared before it is served");
+    };
+    inner.members_only = true;
+
+    // A signed token for someone the workspace does not hold is refused...
+    let stranger = token("ws:shut", "user:mallory")?;
+    let (status, why) = with(
+        shut.clone(),
+        Some(stranger),
+        "GET",
+        "/members",
+        serde_json::Value::Null,
+    )
+    .await?;
+    anyhow::ensure!(status == StatusCode::FORBIDDEN, "{status} {why}");
+    anyhow::ensure!(
+        why["error"]
+            .as_str()
+            .is_some_and(|w| w.contains("not a member")),
+        "{why}"
+    );
+    // ...its owner is served...
+    let (status, _) = with(
+        shut.clone(),
+        Some(ada),
+        "GET",
+        "/members",
+        serde_json::Value::Null,
+    )
+    .await?;
+    anyhow::ensure!(status == StatusCode::OK, "the owner: {status}");
+    // ...and so is someone an invitation let in.
+    let asked = serde_json::json!({ "code": code, "handle": "bodil", "secret_digest": antumbra_core::join::digest("s") });
+    let (_, request) = with(shut.clone(), None, "POST", "/join/request", asked).await?;
+    anyhow::ensure!(request["standing"] == "approved", "{request}");
+    let (_, got) = with(
+        shut.clone(),
+        None,
+        "POST",
+        "/join/collect",
+        serde_json::json!({ "request": request["request"], "secret": "s" }),
+    )
+    .await?;
+    let bodil = got["token"].as_str().map(str::to_string);
+    anyhow::ensure!(bodil.is_some(), "{got}");
+    let (status, _) = with(shut, bodil, "GET", "/members", serde_json::Value::Null).await?;
+    anyhow::ensure!(status == StatusCode::OK, "the invited member: {status}");
     Ok(())
 }

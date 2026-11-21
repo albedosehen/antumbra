@@ -2143,3 +2143,89 @@ select.role {
 #members-status {
   margin: 12px 4px 0;
 }
+
+/* Letting people in */
+
+.asking > li {
+  display: block;
+  padding: 16px;
+}
+
+.ask p {
+  margin: 0;
+}
+
+.asking-who {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ask .content {
+  margin-top: 10px;
+  white-space: pre-wrap;
+}
+
+.ask .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 8px;
+}
+
+.ask .write-row input {
+  flex: 1 1 240px;
+}
+
+.code-fields {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 16px;
+}
+
+.code-fields .write {
+  padding: 0;
+}
+
+.code-fields input[type="number"] {
+  width: 100%;
+  text-align: left;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 0.9rem !important;
+  font-weight: 400 !important;
+  color: var(--ink) !important;
+}
+
+.made {
+  margin-top: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+}
+
+.made p {
+  margin: 0;
+}
+
+.shown {
+  font-size: 1rem;
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+
+.codes-list {
+  margin-top: 16px;
+}
+
+@media (max-width: 700px) {
+  .code-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

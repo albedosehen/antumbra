@@ -213,6 +213,13 @@ pub async fn role_of(
     Ok(Some(role))
 }
 
+/// Whether the pair is a member now: provisioned, and not removed.
+pub async fn is_member(store: &Store, tenant: &TenantId, user: &UserId) -> Result<bool> {
+    Ok(row_of(store, tenant, user)
+        .await?
+        .is_some_and(|row| !row.removed()))
+}
+
 /// The workspace's members, owners first, then admins, then by user id. A
 /// member with no role recorded yet is listed as a member.
 pub async fn members(store: &Store, tenant: &TenantId) -> Result<Vec<Member>> {

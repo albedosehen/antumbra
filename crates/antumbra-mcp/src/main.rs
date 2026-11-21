@@ -191,6 +191,15 @@ struct Cli {
     /// varies. 0, the default, is the stream every training has used.
     #[arg(long, env = "ANTUMBRA_GENERATION_SEED", default_value_t = 0)]
     generation_seed: u64,
+    /// Serve only a workspace's members (HTTP transport only): a signed token
+    /// for a (workspace, user) the workspace does not hold is refused, where
+    /// it was provisioned on its first call. People are let in by a join code
+    /// one of the workspace's admins makes. Turn it on once the workspaces
+    /// here have their owners; a workspace nobody has called yet is still
+    /// opened by its first caller.
+    #[arg(long, env = "ANTUMBRA_MEMBERS_ONLY")]
+    members_only: bool,
+
     /// Print a long-lived hook token for `--tenant`/`--user`, signed with
     /// `--jwt-secret` (HS256), and exit -- the credential a non-interactive
     /// lifecycle hook presents on the offline / self-hosted tier (the server
@@ -977,6 +986,13 @@ async fn run() -> Result<()> {
             &cli.serve_quant,
             cli.serve_ahead,
             sync,
+            // A server that verifies with a public key holds nothing to sign
+            // with.
+            jwt_secret
+                .as_deref()
+                .filter(|_| cli.jwt_public_key.is_none())
+                .map(|secret| secret.as_bytes().to_vec()),
+            cli.members_only,
         )
         .await;
     }
