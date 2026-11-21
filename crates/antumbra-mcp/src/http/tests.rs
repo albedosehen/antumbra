@@ -1401,6 +1401,119 @@ async fn a_members_only_server_serves_no_one_it_did_not_let_in() -> anyhow::Resu
     Ok(())
 }
 
+/// What to share is suggested from what was shared before: nothing until a
+/// few were, then the undecided memories that lie with them and not the ones
+/// that lie with what was left out, nearest first; choosing everything
+/// suggested is one call; and what is held back is never suggested.
+#[tokio::test]
+async fn what_to_share_is_suggested_from_what_was_shared_before() -> anyhow::Result<()> {
+    let st = state().await?;
+    let dana = token("ws:own", "user:dana")?;
+    let ask = |tool: &str, arguments: serde_json::Value| {
+        let (st, tok) = (st.clone(), dana.clone());
+        let body = serde_json::json!({ "tool": tool, "arguments": arguments }).to_string();
+        async move {
+            let res = router(st).oneshot(call_request(Some(&tok), &body)?).await?;
+            let status = res.status();
+            let text = body_text(res).await?;
+            anyhow::ensure!(status == StatusCode::OK, "{status}: {text}");
+            anyhow::Ok(serde_json::from_str::<serde_json::Value>(&text)?)
+        }
+    };
+    // The test embedder lays a text's bytes out in order, so two kinds of
+    // text far apart by it: one heavy where it starts, one heavy after that.
+    let work = |i: usize| format!("~~~~~~~~{}", "!".repeat(i + 1));
+    let home = |i: usize| format!("!!!!!!!!~~~~~~~~{}", "!".repeat(i + 1));
+    let mut stored = std::collections::HashMap::new();
+    for text in (0..7).map(work).chain((0..7).map(home)) {
+        let out = ask(
+            "store_memory",
+            serde_json::json!({ "content": text, "network": "world" }),
+        )
+        .await?;
+        stored.insert(text, out["id"].as_str().unwrap_or_default().to_string());
+    }
+    let suggested = serde_json::json!({ "filter": { "suggested": true } });
+
+    // Four shared: not yet, and it says how many more.
+    let ids =
+        |texts: Vec<String>| -> Vec<String> { texts.iter().map(|t| stored[t].clone()).collect() };
+    ask(
+        "bring_choose",
+        serde_json::json!({ "choice": "chosen", "ids": ids((0..4).map(work).collect()) }),
+    )
+    .await?;
+    let early = ask("bring_candidates", suggested.clone()).await?;
+    anyhow::ensure!(
+        early["total"] == 0 && early["suggests_after"] == 1,
+        "{early}"
+    );
+
+    // Five shared and five left out: the two undecided of the shared kind
+    // are suggested, and neither of the other kind.
+    ask(
+        "bring_choose",
+        serde_json::json!({ "choice": "brought", "ids": ids(vec![work(4)]) }),
+    )
+    .await?;
+    ask(
+        "bring_choose",
+        serde_json::json!({ "choice": "declined", "ids": ids((0..5).map(home).collect()) }),
+    )
+    .await?;
+    let now = ask("bring_candidates", suggested.clone()).await?;
+    let said: Vec<&str> = now["memories"]
+        .as_array()
+        .map(|m| m.iter().filter_map(|m| m["content"].as_str()).collect())
+        .unwrap_or_default();
+    anyhow::ensure!(
+        now["total"] == 2 && now.get("suggests_after").is_none(),
+        "{now}"
+    );
+    anyhow::ensure!(said.iter().all(|t| t.starts_with("~~~~")), "{said:?}");
+    let leanings: Vec<f64> = now["memories"]
+        .as_array()
+        .map(|m| m.iter().filter_map(|m| m["leaning"].as_f64()).collect())
+        .unwrap_or_default();
+    anyhow::ensure!(
+        leanings.len() == 2 && leanings[0] >= leanings[1] && leanings[1] > 0.05,
+        "{leanings:?}"
+    );
+    // Without the filter nothing changed: all four undecided, newest first.
+    let plain = ask("bring_candidates", serde_json::json!({})).await?;
+    anyhow::ensure!(
+        plain["total"] == 4 && plain["memories"][0].get("leaning").is_none(),
+        "{plain}"
+    );
+
+    // A secret of the shared kind is held back, and so is not suggested.
+    ask(
+        "store_memory",
+        serde_json::json!({ "content": "~~~~~~~~ password: aAaa4aaaAaaa9aaa", "network": "world" }),
+    )
+    .await?;
+    let still = ask("bring_candidates", suggested.clone()).await?;
+    anyhow::ensure!(still["total"] == 2, "{still}");
+
+    // Everything suggested, chosen in one call; the other kind is untouched.
+    let chosen = ask(
+        "bring_choose",
+        serde_json::json!({ "choice": "chosen", "filter": { "suggested": true } }),
+    )
+    .await?;
+    anyhow::ensure!(chosen["changed"] == 2, "{chosen}");
+    let left = ask("bring_candidates", serde_json::json!({})).await?;
+    let said: Vec<&str> = left["memories"]
+        .as_array()
+        .map(|m| m.iter().filter_map(|m| m["content"].as_str()).collect())
+        .unwrap_or_default();
+    anyhow::ensure!(
+        left["total"] == 2 && said.iter().all(|t| t.starts_with("!!!!")),
+        "{left}"
+    );
+    Ok(())
+}
+
 /// Choosing what to bring to a workspace: a person's own memories are
 /// narrowed and counted on the server, the hooks' own and secret-looking ones
 /// are held back until asked for, a choice is recorded for some or for
