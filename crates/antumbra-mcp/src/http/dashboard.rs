@@ -46,6 +46,8 @@ const SIDE: &str = include_str!("dashboard/side.js");
 /// What the dashboard changes (a memory, a handoff, a document, a
 /// compartment) and the Agent page.
 const MANAGE: &str = include_str!("dashboard/manage.js");
+/// The Bring page: choosing which of your own memories go to a workspace.
+const BRING: &str = include_str!("dashboard/bring.js");
 const STYLE: &str = include_str!("dashboard/app.css");
 /// The relics gallery and viewer (`/relics`, `/relic/<slug>`): one script and
 /// one style for both pages, self-contained because the dashboard's script
@@ -76,6 +78,10 @@ pub(super) fn routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
         .route(
             "/dashboard/manage.js",
             get(|| async { asset("text/javascript; charset=utf-8", MANAGE) }),
+        )
+        .route(
+            "/dashboard/bring.js",
+            get(|| async { asset("text/javascript; charset=utf-8", BRING) }),
         )
         .route(
             "/dashboard/side.js",
@@ -154,6 +160,7 @@ mod tests {
             ("/dashboard/theme.js", "text/javascript"),
             ("/dashboard/side.js", "text/javascript"),
             ("/dashboard/manage.js", "text/javascript"),
+            ("/dashboard/bring.js", "text/javascript"),
             ("/dashboard/app.css", "text/css"),
             ("/dashboard/relics.js", "text/javascript"),
             ("/dashboard/relics.css", "text/css"),
@@ -226,6 +233,7 @@ mod tests {
             ("theme.js", THEME),
             ("side.js", SIDE),
             ("manage.js", MANAGE),
+            ("bring.js", BRING),
         ] {
             for sink in [
                 "innerHTML",

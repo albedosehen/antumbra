@@ -184,6 +184,7 @@ function clearSections() {
   byId("recall").reset();
   clearShell();
   clearManage();
+  clearBring();
 }
 
 async function open(token) {
@@ -242,6 +243,7 @@ async function refresh() {
     byId("updated").textContent = `Updated ${clock.format(new Date())}`;
     renderAttention();
     showAgentWhenAsked();
+    showBringWhenAsked();
     return true;
   } finally {
     button.disabled = false;
@@ -1160,6 +1162,7 @@ async function memoryAction(view) {
 function start() {
   startShell();
   startManage();
+  startBring();
   byId("gate-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const token = byId("token").value.trim().replace(/^Bearer\s+/i, "");
