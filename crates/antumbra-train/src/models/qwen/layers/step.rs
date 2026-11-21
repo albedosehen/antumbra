@@ -692,6 +692,12 @@ fn gate_times(gate: &[f32], up: &[f32], out: &mut [f32]) {
         unsafe { wide::avx2::silu_times(gate, up, out) };
         return;
     }
+    // SAFETY: every aarch64 CPU has NEON.
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        wide::neon::silu_times(gate, up, out)
+    };
+    #[cfg(not(target_arch = "aarch64"))]
     for ((o, g), u) in out.iter_mut().zip(gate).zip(up) {
         *o = g / (1.0 + (-g).exp()) * u;
     }
