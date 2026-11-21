@@ -2262,7 +2262,7 @@ fn secret(n: usize, url_safe: bool) -> anyhow::Result<String> {
 
 /// A program on the PATH. On Windows, `.exe`, `.cmd` and `.bat` count, and
 /// the native Claude Code installer's `~/.local/bin` is looked in too.
-fn find_program(name: &str) -> Option<PathBuf> {
+pub(crate) fn find_program(name: &str) -> Option<PathBuf> {
     let exts: &[&str] = if cfg!(windows) {
         &[".exe", ".cmd", ".bat"]
     } else {

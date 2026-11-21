@@ -249,6 +249,36 @@ if [ -n "$commit" ]; then
   git_line="Git context: repo=${repo:-?} branch=${branch:-(detached)} commit=${commit}. When storing a memory about this code, pass provenance {repo: \"${repo}\", commit: \"${commit}\", branch: \"${branch}\"} to store_memory (add path for a single file) so a later session can tell whether it still applies. Tags: [live] the anchor is on HEAD; [not-on-head] learned on a commit this HEAD does not contain; [orphaned] its branch no longer exists here or on origin, or GitHub reported it deleted -- verify before relying on it, and penalize_memory if it is wrong."
 fi
 
+# The workspaces this machine joined (`antumbra join`), so the agent knows
+# what the labelled memories in its prompts are, whether it has a workspace's
+# tools, and where what it learns is to go. Read from the files join keeps;
+# no server is asked.
+joined=""
+for WS in "${ANTUMBRA_WORKSPACES_DIR:-$HOME/.antumbra/workspaces}"/*/workspace.json; do
+  [ -r "$WS" ] || continue
+  line=$(jq -r '
+    select((.url // "") != "" and (.workspace // "") != "")
+    | (.server // "") as $server
+    | "- " + .workspace + " at " + .url
+      + (if (.user // "") != "" then ", as " + .user else "" end) + ". "
+      + ( if $server != ""
+          then "Its tools are the MCP server `" + $server + "`: use them to search it further or to write to it. "
+          else "You have no tools for it: you read what your prompts are given. " end )
+      + ( if .write == "workspace" and $server != ""
+          then "Store what you learn about this team'"'"'s work there, with its store_memory; what is the user'"'"'s own goes to your own store."
+          elif .write == "ask"
+          then "New memories go to your own store. When something you learn is the team'"'"'s and not only the user'"'"'s, ask the user whether to store it in the workspace too."
+          else "New memories go to your own store. Write to the workspace only when the user asks." end )
+  ' "$WS" 2>/dev/null) || line=""
+  [ -n "$line" ] && joined="${joined}${line}
+"
+done
+if [ -n "$joined" ]; then
+  joined="Workspaces this machine joined. What each holds for a prompt comes with the prompt, labelled as the workspace's and not your own.
+${joined%
+}"
+fi
+
 # The agent caps a hook's context at 10,000 characters. Past the cap it is handed
 # a file path and a 2,000-character preview it is never asked to open, so an
 # oversized bootstrap is a truncated one that says nothing about it. What must
@@ -260,9 +290,10 @@ LIMIT="${ANTUMBRA_CONTEXT_LIMIT:-9500}"
 case "$LIMIT" in ''|*[!0-9]*) LIMIT=9500 ;; esac
 [ "$LIMIT" -lt 1000 ] && LIMIT=1000
 context=$(jq -nc --argjson entries "$entries" --arg host "$HOST_ID" --arg git "$git_line" \
-  --arg brief "$brief" --arg handoffs "$handoffs" --argjson limit "$LIMIT" '
+  --arg brief "$brief" --arg handoffs "$handoffs" --arg joined "$joined" --argjson limit "$LIMIT" '
   ( "# Antumbra session bootstrap (host=" + $host + ")\n\n"
     + (if $handoffs != "" then $handoffs + "\n\n" else "" end)
+    + (if $joined != "" then $joined + "\n\n" else "" end)
     + (if $brief != "" then $brief + "\n\n" else "" end)
     + (if $git != "" then $git + "\n\n" else "" end) ) as $head
   | "\n\n---\n\n" as $sep
