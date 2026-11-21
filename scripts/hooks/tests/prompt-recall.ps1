@@ -20,6 +20,7 @@ $response = Join-Path $work 'response.json'
 $delay = Join-Path $work 'delay.txt'
 $request = Join-Path $work 'request.json'
 Set-Content -Path $response -Value '{}'
+Set-Content -Path "$response.team" -Value '{}'
 Set-Content -Path $delay -Value '0'
 $port = Get-Random -Minimum 20000 -Maximum 40000
 $url = "http://127.0.0.1:$port"
@@ -35,7 +36,13 @@ $null = Start-ThreadJob -ArgumentList $listener, $response, $delay, $request -Sc
             [System.IO.File]::WriteAllText($requestFile, $reader.ReadToEnd())
             $wait = [int](Get-Content -Raw $delayFile)
             if ($wait -gt 0) { Start-Sleep -Seconds $wait }
-            $bytes = [System.IO.File]::ReadAllBytes($responseFile)
+            # A workspace's address (the same surface, under /team) is answered
+            # from the workspace's file, and what it was asked is kept apart.
+            $team = $call.Request.RawUrl.StartsWith('/team/')
+            if ($team) {
+                [System.IO.File]::WriteAllText("$requestFile.team", [string]$call.Request.Headers['Authorization'])
+            }
+            $bytes = [System.IO.File]::ReadAllBytes($(if ($team) { "$responseFile.team" } else { $responseFile }))
             # No charset, as the engine sends it.
             $call.Response.ContentType = 'application/json'
             try {
@@ -119,6 +126,42 @@ foreach ($script:runner in $runners) {
     Check 'says nothing' ($out -eq '')
     Remove-Item Env:ANTUMBRA_RECALL_BUDGET_SEC
     Set-Surface $recall
+
+    # A machine that joined a workspace (`antumbra join`) recalls from its own
+    # store and from the workspace, each said apart, the workspace with its
+    # own token.
+    Write-Output 'a machine that joined a workspace'
+    $joined = Join-Path $work 'workspaces'
+    $crew = Join-Path $joined 'team__ws_crew'
+    New-Item -ItemType Directory -Force -Path $crew | Out-Null
+    $tokenFile = Join-Path $crew 'token.txt'
+    Set-Content -Path $tokenFile -Value 'team-token'
+    @{ url = "$url/team"; workspace = 'ws:crew'; user = 'user:bodil'; token_file = $tokenFile } |
+        ConvertTo-Json -Compress | Set-Content -Path (Join-Path $crew 'workspace.json')
+    $env:ANTUMBRA_WORKSPACES_DIR = $joined
+    $teamRecall = '{"memories":[{"id":"memory:t","network":"bank","content":"the deploy runs in two steps"}]}'
+    [System.IO.File]::WriteAllText("$response.team", $teamRecall, [System.Text.UTF8Encoding]::new($false))
+    Set-Surface $recall
+    $ctx = [string]((Invoke-Hook 'how do we deploy') | ConvertFrom-Json).hookSpecificOutput.additionalContext
+    Check 'recalls from its own store' $ctx.Contains('memory:a: keep it plain')
+    Check 'and from the workspace, named' $ctx.Contains('From the workspace ws:crew')
+    Check "with the workspace's memories under it" $ctx.Contains('memory:t: the deploy runs in two steps')
+    Check 'your own first' ($ctx.IndexOf('memory:a') -lt $ctx.IndexOf('From the workspace'))
+    Check "asks the workspace with the workspace's token" ((Get-Content -Raw "$request.team").Trim() -eq 'Bearer team-token')
+
+    Write-Output 'your own store with nothing to say'
+    Set-Surface '{"memories":[]}'
+    $ctx = [string]((Invoke-Hook 'how do we deploy') | ConvertFrom-Json).hookSpecificOutput.additionalContext
+    Check "still gives the workspace's" $ctx.Contains('memory:t: the deploy runs in two steps')
+
+    Write-Output 'told to ask only your own'
+    Set-Surface $recall
+    Remove-Item "$request.team" -ErrorAction SilentlyContinue
+    $env:ANTUMBRA_RECALL_WORKSPACES = '0'
+    $ctx = [string]((Invoke-Hook 'how do we deploy') | ConvertFrom-Json).hookSpecificOutput.additionalContext
+    Check 'asks the workspace nothing' (-not (Test-Path "$request.team") -and -not $ctx.Contains('From the workspace'))
+    Remove-Item Env:ANTUMBRA_RECALL_WORKSPACES
+    Remove-Item Env:ANTUMBRA_WORKSPACES_DIR
 
     Write-Output 'no token'
     Remove-Item Env:ANTUMBRA_TOKEN
