@@ -2339,3 +2339,107 @@ button.link.strong {
   min-height: 1.4em;
   margin: 8px 4px 0;
 }
+
+/* A memory's text, with its code as code. */
+
+.content.rich > p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.content.rich > * + * {
+  margin-top: 8px;
+}
+
+.content.rich code {
+  padding: 1px 5px;
+  border-radius: var(--radius-s);
+  background: var(--accent-soft);
+  font-size: 0.86em;
+}
+
+pre.code {
+  position: relative;
+  max-width: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.content.rich pre.code code {
+  padding: 0;
+  background: none;
+  font-size: inherit;
+}
+
+pre.code[data-lang]::after {
+  content: attr(data-lang);
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+:root {
+  --tok-key: #5c55a8;
+  --tok-str: #2f6f4f;
+  --tok-num: #9a5a12;
+  --tok-kw: #9c4636;
+  --tok-com: rgb(27 26 46 / 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --tok-key: #a9a4e0;
+    --tok-str: #8fcfa9;
+    --tok-num: #e0b070;
+    --tok-kw: #e39a88;
+    --tok-com: rgb(239 231 216 / 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  --tok-key: #a9a4e0;
+  --tok-str: #8fcfa9;
+  --tok-num: #e0b070;
+  --tok-kw: #e39a88;
+  --tok-com: rgb(239 231 216 / 0.5);
+}
+
+.tok-key { color: var(--tok-key); }
+.tok-str { color: var(--tok-str); }
+.tok-num { color: var(--tok-num); }
+.tok-kw { color: var(--tok-kw); font-weight: 600; }
+.tok-com { color: var(--tok-com); font-style: italic; }
+
+/* A memory in the list is clipped until it is opened; a block is not a line. */
+.memory .content.rich {
+  display: block;
+  max-height: 9.5em;
+  -webkit-line-clamp: unset;
+  line-clamp: none;
+  white-space: normal;
+}
+
+.memory.open .content.rich {
+  max-height: none;
+}
+
+/* The unit beside a policy field: the same room on every row. */
+.knob-field .unit {
+  flex: none;
+  width: 3.2em;
+  text-align: left;
+}

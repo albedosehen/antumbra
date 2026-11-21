@@ -1,4 +1,4 @@
-// The Bring page: choosing which of your own memories go to a workspace you
+// The Share page: choosing which of your own memories go to a workspace you
 // joined. It is built for a store of thousands. Every narrowing is done by
 // the server (`bring_candidates`), which also counts what each way of
 // narrowing would leave, and a whole filter's worth is decided in one call
@@ -89,7 +89,7 @@ function bringRow(m, state) {
         ? []
         : [decide("clear", "Undo", true), state === "declined" ? decide("chosen", "Choose") : null];
   item.append(
-    h("p", { class: "content" }, m.content, m.truncated ? " \u2026" : ""),
+    rich(m.truncated ? `${m.content} \u2026` : m.content),
     h(
       "p",
       { class: "meta small muted" },
@@ -132,6 +132,7 @@ function drawBringStates(out) {
   const badge = byId("nav-chosen");
   badge.hidden = !states.chosen;
   badge.textContent = states.chosen ? numbers.format(states.chosen) : "";
+  byId("bring-send").hidden = !states.chosen;
 }
 
 async function refreshBringCounts() {
@@ -173,7 +174,7 @@ async function showBring() {
 
 /** The page reads every memory to count them, so it is read when looked at. */
 function showBringWhenAsked() {
-  if (location.hash.replace(/^#\/?/, "") === "bring" && state.token) showBring();
+  if (location.hash.replace(/^#\/?/, "") === "share" && state.token) showBring();
 }
 
 function startBring() {

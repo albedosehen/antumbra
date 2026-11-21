@@ -63,6 +63,100 @@ function h(tag, attrs = {}, ...children) {
   return node;
 }
 
+// Text an agent wrote often holds code between ``` fences. It is drawn as
+// what it is: prose as prose, code in a block of its own in a fixed-width
+// face, coloured by what each part is, and the fence marks themselves left
+// out. Everything is built from text nodes; nothing stored is read as markup.
+
+const CODE_WORDS = new Set(
+  (
+    "as async await break case catch class const continue def default do else enum export extends false fn for from " +
+    "function if impl import in interface let loop match mod mut new nil none null pub return self static struct " +
+    "super switch then this throw trait true try type use var where while with yield"
+  ).split(" "),
+);
+/** A fence's label that means JSON, whatever it is called. */
+const JSON_LABELS = new Set(["json", "jsonc", "behavior", "behaviour"]);
+
+/** One run of code as spans: strings, numbers, words of the language,
+ *  comments, and in JSON the keys apart from the values. */
+function codeSpans(code, label) {
+  const json = JSON_LABELS.has(label) || /^\s*[[{]/.test(code);
+  const out = [];
+  const token =
+    /(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/)|("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d[\d_]*(?:\.\d+)?(?:[eE][+-]?\d+)?\b)|([A-Za-z_][A-Za-z0-9_]*)/g;
+  let at = 0;
+  for (let found = token.exec(code); found; found = token.exec(code)) {
+    const [text, comment, string, number, word] = found;
+    // JSON has no comments: a `#` or `//` there is inside a value.
+    let kind = null;
+    if (comment && !json) kind = "com";
+    else if (string) kind = json && /^\s*:/.test(code.slice(token.lastIndex)) ? "key" : "str";
+    else if (number) kind = "num";
+    else if (word && CODE_WORDS.has(word.toLowerCase())) kind = "kw";
+    else if (comment) {
+      // Not a comment after all: go on from just past its first character.
+      token.lastIndex = found.index + 1;
+      continue;
+    }
+    if (!kind) continue;
+    if (found.index > at) out.push(code.slice(at, found.index));
+    out.push(h("span", { class: `tok-${kind}` }, text));
+    at = token.lastIndex;
+  }
+  if (at < code.length) out.push(code.slice(at));
+  return out;
+}
+
+/** `text` cut where its ``` fences are: prose and code by turns. A fence
+ *  that is never closed (a memory cut short) runs to the end. */
+function fenced(text) {
+  const parts = [];
+  const fence = /```([A-Za-z0-9_+-]*)[ \t]*\n?([\s\S]*?)(?:\n?```|$)/g;
+  let at = 0;
+  for (let found = fence.exec(text); found; found = fence.exec(text)) {
+    if (found.index > at) parts.push({ prose: text.slice(at, found.index) });
+    parts.push({ code: found[2], label: found[1].toLowerCase() });
+    at = fence.lastIndex;
+    if (found[0].length === 0) break;
+  }
+  if (at < text.length) parts.push({ prose: text.slice(at) });
+  return parts;
+}
+
+/** Prose with its `inline code` in a fixed-width face, the marks left out. */
+function proseNodes(prose) {
+  return prose.split(/(`[^`\n]+`)/).map((piece) =>
+    piece.length > 2 && piece.startsWith("`") && piece.endsWith("`") ? h("code", {}, piece.slice(1, -1)) : piece,
+  );
+}
+
+/** A memory's text, drawn: prose, and each fenced run of code as a block. */
+function rich(text) {
+  const box = h("div", { class: "content rich" });
+  for (const part of fenced(String(text ?? ""))) {
+    if (part.code !== undefined) {
+      if (!part.code.trim()) continue;
+      const block = h("pre", { class: "code" }, h("code", {}, ...codeSpans(part.code.replace(/\s+$/, ""), part.label)));
+      if (part.label) block.dataset.lang = part.label;
+      box.append(block);
+    } else if (part.prose.trim()) {
+      box.append(h("p", {}, ...proseNodes(part.prose.replace(/^\n+|\n+$/g, ""))));
+    }
+  }
+  return box;
+}
+
+/** A memory's text on one line of prose: no fence marks, no backticks. For
+ *  where a memory is only glanced at. */
+function plain(text) {
+  return String(text ?? "")
+    .replace(/```[A-Za-z0-9_+-]*/g, " ")
+    .replace(/`/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // The token: kept in this tab's session storage, which the browser clears
 // with the tab. Storage can be refused (a private window); then the token
 // lasts this load only.
@@ -1057,7 +1151,7 @@ function memoryItem(m) {
   const item = h(
     "li",
     { class: "memory" },
-    h("p", { class: "content" }, m.content),
+    rich(m.content),
     memoryMeta(m),
     // Reinforce, penalize, forget (manage.js).
     h("div", { class: "actions-row" }, toggle, relate, ...memoryActions(m)),
