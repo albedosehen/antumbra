@@ -9,7 +9,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use surql::query::crud::create_record;
+use surql::query::builder::Query;
+use surql::query::crud::{create_record, query_records};
+use surql::types::operators::eq;
 
 use antumbra_core::{AntumbraError, Result};
 
@@ -17,6 +19,7 @@ use crate::error::map;
 use crate::store::Store;
 
 const TABLE: &str = crate::tables::ACCOUNT;
+const MEMBERSHIP: &str = crate::tables::ACCOUNT_MEMBERSHIP;
 
 /// A hosted account: a login identity bound to the workspace it owns.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +57,63 @@ pub async fn create(store: &Store, account: &Account) -> Result<()> {
 /// Look up the account for a verified login subject (login).
 pub async fn get_by_subject(store: &Store, subject: &str) -> Result<Option<Account>> {
     store.get_row(TABLE, key(subject).as_str()).await
+}
+
+/// One workspace an account is in, and who the account is there. A user id
+/// names one user in one workspace, so the same login is a different user in
+/// each workspace it joins.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Membership {
+    /// The account's login key.
+    pub subject: String,
+    pub tenant: String,
+    pub user: String,
+    pub joined_at: DateTime<Utc>,
+}
+
+/// Record that an account is in a workspace. One row for an account in a
+/// workspace: said again, the first stands, whoever it names there.
+pub async fn add_membership(store: &Store, membership: &Membership) -> Result<()> {
+    let mut row = serde_json::to_value(membership)?;
+    row["id"] = serde_json::json!(format!(
+        "{}__{}",
+        key(&membership.subject),
+        key(&membership.tenant)
+    ));
+    match create_record(store.client(), MEMBERSHIP, row).await {
+        Ok(_) => Ok(()),
+        Err(e) if e.to_string().contains("already exists") => Ok(()),
+        Err(e) => Err(map(e)),
+    }
+}
+
+/// The workspaces an account is in, the first joined first. An account from
+/// before memberships were recorded has no row for the workspace it was made
+/// with, so that one is always among them, first.
+pub async fn memberships(store: &Store, account: &Account) -> Result<Vec<Membership>> {
+    let query = Query::new()
+        .select(None)
+        .from_table(MEMBERSHIP)
+        .map_err(map)?
+        .where_(eq("subject", account.subject.as_str()));
+    let mut all: Vec<Membership> = query_records(store.client(), &query).await.map_err(map)?;
+    all.sort_by(|a, b| {
+        a.joined_at
+            .cmp(&b.joined_at)
+            .then_with(|| a.tenant.cmp(&b.tenant))
+    });
+    if !all.iter().any(|m| m.tenant == account.tenant) {
+        all.insert(
+            0,
+            Membership {
+                subject: account.subject.clone(),
+                tenant: account.tenant.clone(),
+                user: account.user.clone(),
+                joined_at: account.created_at,
+            },
+        );
+    }
+    Ok(all)
 }
 
 #[cfg(test)]
@@ -117,6 +177,60 @@ mod tests {
         assert_eq!(got.tenant, "ws:abc");
         assert_eq!(got.user, "user:owner");
         assert_eq!(got.email.as_deref(), Some("a@b.com"));
+        Ok(())
+    }
+
+    /// An account is in the workspace it was made with whether or not a row
+    /// says so; each workspace it joins is one row, said once; and another
+    /// account's workspaces are not among them.
+    #[tokio::test]
+    async fn an_account_lists_the_workspaces_it_is_in() -> Result<()> {
+        let s = mem_store().await?;
+        let made = Utc::now() - chrono::Duration::days(30);
+        let dana = Account {
+            subject: "email:dana@example.com".into(),
+            tenant: "ws:first".into(),
+            user: "user:owner".into(),
+            email: Some("dana@example.com".into()),
+            display: None,
+            created_at: made,
+        };
+        create(&s, &dana).await?;
+        // From before memberships: the workspace it was made with, alone.
+        let first = memberships(&s, &dana).await?;
+        assert_eq!(first.len(), 1);
+        assert_eq!(
+            (first[0].tenant.as_str(), first[0].user.as_str()),
+            ("ws:first", "user:owner")
+        );
+        assert_eq!(first[0].joined_at, made);
+
+        let row = |subject: &str, tenant: &str, user: &str, days: i64| Membership {
+            subject: subject.into(),
+            tenant: tenant.into(),
+            user: user.into(),
+            joined_at: made + chrono::Duration::days(days),
+        };
+        add_membership(&s, &row(&dana.subject, "ws:first", "user:owner", 0)).await?;
+        add_membership(&s, &row(&dana.subject, "ws:crew", "user:dana", 9)).await?;
+        add_membership(&s, &row(&dana.subject, "ws:lab", "user:dana-l", 3)).await?;
+        // Said again as someone else: the first stands.
+        add_membership(&s, &row(&dana.subject, "ws:crew", "user:other", 12)).await?;
+        add_membership(&s, &row("email:eli@example.com", "ws:elis", "user:eli", 1)).await?;
+
+        let all = memberships(&s, &dana).await?;
+        let seen: Vec<(&str, &str)> = all
+            .iter()
+            .map(|m| (m.tenant.as_str(), m.user.as_str()))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                ("ws:first", "user:owner"),
+                ("ws:lab", "user:dana-l"),
+                ("ws:crew", "user:dana")
+            ]
+        );
         Ok(())
     }
 }

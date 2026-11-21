@@ -433,6 +433,11 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
         // to a tenant and must never be tenant-readable).
         table_schema(tables::INVITE_CODE).with_mode(TableMode::Schemaless),
         table_schema(tables::ACCOUNT).with_mode(TableMode::Schemaless),
+        // The workspaces an account is in, a row for each. Owner-only like
+        // the account itself: it says which logins reach which workspaces.
+        table_schema(tables::ACCOUNT_MEMBERSHIP)
+            .with_mode(TableMode::Schemaless)
+            .with_indexes([index("account_membership_subject_idx", ["subject"])]),
         // Join codes and join requests: a way into a workspace, and the digest
         // of the secret a request's token is collected with. Owner-only like
         // the two above; the server reads them for an admin it has checked.
