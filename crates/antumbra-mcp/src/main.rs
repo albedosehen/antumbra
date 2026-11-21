@@ -207,6 +207,14 @@ struct Cli {
     #[arg(long, env = "ANTUMBRA_MEMBERS_ONLY")]
     members_only: bool,
 
+    /// The address of the control plane that signs this server's tokens
+    /// (HTTP transport only, with `--jwt-public-key`). With it, a workspace's
+    /// admins make join codes here, and someone who asks to join is sent
+    /// there: it verifies their address by a link and signs their token once
+    /// an admin approved. Both read this server's store.
+    #[arg(long, env = "ANTUMBRA_CONTROL_PLANE", value_name = "URL")]
+    control_plane: Option<String>,
+
     /// Print a long-lived hook token for `--tenant`/`--user`, signed with
     /// `--jwt-secret` (HS256), and exit -- the credential a non-interactive
     /// lifecycle hook presents on the offline / self-hosted tier (the server
@@ -1000,6 +1008,7 @@ async fn run() -> Result<()> {
                 .filter(|_| cli.jwt_public_key.is_none())
                 .map(|secret| secret.as_bytes().to_vec()),
             cli.members_only,
+            cli.control_plane.clone(),
         )
         .await;
     }
