@@ -119,7 +119,7 @@ async function loadAgent() {
               h("span", { class: "mono" }, r.rule),
               h("span", { class: "tag" }, r.current ? "current" : "retired"),
             ),
-            h("p", { class: "content" }, r.text),
+            rich(r.text),
           ),
         )
       : [h("li", { class: "empty" }, "No rules are kept: `antumbra claude rules` writes the ones for an agent run with its feature flags off.")]),
@@ -679,7 +679,7 @@ function drawPool(pool, compartments) {
             "li",
             { class: "ask" },
             h("p", { class: "asking-who" }, h("span", { class: "member-text" }, h("span", {}, name), h("span", { class: "small muted" }, `offered by ${o.offered_by_name || bareName(o.offered_by)}${o.yours ? " (you)" : ""} \u00b7 ${numbers.format(o.memories)} ${o.memories === 1 ? "memory" : "memories"}`)), h("span", { class: "tag" }, o.status)),
-            ...(o.preview ?? []).map((text) => h("p", { class: "content small" }, text)),
+            ...(o.preview ?? []).map((text) => h("p", { class: "content small" }, plain(text))),
             acts.length ? h("div", { class: "write-row" }, ...acts) : null,
           );
         })

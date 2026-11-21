@@ -59,7 +59,7 @@
         <a class="nav-item" href="#/account" data-nav="account" title="Account"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="6.5" r="1.8"/><path d="M4.6 12.2c.7-1.5 1.900-2.2 3.400-2.2s2.7.7 3.400 2.2"/></svg><span>Account</span></a>
         <a class="nav-item" href="#/devices" data-nav="devices" title="Devices"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v7h-11zM6 13.5h4M8 10.5v3"/></svg><span>Devices</span><span id="nav-handoffs" class="count" hidden></span></a>
         <a class="nav-item" href="#/agent" data-nav="agent" title="Agent"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6.5V5a4 4 0 0 1 8 0v1.5M3 6.5h10v5.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 12zM6.2 9.500h.01M9.8 9.500h.01"/></svg><span>Agent</span></a>
-        <a class="nav-item" href="#/bring" data-nav="bring" title="Bring to a workspace"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 9.5v3h11v-3M8 2.5v7.5M5 5.5l3-3 3 3"/></svg><span>Bring</span><span id="nav-chosen" class="count" hidden></span></a>
+        <a class="nav-item" href="#/share" data-nav="share" title="Share with a workspace"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 9.5v3h11v-3M8 2.5v7.5M5 5.5l3-3 3 3"/></svg><span>Share</span><span id="nav-chosen" class="count" hidden></span></a>
       <p class="nav-group">Workspace settings</p>
         <a class="nav-item" href="#/members" data-nav="members" title="Members"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6" cy="5.5" r="2.2"/><path d="M2 13c.5-2.2 2-3.3 4-3.3s3.5 1.1 4 3.3"/><circle cx="11.5" cy="6" r="1.7"/><path d="M11.2 9.8c1.5.1 2.5 1 2.8 2.7"/></svg><span>Members</span><span id="nav-asking" class="count" hidden></span></a>
         <a class="nav-item" href="#/settings" data-nav="settings" title="Policy"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"/><circle cx="10" cy="4.5" r="1.5"/><circle cx="6" cy="11.5" r="1.5"/></svg><span>Policy</span></a>
@@ -196,7 +196,7 @@
       <div class="view" data-view="behaviors" hidden>
         <header class="view-head">
           <h2 class="view-title">Behaviors</h2>
-          <p class="view-lede">How you told an agent to act. Accept one and your expert is taught it; retire one and it trains nothing.</p>
+          <p class="view-lede">How you told your agents to act.</p>
         </header>
         <section aria-labelledby="h-behaviors">
       <div class="section-head">
@@ -469,7 +469,7 @@
       <div class="view" data-view="agent" hidden>
         <header class="view-head">
           <h2 class="view-title">Agent</h2>
-          <p class="view-lede">What your coding agent uses and what it is told: the skills its hooks count, and the rules it is given.</p>
+          <p class="view-lede">The skills your coding agent uses and the rules it is given.</p>
         </header>
         <section aria-labelledby="h-skills">
           <div class="section-head">
@@ -502,10 +502,10 @@
         </section>
       </div>
 
-      <div class="view" data-view="bring" hidden>
+      <div class="view" data-view="share" hidden>
         <header class="view-head">
-          <h2 class="view-title">Bring to a workspace</h2>
-          <p class="view-lede">Nothing you remember here reaches a workspace by itself. Choose what goes: narrow your memories, take a whole group at once, and look over what you chose. What you bring is copied; the original stays yours. Choosing sends nothing: <code>antumbra bring</code>, on a machine that joined the workspace, copies what is chosen.</p>
+          <h2 class="view-title">Share with a workspace</h2>
+          <p class="view-lede">Choose which of your memories to share with a workspace you joined.</p>
         </header>
         <section aria-labelledby="h-bring">
           <div class="section-head">
@@ -543,6 +543,7 @@
             </div>
           </div>
           <p id="bring-status" class="small muted" role="status"></p>
+          <p id="bring-send" class="note small" hidden>Run <code>antumbra bring</code> on a machine that joined the workspace to send what you chose.</p>
           <div class="panel">
             <ul id="bring-list" class="list bring-list"></ul>
           </div>
@@ -606,7 +607,7 @@
       <div class="view" data-view="members" hidden>
         <header class="view-head">
           <h2 class="view-title">Members</h2>
-          <p class="view-lede">Who is in this workspace, and as what. An owner decides who its admins and owners are; an admin or an owner removes a member.</p>
+          <p class="view-lede">Who is in this workspace, and as what.</p>
         </header>
         <section aria-labelledby="h-members">
           <div class="section-head">
@@ -687,7 +688,7 @@
       <div class="view" data-view="settings" hidden>
         <header class="view-head">
           <h2 class="view-title">Policy</h2>
-          <p class="view-lede">How this workspace keeps, links and teaches what it remembers. An operator changes it here or in the console.</p>
+          <p class="view-lede">How this workspace keeps, links and teaches what it remembers.</p>
         </header>
         <section aria-labelledby="h-policy">
           <div class="section-head">

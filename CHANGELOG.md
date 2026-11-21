@@ -38,6 +38,7 @@ A workspace has members: each with a name and an image, a role, and a way in tha
 ### The dashboard
 
 - **An Agent page, and the writes that are a user's own** ([#516](https://github.com/albedosehen/antumbra/pull/516)). Agent lists the skills an agent's hooks have counted and the rules kept for it. Memory can be written, reinforced, penalized and forgotten; a note can be left for an agent on one of the user's devices; a document and a compartment can be added. Each goes through the tool an agent would call, as the signed-in identity.
+- **Share, code drawn as code, and policy fields in line** ([#544](https://github.com/albedosehen/antumbra/pull/544)). The page for choosing what goes to a workspace is called Share, at `#/share`, with one sentence under its title, and several other pages' subheaders are one sentence too. Code between ``` fences in a memory is a block in a fixed-width face, coloured by what each part is, without the fence marks; inline code likewise. Every field on the Policy page starts and ends at the same place.
 
 ### Known limits
 

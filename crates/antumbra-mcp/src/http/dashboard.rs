@@ -46,7 +46,7 @@ const SIDE: &str = include_str!("dashboard/side.js");
 /// What the dashboard changes (a memory, a handoff, a document, a
 /// compartment) and the Agent page.
 const MANAGE: &str = include_str!("dashboard/manage.js");
-/// The Bring page: choosing which of your own memories go to a workspace.
+/// The Share page: choosing which of your own memories go to a workspace.
 const BRING: &str = include_str!("dashboard/bring.js");
 const STYLE: &str = include_str!("dashboard/app.css");
 /// The relics gallery and viewer (`/relics`, `/relic/<slug>`): one script and

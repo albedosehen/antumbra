@@ -16,7 +16,7 @@ const VIEWS = {
   knowledge: "Knowledge",
   account: "Account",
   agent: "Agent",
-  bring: "Bring",
+  share: "Share",
   devices: "Devices and handoffs",
   members: "Members",
   settings: "Policy",
@@ -295,7 +295,7 @@ function handoffItem(note) {
     "li",
     { class: "handoff" },
     h("p", { class: "handoff-title" }, title || "Untitled"),
-    body ? h("p", { class: "content" }, body) : null,
+    body ? rich(body) : null,
     h(
       "p",
       { class: "meta small muted" },
@@ -474,7 +474,9 @@ function knobRow([key, label, says, unit], stored, knob, operator) {
     control = h(
       "div",
       { class: "knob-input" },
-      h("div", { class: "knob-field" }, input, unit ? h("span", { class: "small muted" }, unit) : null),
+      // The unit's room is the same on every row, named or not, so the
+      // fields line up down the page.
+      h("div", { class: "knob-field" }, input, h("span", { class: "unit small muted" }, unit || "")),
       h("p", { class: "small muted" }, `${numbers.format(knob.min)} to ${numbers.format(knob.max)}`),
     );
   }
@@ -521,7 +523,7 @@ async function loadRecent() {
           h(
             "li",
             { class: "recent" },
-            h("p", { class: "recent-text" }, m.content),
+            h("p", { class: "recent-text" }, plain(m.content)),
             h(
               "p",
               { class: "meta small muted" },
