@@ -27,6 +27,14 @@
 //! six; where a row costs a third of a pass, as on a machine whose memory
 //! outruns its arithmetic, only text it has all but written before.
 //!
+//! A model on a CUDA device reads no rows as plain values, and reads ahead
+//! as tensors instead ([`super::tensors`]): its guesses ride in passes of
+//! one width, the rest of the width padding, because that is what the
+//! device's library computes a row the same way in. A row there costs
+//! nothing more, so every guess offered rides; what it costs is that every
+//! pass is a wide one, about two fifths dearer than a pass of one row on
+//! the card it was measured on.
+//!
 //! Requests answered together read ahead too ([`pass`]): each carries its
 //! own guesses in the passes they share, as far as a pass has rows beside
 //! one for every request. The same count shares the rows out: the more
@@ -107,6 +115,9 @@ pub(in crate::models::qwen) struct Odds {
     /// Seconds and tokens to a pass, lately.
     secs: f64,
     tokens: f64,
+    /// No guess is carried, whatever it is worth.
+    #[cfg(test)]
+    never: bool,
     /// Every guess offered is carried, whatever it is worth.
     #[cfg(test)]
     eager: bool,
@@ -123,6 +134,16 @@ impl Odds {
         }
     }
 
+    /// Odds under which no guess is carried: a test's, to read a token a
+    /// pass through the passes a reader's are.
+    #[cfg(test)]
+    pub(in crate::models::qwen) fn never() -> Self {
+        Self {
+            never: true,
+            ..Self::default()
+        }
+    }
+
     /// How likely a guess of `kind` is the model's own token, the guesses
     /// before it being right: what was counted, from what is believed.
     fn likely(&self, kind: u8) -> f32 {
@@ -135,6 +156,10 @@ impl Odds {
     /// their rows: each while the chance that it and all before it are
     /// right, by the time a token takes, is at least what a row adds.
     fn carry(&self, kinds: &[u8]) -> usize {
+        #[cfg(test)]
+        if self.never {
+            return 0;
+        }
         #[cfg(test)]
         if self.eager {
             return kinds.len();
@@ -334,12 +359,22 @@ pub(in crate::models::qwen) fn decode(
     if most == 0 {
         return Ok(Some(told));
     }
+    // Where rows are read as tensors, every pass is read against as many
+    // positions as the generation may come to; one that may come to more
+    // than can be turned is decoded a token at a time.
+    if model.reads_ahead_as_tensors() && !model.read_within(prompt_len + most) {
+        return Ok(None);
+    }
     // The prompt, and the first token after it.
     let began = Instant::now();
     let mut next = match model.step(tokens, 0, true)? {
         Some(Stepped::First(token)) => token,
         Some(Stepped::Logits(_)) => bail!("a head that reads ahead gave logits for one token"),
-        None => return Ok(None),
+        // Not as plain rows: as tensors, where rows are read ahead that way.
+        None => match model.first_as_tensors(tokens, 0)? {
+            Some(token) => token,
+            None => return Ok(None),
+        },
     };
     timing.record(0, tokens.len(), began.elapsed());
     reading.begin(far.said(&tokens[..prompt_len]));
@@ -399,7 +434,7 @@ pub(in crate::models::qwen) fn decode(
         }
         // The rows after the first guess that was not the model's token
         // were read on text that was never written.
-        model.truncate(at + 1 + kept);
+        model.truncate(at + 1 + kept)?;
     }
     Ok(Some(told))
 }
@@ -557,6 +592,8 @@ mod tests {
     fn untimed_a_guess_rides_on_what_is_believed_of_it() {
         let odds = Odds::default();
         assert_eq!(odds.carry(&[]), 0);
+        // And under odds that carry nothing, nothing rides, however sure.
+        assert_eq!(Odds::never().carry(&[SAID; 15]), 0);
         // 0.70, then by 0.75 each: 0.525, 0.39, 0.30, 0.22.
         assert_eq!(odds.carry(&SURE), 4);
         assert_eq!(odds.carry(&[kind(0, 1)]), 0);

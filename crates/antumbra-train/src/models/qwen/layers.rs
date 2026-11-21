@@ -317,6 +317,14 @@ impl LoraLinear {
         group.iter().map(|l| l.base_product(x)).collect()
     }
 
+    /// The frozen base as a dense tensor, where it is held as one.
+    fn dense_base(&self) -> Option<&Tensor> {
+        match &self.base {
+            BaseWeight::Dense(w) => Some(w),
+            _ => None,
+        }
+    }
+
     fn with_bias(&self, out: Tensor) -> CResult<Tensor> {
         match &self.base_b {
             Some(bias) => out.broadcast_add(bias),
@@ -552,6 +560,11 @@ impl RotaryEmbedding {
         })
     }
 
+    /// How many positions the table turns.
+    fn positions(&self) -> usize {
+        self.sin.dims().first().copied().unwrap_or(0)
+    }
+
     pub(super) fn apply(&self, q: &Tensor, k: &Tensor, offset: usize) -> CResult<(Tensor, Tensor)> {
         let (_b, _h, seq_len, _d) = q.dims4()?;
         let cos = self.cos.narrow(0, offset, seq_len)?;
@@ -563,6 +576,45 @@ impl RotaryEmbedding {
 }
 
 // --- attention -------------------------------------------------------------
+
+/// One sequence's keys and values as tensors with room for all it may come
+/// to: `(1, kv_heads, room, head_dim)` each, of which the first `len`
+/// positions hold what was read. A pass writes its rows where they belong
+/// and reads the whole of it under a mask as wide ([`Attention::forward`]);
+/// nothing is joined and nothing copied but the rows themselves, and what
+/// lies past `len` is seen by no row.
+struct Roomy {
+    k: Tensor,
+    v: Tensor,
+    len: usize,
+}
+
+impl Roomy {
+    /// Room for `room` positions, holding the `held` keys and values that
+    /// were cached before it, if any.
+    fn of(room: usize, like: &Tensor, held: Option<(Tensor, Tensor)>) -> CResult<Self> {
+        let (b, kv_heads, _, head_dim) = like.dims4()?;
+        let none = || Tensor::zeros((b, kv_heads, room, head_dim), like.dtype(), like.device());
+        let (k, v) = (none()?, none()?);
+        let len = match held {
+            Some((held_k, held_v)) => {
+                k.slice_set(&held_k.contiguous()?, 2, 0)?;
+                v.slice_set(&held_v.contiguous()?, 2, 0)?;
+                held_k.dim(2)?
+            }
+            None => 0,
+        };
+        Ok(Self { k, v, len })
+    }
+
+    /// What is held, as tensors of its own length.
+    fn held(&self) -> CResult<Option<(Tensor, Tensor)>> {
+        Ok(match self.len {
+            0 => None,
+            len => Some((self.k.narrow(2, 0, len)?, self.v.narrow(2, 0, len)?)),
+        })
+    }
+}
 
 pub(super) struct Attention {
     q_proj: LoraLinear,
@@ -576,6 +628,9 @@ pub(super) struct Attention {
     hidden_size: usize,
     rotary: Arc<RotaryEmbedding>,
     kv_cache: Option<(Tensor, Tensor)>,
+    /// The cache as tensors with room, in place of `kv_cache`, from the
+    /// first pass read under a mask wider than what it holds.
+    kv_room: Option<Roomy>,
     /// In f32 on the CPU, one generating sequence's cache as plain rows: a
     /// decoded token's keys and values are written onto the end of it, where
     /// joining them to the cache copied every position so far in every layer
@@ -643,6 +698,7 @@ impl Attention {
             hidden_size: h,
             rotary,
             kv_cache: None,
+            kv_room: None,
             kv_store: (base.device().is_cpu() && base.dtype() == DType::F32)
                 .then(|| kv::KvStore::new(num_kv_heads, head_dim)),
             others: Vec::new(),
@@ -692,6 +748,14 @@ impl Attention {
                         true => (k, v),
                         false => store.tensors()?,
                     };
+                    // A mask with room past the cache is read against a
+                    // cache of tensors kept with that room, which a cache of
+                    // plain rows is not: nothing on a CPU reads that way.
+                    if mask.is_some_and(|m| m.dims().last() != Some(&store.len())) {
+                        candle_core::bail!(
+                            "a mask wider than the cache was read against a cache of plain rows"
+                        )
+                    }
                     grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?
                 }
             }
@@ -701,16 +765,59 @@ impl Attention {
                         "a sequence cached as plain rows cannot go on as a batch or with a gradient"
                     )
                 }
-                let (k, v) = match &self.kv_cache {
-                    Some((pk, pv)) if use_cache => {
-                        (Tensor::cat(&[pk, &k], 2)?, Tensor::cat(&[pv, &v], 2)?)
-                    }
-                    _ => (k, v),
-                };
-                if use_cache {
-                    self.kv_cache = Some((k.clone(), v.clone()));
+                // Under a mask wider than the cache and these rows, the
+                // cache is kept with that much room and the rows written
+                // into it where they belong.
+                let room = match mask {
+                    Some(mask) if use_cache => Some(mask.dim(D::Minus1)?),
+                    _ => None,
                 }
-                grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?
+                .filter(|room| *room > offset + q_len);
+                if let Some(room) = room {
+                    let cache = match self.kv_room.take() {
+                        Some(cache) if cache.k.dim(2)? == room => cache,
+                        other => {
+                            let held = match other {
+                                Some(cache) => cache.held()?,
+                                None => self.kv_cache.take(),
+                            };
+                            Roomy::of(room, &k, held)?
+                        }
+                    };
+                    self.kv_cache = None;
+                    if cache.len < offset {
+                        candle_core::bail!(
+                            "rows at {offset} do not follow a cache of {} positions",
+                            cache.len
+                        )
+                    }
+                    cache.k.slice_set(&k.contiguous()?, 2, offset)?;
+                    cache.v.slice_set(&v.contiguous()?, 2, offset)?;
+                    let cache = Roomy {
+                        len: offset + q_len,
+                        ..cache
+                    };
+                    let out = grouped_attention(&q, &cache.k, &cache.v, mask, self.num_kv_groups)?;
+                    self.kv_room = Some(cache);
+                    out
+                } else {
+                    // A cache with room goes on as one of its own length.
+                    if use_cache {
+                        if let Some(cache) = self.kv_room.take() {
+                            self.kv_cache = cache.held()?;
+                        }
+                    }
+                    let (k, v) = match &self.kv_cache {
+                        Some((pk, pv)) if use_cache => {
+                            (Tensor::cat(&[pk, &k], 2)?, Tensor::cat(&[pv, &v], 2)?)
+                        }
+                        _ => (k, v),
+                    };
+                    if use_cache {
+                        self.kv_cache = Some((k.clone(), v.clone()));
+                    }
+                    grouped_attention(&q, &k, &v, mask, self.num_kv_groups)?
+                }
             }
         };
         let out = out.transpose(1, 2)?.reshape((b, q_len, self.hidden_size))?;
@@ -720,16 +827,35 @@ impl Attention {
 
     pub(super) fn clear_cache(&mut self) {
         self.kv_cache = None;
+        self.kv_room = None;
         if let Some(store) = &mut self.kv_store {
             store.reset();
         }
     }
 
-    /// Forget the positions from `len` on in the cache of plain rows.
-    pub(super) fn truncate(&mut self, len: usize) {
+    /// Forget the positions from `len` on in the cache, as plain rows and
+    /// as tensors. A cache of tensors is cut back as a view of itself: the
+    /// next token's keys and values are joined to what is left of it. One
+    /// kept with room only holds less: the rows cut off stay where they
+    /// lie, seen by no row, until others are written over them.
+    pub(super) fn truncate(&mut self, len: usize) -> CResult<()> {
         if let Some(store) = &mut self.kv_store {
             store.truncate(len);
         }
+        if let Some(cache) = &mut self.kv_room {
+            cache.len = cache.len.min(len);
+        }
+        let cut = match &self.kv_cache {
+            Some((k, v)) if len < k.dim(2)? => Some(match len {
+                0 => None,
+                _ => Some((k.narrow(2, 0, len)?, v.narrow(2, 0, len)?)),
+            }),
+            _ => None,
+        };
+        if let Some(cache) = cut {
+            self.kv_cache = cache;
+        }
+        Ok(())
     }
 
     pub(super) fn packs(&self) -> bool {
@@ -966,8 +1092,37 @@ impl DecoderLayer {
         self.self_attn.clear_cache();
     }
 
-    pub(super) fn truncate(&mut self, len: usize) {
-        self.self_attn.truncate(len);
+    pub(super) fn truncate(&mut self, len: usize) -> CResult<()> {
+        self.self_attn.truncate(len)
+    }
+
+    /// The most positions a sequence read through this layer may come to.
+    pub(super) fn positions_most(&self) -> usize {
+        self.self_attn.rotary.positions()
+    }
+
+    /// Its attention's query heads, key and value heads, and a head's width.
+    pub(super) fn attention_shape(&self) -> (usize, usize, usize) {
+        let attn = &self.self_attn;
+        (attn.num_heads, attn.num_kv_heads, attn.head_dim)
+    }
+
+    /// The frozen bases of its projections that are held dense: all seven
+    /// in a model that is not served quantized.
+    pub(super) fn dense_bases(&self) -> Vec<&Tensor> {
+        let (attn, mlp) = (&self.self_attn, &self.mlp);
+        [
+            &attn.q_proj,
+            &attn.k_proj,
+            &attn.v_proj,
+            &attn.o_proj,
+            &mlp.gate_proj,
+            &mlp.up_proj,
+            &mlp.down_proj,
+        ]
+        .into_iter()
+        .filter_map(LoraLinear::dense_base)
+        .collect()
     }
 
     /// Whether any of this layer's adapters has a copy to make.

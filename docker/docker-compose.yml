@@ -113,13 +113,15 @@ services:
       # much, and q4_k about 1.7 times as fast and four times as much. off
       # keeps the base dense anywhere.
       - ANTUMBRA_SERVE_QUANT=${ANTUMBRA_SERVE_QUANT:-auto}
-      # Whether an answer is decoded several tokens a pass on a CPU that
-      # serves a quantized base: the same answer, in fewer passes over the
-      # weights. The server guesses from what it wrote for earlier requests
-      # through the same experts, kept in memory while it runs, so an answer
-      # like an earlier one comes back faster and a caller who can time
-      # answers can tell that it did. off decodes a token a pass and
-      # remembers nothing.
+      # Whether an answer is decoded several tokens a pass, on a CPU that
+      # serves a quantized base or on a CUDA GPU: what is guessed decides
+      # nothing, and the answer comes in fewer passes over the weights. The
+      # server guesses from what it wrote for earlier requests through the
+      # same experts, kept in memory while it runs, so an answer like an
+      # earlier one comes back faster and a caller who can time answers can
+      # tell that it did. off decodes a token a pass and remembers nothing.
+      # On a CUDA GPU on and off round differently, so an answer can differ
+      # in a word between them; experts are trained decoding as this is set.
       - ANTUMBRA_SERVE_AHEAD=${ANTUMBRA_SERVE_AHEAD:-on}
       - ANTUMBRA_BEHAVE_ROUNDS=${ANTUMBRA_BEHAVE_ROUNDS:-3}
       - ANTUMBRA_BEHAVE_LR=${ANTUMBRA_BEHAVE_LR:-1.5e-4}

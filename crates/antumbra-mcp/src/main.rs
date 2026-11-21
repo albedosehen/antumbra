@@ -165,8 +165,8 @@ struct Cli {
     /// dense anywhere. Experts are never quantized.
     #[arg(long, env = "ANTUMBRA_SERVE_QUANT", default_value = "auto")]
     serve_quant: String,
-    /// Whether an expert's answer is decoded several tokens a pass on a CPU:
-    /// `on` or `off`. On, a pass over the weights carries, after the token in
+    /// Whether an expert's answer is decoded several tokens a pass: `on` or
+    /// `off`. On, a pass over the weights carries, after the token in
     /// hand, the tokens guessed to follow it, and keeps each that is the
     /// model's own next token: the answer is the one a token at a time
     /// writes, in fewer passes. The guesses come from what the model wrote
@@ -176,8 +176,15 @@ struct Cli {
     /// through the same experts, and several times faster where the very
     /// prompt was answered before; a caller who can time answers through
     /// those experts can tell that it was. `off` remembers nothing and
-    /// decodes a token a pass. It is only read ahead where the base is
-    /// served quantized on a CPU with the fast kernels.
+    /// decodes a token a pass. It is read ahead where the base is served
+    /// quantized on a CPU with the fast kernels, and from the dense base on
+    /// a CUDA GPU whose library computes a row the same way whatever is
+    /// beside it, which is asked of it at the first answer. On such a GPU
+    /// reading ahead decodes through passes of sixteen rows, which the GPU
+    /// rounds otherwise than a pass of one: what is guessed still decides
+    /// nothing, but an answer can differ in a word from the one `off`
+    /// writes, where two tokens were all but tied. Experts are trained and
+    /// audited here decoding as this is set.
     #[arg(
         long,
         env = "ANTUMBRA_SERVE_AHEAD",
@@ -548,7 +555,7 @@ pub(crate) async fn build_serve(
         hardware::backend(),
         quant.map_or("dense", ServeQuant::name),
         match serve_ahead {
-            true => "several tokens a pass where the CPU reads ahead",
+            true => "several tokens a pass where the device reads ahead",
             false => "a token a pass",
         }
     );
