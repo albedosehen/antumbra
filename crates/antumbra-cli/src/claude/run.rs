@@ -32,8 +32,13 @@ fn project(dir: Option<PathBuf>) -> anyhow::Result<PathBuf> {
 /// the machine `ANTUMBRA_HOST_ID` names when it names one, so the server
 /// stamps what the command writes with it. A refusal comes back with the
 /// surface's own words, since "400" tells a user nothing they can act on.
-fn surface_client(surface: &str, token: Option<&str>, patience: Duration) -> SurfaceClient {
-    SurfaceClient::new(surface, token, patience).from_machine(antumbra_http::host_id())
+///
+/// The address and the token are the ones given, and where they are not,
+/// the ones `antumbra setup` recorded ([`SurfaceArgs::reach`]): a hook is run
+/// with the address and no token, and a terminal with neither.
+fn surface_client(args: &SurfaceArgs, patience: Duration) -> SurfaceClient {
+    let (surface, token) = args.reach(home().as_deref(), |name| std::env::var(name).ok());
+    SurfaceClient::new(&surface, token.as_deref(), patience).from_machine(antumbra_http::host_id())
 }
 
 /// A working tree's `origin` URL, when it has one.
@@ -181,7 +186,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
         ClaudeAction::Dependencies {
             dir,
             repos,
-            surface: SurfaceArgs { surface, token },
+            surface,
             dry_run,
         } => {
             let trees: Vec<dependencies::Tree> = tree_dirs(&project(dir)?, repos.as_deref())
@@ -197,7 +202,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             if trees.is_empty() {
                 anyhow::bail!("no repository with an `origin` remote to read");
             }
-            let client = surface_client(&surface, token.as_deref(), SURFACE_TIMEOUT);
+            let client = surface_client(&surface, SURFACE_TIMEOUT);
             let call = |tool: &str, arguments: Value| {
                 client.call(tool, arguments).map_err(anyhow::Error::from)
             };
@@ -208,11 +213,8 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
                 println!("{line}");
             }
         }
-        ClaudeAction::Remember {
-            surface: SurfaceArgs { surface, token },
-            dry_run,
-        } => {
-            let client = surface_client(&surface, token.as_deref(), SURFACE_TIMEOUT);
+        ClaudeAction::Remember { surface, dry_run } => {
+            let client = surface_client(&surface, SURFACE_TIMEOUT);
             let call = |tool: &str, arguments: Value| {
                 client.call(tool, arguments).map_err(anyhow::Error::from)
             };
@@ -229,11 +231,11 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
         ClaudeAction::AutoModeEnv {
             dir,
             repos,
-            surface: SurfaceArgs { surface, token },
+            surface,
             each,
         } => {
             let trees = working_trees(&project(dir)?, repos.as_deref());
-            let client = surface_client(&surface, token.as_deref(), SURFACE_TIMEOUT);
+            let client = surface_client(&surface, SURFACE_TIMEOUT);
             let call = |tool: &str, arguments: Value| {
                 client.call(tool, arguments).map_err(anyhow::Error::from)
             };
@@ -280,14 +282,10 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
                 );
             }
         }
-        ClaudeAction::SkillUsed {
-            name,
-            surface: SurfaceArgs { surface, token },
-        } => {
+        ClaudeAction::SkillUsed { name, surface } => {
             let as_a_hook = name.is_none();
             let client = surface_client(
                 &surface,
-                token.as_deref(),
                 if as_a_hook {
                     HOOK_TIMEOUT
                 } else {
@@ -321,12 +319,8 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
                 (false, Err(why)) => return Err(why),
             }
         }
-        ClaudeAction::Skills {
-            dir,
-            days,
-            surface: SurfaceArgs { surface, token },
-        } => {
-            let client = surface_client(&surface, token.as_deref(), SURFACE_TIMEOUT);
+        ClaudeAction::Skills { dir, days, surface } => {
+            let client = surface_client(&surface, SURFACE_TIMEOUT);
             let call = |tool: &str, arguments: Value| {
                 client.call(tool, arguments).map_err(anyhow::Error::from)
             };
@@ -340,7 +334,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
             limit,
             days,
             dry_run,
-            surface: SurfaceArgs { surface, token },
+            surface,
         } => {
             let project = project(dir)?;
             let repo = origin_of(&project)
@@ -356,7 +350,7 @@ pub fn run(action: ClaudeAction) -> anyhow::Result<()> {
                 let cutoff = chrono::Utc::now() - chrono::Duration::days(days);
                 merges = reanchor::merged_since(merges, cutoff);
             }
-            let client = surface_client(&surface, token.as_deref(), SURFACE_TIMEOUT);
+            let client = surface_client(&surface, SURFACE_TIMEOUT);
             let call = |tool: &str, arguments: Value| {
                 client.call(tool, arguments).map_err(anyhow::Error::from)
             };
