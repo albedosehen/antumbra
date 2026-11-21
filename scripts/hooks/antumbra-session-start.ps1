@@ -338,6 +338,38 @@ if ($commit) {
                "Tags: [live] the anchor is on HEAD; [not-on-head] learned on a commit this HEAD does not contain; [orphaned] its branch no longer exists here or on origin, or GitHub reported it deleted -- verify before relying on it, and penalize_memory if it is wrong.`n`n"
 }
 
+# The workspaces this machine joined (`antumbra join`), so the agent knows
+# what the labelled memories in its prompts are, whether it has a workspace's
+# tools, and where what it learns is to go. Read from the files join keeps;
+# no server is asked.
+$joined = ''
+try {
+    $joinedDir = if ($env:ANTUMBRA_WORKSPACES_DIR) { $env:ANTUMBRA_WORKSPACES_DIR }
+                 else { Join-Path $HOME '.antumbra/workspaces' }
+    $joinedLines = @()
+    if (Test-Path $joinedDir) {
+        foreach ($dir in (Get-ChildItem -Path $joinedDir -Directory | Sort-Object Name)) {
+            $file = Join-Path $dir.FullName 'workspace.json'
+            if (-not (Test-Path $file)) { continue }
+            $ws = Get-Content $file -Raw | ConvertFrom-Json
+            if (-not $ws.url -or -not $ws.workspace) { continue }
+            $server = [string]$ws.server
+            $line = "- $($ws.workspace) at $($ws.url)"
+            if ($ws.user) { $line += ", as $($ws.user)" }
+            $line += '. '
+            $line += if ($server) { "Its tools are the MCP server ``$server``: use them to search it further or to write to it. " }
+                     else { 'You have no tools for it: you read what your prompts are given. ' }
+            $line += if ($ws.write -eq 'workspace' -and $server) { "Store what you learn about this team's work there, with its store_memory; what is the user's own goes to your own store." }
+                     elseif ($ws.write -eq 'ask') { "New memories go to your own store. When something you learn is the team's and not only the user's, ask the user whether to store it in the workspace too." }
+                     else { 'New memories go to your own store. Write to the workspace only when the user asks.' }
+            $joinedLines += $line
+        }
+    }
+    if ($joinedLines.Count -gt 0) {
+        $joined = "Workspaces this machine joined. What each holds for a prompt comes with the prompt, labelled as the workspace's and not your own.`n" + ($joinedLines -join "`n")
+    }
+} catch { $joined = '' }
+
 # The agent caps a hook's context at 10,000 characters. Past the cap it is handed
 # a file path and a 2,000-character preview it is never asked to open, so an
 # oversized bootstrap is a truncated one that says nothing about it. What must
@@ -350,6 +382,7 @@ if ($env:ANTUMBRA_CONTEXT_LIMIT -match '^\d+$') { $limit = [Math]::Max(1000, [in
 $sep   = "`n`n---`n`n"
 $head  = "# Antumbra session bootstrap (host=$hostId)`n`n"
 $head += $handoffs
+if ($joined) { $head += "$joined`n`n" }
 if ($brief) { $head += "$brief`n`n" }
 $head += $gitLine
 

@@ -80,6 +80,11 @@ pub struct BridgeArgs {
     /// The file holding the token, when it is not the one setup wrote.
     #[arg(long, env = "ANTUMBRA_TOKEN_FILE")]
     pub token_file: Option<PathBuf>,
+    /// Present the file's token whatever `ANTUMBRA_TOKEN` holds: for a bridge
+    /// to a workspace this machine joined, which must never be sent the token
+    /// of the machine's own server.
+    #[arg(long, requires = "token_file")]
+    pub file_token_only: bool,
 }
 
 /// What became of one message sent to the endpoint.
@@ -561,6 +566,9 @@ pub fn run(args: &BridgeArgs) -> anyhow::Result<()> {
     })?;
     if let Some(file) = &args.token_file {
         reach.token_file.clone_from(file);
+    }
+    if args.file_token_only {
+        reach.token_given = None;
     }
     let bridge = Arc::new(Bridge::new(
         HttpEndpoint::new(reach, args.agent.as_deref()),

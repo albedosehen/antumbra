@@ -100,6 +100,22 @@ ctx=$(run "$work/small.json" | context)
 check "keeps everything" grep -q 'second small' <<<"$ctx"
 check "mentions no omission" bash -c '! grep -q "left out" <<<"$1"' _ "$ctx"
 
+echo "a machine that joined workspaces"
+joined="$work/workspaces"
+mkdir -p "$joined/a__ws_crew" "$joined/b__ws_lab" "$joined/c__ws_ask"
+printf '%s' '{"url":"https://team.example","workspace":"ws:crew","user":"user:bodil","token_file":"/nowhere","write":"workspace","server":"antumbra-crew"}' > "$joined/a__ws_crew/workspace.json"
+printf '%s' '{"url":"https://lab.example","workspace":"ws:lab","user":"user:bodil","token_file":"/nowhere","write":"workspace"}' > "$joined/b__ws_lab/workspace.json"
+printf '%s' '{"url":"https://ask.example","workspace":"ws:ask","token_file":"/nowhere","write":"ask"}' > "$joined/c__ws_ask/workspace.json"
+ctx=$(run "$work/small.json" ANTUMBRA_WORKSPACES_DIR="$joined" | context)
+check "names each" grep -q -- '- ws:crew at https://team.example, as user:bodil' <<<"$ctx"
+check "says which has tools, and by what name" grep -q 'Its tools are the MCP server `antumbra-crew`' <<<"$ctx"
+check "sends the team's to a workspace it can write to" grep -q "ws:crew.*Store what you learn about this team's work there" <<<"$ctx"
+check "and not to one it has no tools for" grep -q 'ws:lab.*You have no tools for it.*New memories go to your own store. Write to the workspace only when the user asks' <<<"$ctx"
+check "asks where it was told to ask" grep -q 'ws:ask.*ask the user whether to store it in the workspace too' <<<"$ctx"
+check "before any memory" test "$(grep -n 'Workspaces this machine joined' <<<"$ctx" | cut -d: -f1)" -lt "$(grep -n 'first small' <<<"$ctx" | cut -d: -f1)"
+ctx=$(run "$work/small.json" ANTUMBRA_WORKSPACES_DIR="$work/none" | context)
+check "says nothing of workspaces when it joined none" bash -c '! grep -q "Workspaces this machine joined" <<<"$1"' _ "$ctx"
+
 echo "a handoff waiting for this machine"
 jq -nc '{memories: [{id: "memory:a", content: "first small"}],
   announcement: "1 handoff waiting for this machine (windows):\n- Rerun the probe (from kuskokwim, 2h ago; id memory:h)"}' \
