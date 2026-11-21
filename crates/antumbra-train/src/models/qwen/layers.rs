@@ -496,15 +496,38 @@ pub(super) struct RotaryEmbedding {
     cos: Tensor,
 }
 
+/// The sine and the cosine of every position's angle in each pair of a
+/// head's dimensions, and how many pairs there are: position `p`'s values
+/// for pair `i` are at `p * pairs + i`.
+///
+/// The angle is worked out in f32, as it always was, and its sine and cosine
+/// by `libm`, which is the same Rust wherever it is compiled, where they
+/// were each platform's own. Those round a last bit their own way: a table
+/// made on Windows and one made on Linux disagreed at about one entry in a
+/// hundred. That is enough to send a nearly tied token the other way, and
+/// the same model wrote different answers under the two.
+fn rotary_tables(theta: f64, dim: usize, positions: usize) -> (Vec<f32>, Vec<f32>, usize) {
+    let inv_freq: Vec<f32> = (0..dim)
+        .step_by(2)
+        .map(|i| 1f32 / libm::pow(theta, i as f64 / dim as f64) as f32)
+        .collect();
+    let pairs = inv_freq.len();
+    let mut sin = Vec::with_capacity(positions * pairs);
+    let mut cos = Vec::with_capacity(positions * pairs);
+    for p in 0..positions {
+        for f in &inv_freq {
+            let (s, c) = libm::sincos(f64::from(p as f32 * f));
+            sin.push(s as f32);
+            cos.push(c as f32);
+        }
+    }
+    (sin, cos, pairs)
+}
+
 impl RotaryEmbedding {
     pub(super) fn new(dtype: DType, cfg: &Config, dev: &Device) -> CResult<Self> {
         let dim = cfg.hidden_size / cfg.num_attention_heads;
         let max_seq_len = cfg.max_position_embeddings;
-        let inv_freq: Vec<_> = (0..dim)
-            .step_by(2)
-            .map(|i| 1f32 / cfg.rope_theta.powf(i as f64 / dim as f64) as f32)
-            .collect();
-        let inv_freq_len = inv_freq.len();
         // Positions and angles are computed in f32 whatever the model computes
         // in, and only the finished sin/cos tables take the model's dtype. bf16
         // carries 8 bits of mantissa: position 257 is 256 in it, and past 512
@@ -514,14 +537,18 @@ impl RotaryEmbedding {
         // dimensions got sin and cos of the wrong angle. On the GPU that showed
         // up as duplicated tokens under greedy decoding ("than than", "+= +=")
         // that an f32 run of the same prompt did not produce.
-        let inv_freq = Tensor::from_vec(inv_freq, (1, inv_freq_len), dev)?;
-        let t = Tensor::arange(0u32, max_seq_len as u32, dev)?
-            .to_dtype(DType::F32)?
-            .reshape((max_seq_len, 1))?;
-        let freqs = t.matmul(&inv_freq)?;
+        //
+        // The tables are made on the host, whatever device the model is on,
+        // so that they are the same tables everywhere ([`rotary_tables`]).
+        let (sin, cos, pairs) = rotary_tables(cfg.rope_theta, dim, max_seq_len);
+        let table = |values: Vec<f32>| {
+            Tensor::from_vec(values, (max_seq_len, pairs), &Device::Cpu)?
+                .to_device(dev)?
+                .to_dtype(dtype)
+        };
         Ok(Self {
-            sin: freqs.sin()?.to_dtype(dtype)?,
-            cos: freqs.cos()?.to_dtype(dtype)?,
+            sin: table(sin)?,
+            cos: table(cos)?,
         })
     }
 
@@ -1051,6 +1078,43 @@ mod tests {
             None => attn,
         };
         candle_nn::ops::softmax_last_dim(&attn)?.matmul(&v)
+    }
+
+    /// The rotary table is one table wherever it is made. Its sines and its
+    /// cosines, for a 1.5B base's heads over 4096 positions, each fold into
+    /// one number, and the numbers are the same on every platform this is
+    /// built for; each value is within a rounding of the platform's own sine
+    /// and cosine, which is all those ever differed by.
+    #[test]
+    fn the_rotary_table_is_the_same_table_everywhere() {
+        const SINES: u64 = 0xa074_ed7b_3cf0_8711;
+        const COSINES: u64 = 0xe02d_aaf0_471e_be10;
+        let (theta, dim, positions) = (1_000_000f64, 128usize, 4096usize);
+        let (sin, cos, pairs) = rotary_tables(theta, dim, positions);
+        assert_eq!(
+            (pairs, sin.len(), cos.len()),
+            (dim / 2, positions * dim / 2, positions * dim / 2)
+        );
+        let folded = |values: &[f32]| {
+            values
+                .iter()
+                .flat_map(|v| v.to_bits().to_le_bytes())
+                .fold(0xcbf2_9ce4_8422_2325u64, |mark, byte| {
+                    (mark ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+                })
+        };
+        assert_eq!(folded(&sin), SINES, "the sines");
+        assert_eq!(folded(&cos), COSINES, "the cosines");
+        for p in [0usize, 1, 257, 4095] {
+            for i in [0usize, 1, 31, 63] {
+                let angle = p as f32 * (1f32 / theta.powf((2 * i) as f64 / dim as f64) as f32);
+                let (s, c) = (sin[p * pairs + i], cos[p * pairs + i]);
+                assert!(
+                    (s - angle.sin()).abs() <= 3e-7 && (c - angle.cos()).abs() <= 3e-7,
+                    "position {p}, pair {i}: {s} and {c} for an angle of {angle}"
+                );
+            }
+        }
     }
 
     /// Stacking the query heads that share a KV head gives what repeating K
