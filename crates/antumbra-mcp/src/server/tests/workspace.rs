@@ -979,7 +979,7 @@ async fn a_tool_profile_narrows_what_is_advertised_and_served() -> anyhow::Resul
         err.message
     );
 
-    assert_eq!(server().await?.advertised_tools().len(), 38);
+    assert_eq!(server().await?.advertised_tools().len(), 40);
     Ok(())
 }
 

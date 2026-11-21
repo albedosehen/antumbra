@@ -216,7 +216,77 @@ function offerDevices() {
   if ([...select.options].some((o) => o.value === chosen)) select.value = chosen;
 }
 
+// The member's own profile: the name they go by, and their image.
+
+/** The side of the square a profile's image is made, in pixels. */
+const AVATAR_SIDE = 256;
+
+/** Read the workspace's profiles and draw the signed-in member from theirs. */
+async function loadProfile() {
+  const out = await call("profiles", { images: true });
+  const mine = (out.profiles ?? []).find((p) => p.user === out.you) || {};
+  state.shell.profile = mine;
+  showSideProfile(mine.display || "", mine.image || "");
+  byId("profile-display").value = mine.display || "";
+  byId("profile-image-clear").hidden = !mine.image;
+}
+
+/** `file` cut to its middle square, made AVATAR_SIDE across, as base64: a
+ *  WebP where the browser writes one, else a PNG. The server checks what it
+ *  is given all the same. */
+async function squared(file) {
+  const picture = await createImageBitmap(file);
+  const side = Math.min(picture.width, picture.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = AVATAR_SIDE;
+  canvas.height = AVATAR_SIDE;
+  canvas
+    .getContext("2d")
+    .drawImage(picture, (picture.width - side) / 2, (picture.height - side) / 2, side, side, 0, 0, AVATAR_SIDE, AVATAR_SIDE);
+  picture.close();
+  const made = (type, quality) => new Promise((done) => canvas.toBlob(done, type, quality));
+  let blob = await made("image/webp", 0.9);
+  if (!blob || blob.type !== "image/webp") blob = await made("image/png");
+  if (!blob) throw new Error("this browser could not prepare the image");
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+function startProfile() {
+  const form = byId("profile");
+  const status = form.querySelector("[role=status]");
+  const redraw = async () => {
+    try {
+      await loadProfile();
+    } catch (error) {
+      if (error instanceof SignedOut) signOut(REFUSED);
+    }
+  };
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = form.querySelector("button[type=submit]");
+    button.disabled = true;
+    const file = byId("profile-image").files[0];
+    const ok = await attempt(status, "Saving", "Saved.", async () => {
+      const sent = { display: byId("profile-display").value };
+      if (file) sent.image = await squared(file);
+      await call("set_profile", sent);
+    });
+    button.disabled = false;
+    if (!ok) return;
+    byId("profile-image").value = "";
+    await redraw();
+  });
+  byId("profile-image-clear").addEventListener("click", async () => {
+    const ok = await attempt(status, "Removing", "Removed.", () => call("set_profile", { clear_image: true }));
+    if (ok) await redraw();
+  });
+}
+
 function startManage() {
+  startProfile();
   window.addEventListener("hashchange", showAgentWhenAsked);
 
   wireForm(
@@ -263,9 +333,11 @@ function startManage() {
 
 /** Empty what this file drew, at sign-out. */
 function clearManage() {
+  showSideProfile("", "");
+  byId("profile-image-clear").hidden = true;
   for (const id of ["skills", "rules"]) byId(id).replaceChildren();
   for (const id of ["skills-summary", "rules-summary"]) byId(id).textContent = "";
-  for (const id of ["memory-new", "handoff-new", "document-new", "compartment-new"]) {
+  for (const id of ["memory-new", "handoff-new", "document-new", "compartment-new", "profile"]) {
     byId(id).reset();
     byId(id).querySelector("[role=status]").textContent = "";
   }

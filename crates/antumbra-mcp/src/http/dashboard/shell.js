@@ -576,6 +576,12 @@ function renderAttention() {
 function shellLoads() {
   return [
     section(byId("devices"), loadDevices),
+    // The member's name and image (manage.js), drawn after the identity the
+    // token gave, which it then stands in for. A server from before profiles
+    // does not have the tool: the initials stay.
+    loadProfile().catch((error) => {
+      if (error instanceof SignedOut || error instanceof Superseded) throw error;
+    }),
     section(byId("policy"), loadPolicy),
     section(byId("recent"), loadRecent),
   ];

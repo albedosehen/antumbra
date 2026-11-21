@@ -154,6 +154,16 @@ function showApp() {
   // with no token gets the relic and no sidebar. Said before the page shows.
   document.documentElement.classList.toggle("signed-out", !state.token);
   showSideUser(state.token ? claims(state.token) || {} : null);
+  // Their name and image, where they have a profile (a server from before
+  // profiles has no such tool, and the initials stay).
+  if (state.token) {
+    call("profiles", { images: true })
+      .then((out) => {
+        const mine = (out.profiles ?? []).find((p) => p.user === out.you) || {};
+        showSideProfile(mine.display || "", mine.image || "");
+      })
+      .catch(() => {});
+  }
   byId("gate").hidden = true;
   byId("app").hidden = false;
 }
