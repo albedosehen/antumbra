@@ -128,6 +128,14 @@ fn kernels(dim: usize) -> Kernels {
             };
         }
     }
+    // Every aarch64 CPU has NEON, whether or not it tiles.
+    #[cfg(target_arch = "aarch64")]
+    if super::wide::attends(dim) {
+        return Kernels {
+            scores: super::wide::neon::scores,
+            weigh: super::wide::neon::weigh,
+        };
+    }
     let _ = dim;
     PLAIN
 }

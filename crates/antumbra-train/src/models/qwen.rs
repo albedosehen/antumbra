@@ -76,7 +76,7 @@ mod rowwise;
 mod sketch;
 mod slices;
 mod tiles;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 mod wide;
 use layers::*;
 
