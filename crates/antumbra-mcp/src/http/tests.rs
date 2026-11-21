@@ -844,3 +844,116 @@ async fn the_policys_knobs_are_named_with_their_ranges() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+/// A member says who they are; the workspace's other members see it, another
+/// workspace does not, and nothing a member sends changes anyone's profile
+/// but their own. What may be an image is decided by its bytes.
+#[tokio::test]
+async fn a_profile_is_its_own_users_to_write_and_the_workspaces_to_read() -> anyhow::Result<()> {
+    use base64::Engine as _;
+    let st = state().await?;
+    let (dana, eli, other) = (
+        token("ws:team", "user:dana")?,
+        token("ws:team", "user:eli")?,
+        token("ws:elsewhere", "user:fay")?,
+    );
+    let ask = |tok: &str, tool: &str, arguments: serde_json::Value| {
+        let (st, tok) = (st.clone(), tok.to_string());
+        let body = serde_json::json!({ "tool": tool, "arguments": arguments }).to_string();
+        async move {
+            let res = router(st).oneshot(call_request(Some(&tok), &body)?).await?;
+            let status = res.status();
+            let text = body_text(res).await?;
+            anyhow::Ok((status, serde_json::from_str::<serde_json::Value>(&text)?))
+        }
+    };
+    let b64 = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend_from_slice(&[7; 64]);
+
+    let (status, set) = ask(
+        &dana,
+        "set_profile",
+        serde_json::json!({ "display": "  Dana   Whitfield ", "image": b64(&png) }),
+    )
+    .await?;
+    anyhow::ensure!(status == StatusCode::OK, "{status}: {set}");
+    anyhow::ensure!(
+        set["display"] == "Dana Whitfield" && set["has_image"] == true,
+        "{set}"
+    );
+
+    // Eli, in the same workspace, sees Dana with her image as it was sent.
+    let (_, seen) = ask(&eli, "profiles", serde_json::json!({ "images": true })).await?;
+    anyhow::ensure!(seen["you"] == "user:eli", "{seen}");
+    let listed = seen["profiles"].as_array().cloned().unwrap_or_default();
+    anyhow::ensure!(
+        listed.len() == 1 && listed[0]["user"] == "user:dana",
+        "{seen}"
+    );
+    let image = format!("data:image/png;base64,{}", b64(&png));
+    anyhow::ensure!(listed[0]["image"] == image.as_str(), "{seen}");
+    // Without asking for images, only that there is one.
+    let (_, brief) = ask(&eli, "profiles", serde_json::json!({})).await?;
+    anyhow::ensure!(brief["profiles"][0]["image"].is_null(), "{brief}");
+    anyhow::ensure!(brief["profiles"][0]["has_image"] == true, "{brief}");
+
+    // Eli's own write is Eli's: Dana's stands as it was.
+    let (status, _) = ask(&eli, "set_profile", serde_json::json!({ "display": "Eli" })).await?;
+    anyhow::ensure!(status == StatusCode::OK);
+    let (_, both) = ask(&dana, "profiles", serde_json::json!({})).await?;
+    let names: Vec<&str> = both["profiles"]
+        .as_array()
+        .map(|all| all.iter().filter_map(|p| p["display"].as_str()).collect())
+        .unwrap_or_default();
+    anyhow::ensure!(names == ["Dana Whitfield", "Eli"], "{both}");
+
+    // Another workspace sees neither.
+    let (_, none) = ask(&other, "profiles", serde_json::json!({ "images": true })).await?;
+    anyhow::ensure!(
+        none["profiles"].as_array().is_some_and(Vec::is_empty),
+        "{none}"
+    );
+
+    // A name alone leaves the image; clearing the image leaves the name.
+    let (_, renamed) = ask(
+        &dana,
+        "set_profile",
+        serde_json::json!({ "display": "Dana" }),
+    )
+    .await?;
+    anyhow::ensure!(
+        renamed["has_image"] == true && renamed["display"] == "Dana",
+        "{renamed}"
+    );
+    let (_, cleared) = ask(
+        &dana,
+        "set_profile",
+        serde_json::json!({ "clear_image": true }),
+    )
+    .await?;
+    anyhow::ensure!(
+        cleared["has_image"] == false && cleared["display"] == "Dana",
+        "{cleared}"
+    );
+
+    // What is not an image of a kind a profile holds is refused, whatever it
+    // is called, and so is one too large.
+    for (what, sent) in [
+        (
+            "an svg",
+            format!("data:image/png;base64,{}", b64(b"<svg onload='x()'></svg>")),
+        ),
+        ("not base64", "!!!".to_string()),
+        (
+            "too large",
+            b64(&[png.clone(), vec![0; 300 * 1024]].concat()),
+        ),
+    ] {
+        let (status, why) = ask(&dana, "set_profile", serde_json::json!({ "image": sent })).await?;
+        anyhow::ensure!(status == StatusCode::BAD_REQUEST, "{what}: {status} {why}");
+    }
+    let (_, after) = ask(&dana, "profiles", serde_json::json!({})).await?;
+    anyhow::ensure!(after["profiles"][0]["has_image"] == false, "{after}");
+    Ok(())
+}

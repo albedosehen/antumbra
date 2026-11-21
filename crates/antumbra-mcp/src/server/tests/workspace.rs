@@ -941,7 +941,7 @@ async fn provenance_is_stored_and_scopes_recall() -> anyhow::Result<()> {
 #[tokio::test]
 async fn a_tool_profile_narrows_what_is_advertised_and_served() -> anyhow::Result<()> {
     let all = McpServer::all_tool_names();
-    assert_eq!(all.len(), 38, "{all:?}");
+    assert_eq!(all.len(), 40, "{all:?}");
     let Some(profile) = crate::profile::ToolProfile::parse("agent", &all)? else {
         anyhow::bail!("agent is a profile, not `all`");
     };

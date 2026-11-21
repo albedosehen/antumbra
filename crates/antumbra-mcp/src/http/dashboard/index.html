@@ -320,6 +320,23 @@
               <p id="role" class="tags"></p>
             </div>
           </div>
+          <form id="profile" class="panel profile-edit">
+            <div class="write">
+              <label for="profile-display">The name you go by</label>
+              <input id="profile-display" name="display" type="text" maxlength="64" autocomplete="name">
+              <p class="small muted">Shown to this workspace's members in place of your user id. Leave it empty to show the id.</p>
+            </div>
+            <div class="write">
+              <label for="profile-image">Your image</label>
+              <input id="profile-image" name="image" type="file" accept="image/png,image/jpeg,image/webp">
+              <p class="small muted">A PNG, JPEG or WebP. It is cut square and made 256 pixels across here, before it is sent.</p>
+            </div>
+            <div class="write-row profile-actions">
+              <button type="submit">Save profile</button>
+              <button id="profile-image-clear" type="button" class="quiet" hidden>Remove image</button>
+              <span class="small muted" role="status"></span>
+            </div>
+          </form>
           <dl id="identity" class="facts panel"></dl>
         </section>
         <section aria-labelledby="h-token">

@@ -516,6 +516,12 @@ pub fn tables(embed_dim: u32) -> Vec<TableDefinition> {
                 index("device_host_idx", ["host", "backend"]),
                 index("device_user_idx", ["user", "role"]),
             ]),
+        // A member's name and image: read by the workspace's members, written
+        // by its own user, which is the rule a device's row has.
+        table_schema(tables::MEMBER_PROFILE)
+            .with_mode(TableMode::Schemaless)
+            .with_permissions(DEVICE_PERMS)
+            .with_indexes([index("member_profile_tenant_idx", ["tenant_id"])]),
         // The tenant hive: two gates and an offer ledger. One hive
         // row per tenant, so the gate cannot be ambiguous.
         table_schema(tables::HIVE)

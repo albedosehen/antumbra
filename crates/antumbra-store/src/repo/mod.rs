@@ -30,6 +30,7 @@ pub mod memory_chunk;
 pub mod memory_policy;
 pub mod memory_use;
 pub mod principal;
+pub mod profile;
 pub mod recipe;
 pub mod relic;
 pub mod revocation;
