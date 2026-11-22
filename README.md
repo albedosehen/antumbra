@@ -16,6 +16,8 @@ Antumbra is a private memory and specialist substrate for the coding agent you a
 - **Sharing is deliberate.** Memory lives in compartments you own and grant, tenancy is enforced in the database engine, and a store on a laptop syncs with one a team shares.
 - **You can see it.** A web dashboard, an operator console in the terminal, and relics: the pages an agent writes for you, kept where you can find them again.
 
+Measured on one series of sessions: an agent that broke 3 of 22 conventions it had already been given broke none with Antumbra. What was run, and what that does not show, is in [docs/measured.md](docs/measured.md).
+
 ## Quick start
 
 Install the CLI from a release. The command names a tag rather than `latest`, so what it runs is a published, unchanging asset, and the installer checks the archive against the sha256 built into it.
