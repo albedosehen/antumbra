@@ -23,7 +23,7 @@
 
 ### Measured
 
-- **A coding agent with Antumbra and without it** ([#PRNUM](https://github.com/albedosehen/antumbra/pull/PRNUM)). Over five sessions that needed conventions given in earlier ones, Claude Code broke a convention it had already been given 3 times in 22 with no memory (1 to 4 over three runs), and not once with Antumbra as setup wires it, nor with the conventions written into its instruction file by hand. Every task passed in every arm. `docs/measured.md` has what was run and what it does not show: one series, one agent, one model.
+- **A coding agent with Antumbra and without it** ([#579](https://github.com/albedosehen/antumbra/pull/579)). Over five sessions that needed conventions given in earlier ones, Claude Code broke a convention it had already been given 3 times in 22 with no memory (1 to 4 over three runs), and not once with Antumbra as setup wires it, nor with the conventions written into its instruction file by hand. Every task passed in every arm. `docs/measured.md` has what was run and what it does not show: one series, one agent, one model.
 
 ### Known limits
 
