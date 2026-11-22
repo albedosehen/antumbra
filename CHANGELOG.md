@@ -21,6 +21,10 @@
 - **The server says how it serves** ([#574](https://github.com/albedosehen/antumbra/pull/574)). `workspace_stats` returns `serving`: the device the base is read on (`cpu`, `cuda` or `metal`, the device a model would be loaded on and not only the build's backend), the base's form, and on a CPU the kernels a token goes through (`avx-512`, `avx2`, `neon`, or `none` for candle's). It is `null` on a build without the model backend. `antumbra setup check` says it in a line, and says plainly when the server does not serve experts.
 - **The image is checked where it is built** ([#574](https://github.com/albedosehen/antumbra/pull/574)). `scripts/image-smoke.sh <image>` starts an image on an in-memory store with a fixed embedder, so no database and no model download, and requires that `workspace_stats` says it serves on the CPU from a quantized base through Antumbra's kernels and that `answer` escalates with no expert. The image workflow runs it after the build of `main`, and on each platform's own runner before a release's version tag names the image, so an image that cannot serve is never the one setup pulls.
 
+### Measured
+
+- **A coding agent with Antumbra and without it** ([#579](https://github.com/albedosehen/antumbra/pull/579)). Over five sessions that needed conventions given in earlier ones, Claude Code broke a convention it had already been given 3 times in 22 with no memory (1 to 4 over three runs), and not once with Antumbra as setup wires it, nor with the conventions written into its instruction file by hand. Every task passed in every arm. `docs/measured.md` has what was run and what it does not show: one series, one agent, one model.
+
 ### Known limits
 
 - **A server with no GPU trains nothing.** It serves the experts a GPU server trained, fetched from that server (`--expert-source`) or read back from the archive. Fetching an adapter between two machines has still been run in tests only. The end-to-end run above was given the adapter by hand.
