@@ -1516,6 +1516,101 @@ async fn what_to_share_is_suggested_from_what_was_shared_before() -> anyhow::Res
     Ok(())
 }
 
+/// A workspace from before roles, with two people and no owner (#580): its
+/// own person's first read with an ordinary token closes nothing; with the
+/// operator's token they are its owner and can let people in; and a member
+/// leaves by removing themselves.
+#[tokio::test]
+async fn a_workspace_from_before_roles_is_opened_by_the_operator_and_left_by_a_member(
+) -> anyhow::Result<()> {
+    let st = state().await?;
+    let with = |tok: String, method: &'static str, path: &'static str, body: serde_json::Value| {
+        let st = st.clone();
+        async move {
+            let req = Request::builder()
+                .method(method)
+                .uri(path)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {tok}"));
+            let res = router(st)
+                .oneshot(req.body(Body::from(body.to_string()))?)
+                .await?;
+            let status = res.status();
+            let text = body_text(res).await?;
+            anyhow::Ok((
+                status,
+                serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default(),
+            ))
+        }
+    };
+    // Two principals as a store from before roles holds them: no role.
+    antumbra_store::testing::members_from_before_roles(
+        &st.store,
+        &TenantId::new("ws:old"),
+        &[&UserId::new("user:own"), &UserId::new("user:check")],
+    )
+    .await?;
+    let none = serde_json::Value::Null;
+    let ordinary = token("ws:old", "user:own")?;
+    let (status, listed) = with(ordinary.clone(), "GET", "/join/codes", none.clone()).await?;
+    anyhow::ensure!(
+        status == StatusCode::FORBIDDEN,
+        "a member listed join codes: {status} {listed}"
+    );
+    let (status, _) = with(
+        ordinary.clone(),
+        "POST",
+        "/join/codes",
+        serde_json::json!({}),
+    )
+    .await?;
+    anyhow::ensure!(status == StatusCode::FORBIDDEN, "{status}");
+
+    // The same person with the operator's token: the workspace has no owner,
+    // so it is theirs, and stays theirs for their ordinary token.
+    let operator = antumbra_auth::mint_hs256_operator(
+        b"test-secret",
+        "ws:old",
+        "user:own",
+        std::time::Duration::from_secs(600),
+    )?;
+    let (status, made) = with(operator, "POST", "/join/codes", serde_json::json!({})).await?;
+    anyhow::ensure!(
+        status == StatusCode::OK,
+        "the operator could not open the workspace: {status} {made}"
+    );
+    let (status, _) = with(ordinary.clone(), "GET", "/join/codes", none.clone()).await?;
+    anyhow::ensure!(status == StatusCode::OK, "{status}");
+
+    // The other leaves by removing themselves; the owner, the last, cannot.
+    let check = token("ws:old", "user:check")?;
+    let (status, left) = with(
+        check.clone(),
+        "POST",
+        "/members/remove",
+        serde_json::json!({ "user": "user:check" }),
+    )
+    .await?;
+    anyhow::ensure!(
+        status == StatusCode::OK,
+        "a member could not leave: {status} {left}"
+    );
+    let (status, _) = with(check, "GET", "/members", none.clone()).await?;
+    anyhow::ensure!(
+        status != StatusCode::OK,
+        "someone who left was still served"
+    );
+    let (status, why) = with(
+        ordinary,
+        "POST",
+        "/members/remove",
+        serde_json::json!({ "user": "user:own" }),
+    )
+    .await?;
+    anyhow::ensure!(status != StatusCode::OK, "the last owner left: {why}");
+    Ok(())
+}
+
 /// A server whose tokens a control plane signs: its admins make join codes
 /// here, and whoever asks or collects here is told where to go instead. With
 /// no control plane and no secret, it makes none and says only that.

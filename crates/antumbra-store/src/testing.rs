@@ -34,6 +34,25 @@ pub async fn members(store: &Store, tenant: &TenantId, users: &[&UserId]) -> Res
 
 /// A fresh store with `user` provisioned as a member of `tenant` and the
 /// session signed in as them, so the engine's permissions apply to every read
+/// Principals as a store from before roles holds them: a row each with no
+/// role, no date and no status.
+pub async fn members_from_before_roles(
+    store: &Store,
+    tenant: &TenantId,
+    users: &[&UserId],
+) -> Result<()> {
+    for user in users {
+        store
+            .put(
+                crate::tables::PRINCIPAL,
+                &format!("old-{}-{}", tenant.as_str(), user.as_str()).replace([':', '/', ' '], "_"),
+                &serde_json::json!({ "tenant": tenant.as_str(), "user": user.as_str() }),
+            )
+            .await?;
+    }
+    Ok(())
+}
+
 /// and write that follows.
 pub async fn signed_in(tenant: &str, user: &str) -> Result<Store> {
     let store = mem_store().await?;
