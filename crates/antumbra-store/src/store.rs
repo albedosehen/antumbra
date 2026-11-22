@@ -161,6 +161,15 @@ impl Store {
     /// credentials) it falls back to `invalidate` (anonymous *is* the owner
     /// there). Use this, not `invalidate`, whenever owner access is required on
     /// a real deployment.
+    /// Whether this is an embedded engine: no credentials of the store's
+    /// owner, and none the connection was made with. There the owner's view
+    /// is the connection with no session ([`Store::signin_root`]).
+    pub fn is_embedded(&self) -> bool {
+        self.db_owner.is_none()
+            && (self.client.config().username().is_none()
+                || self.client.config().password().is_none())
+    }
+
     pub async fn signin_root(&self) -> Result<()> {
         self.set_session(None);
         if let Some((user, pass)) = &self.db_owner {
@@ -217,8 +226,21 @@ impl Store {
     /// (`repo::lifecycle::adopt_ids`). Nothing to do on a store that has
     /// been through it.
     pub async fn ensure_schema(&self) -> Result<()> {
-        let script = schema::schema_statements(self.embed_dim as u32)?.join("\n");
-        self.client.query(&script).await.map_err(map)?;
+        let mut statements = schema::schema_statements(self.embed_dim as u32)?;
+        if self.is_embedded() {
+            // An embedded store's record sessions do not expire
+            // ([`schema::tenant_access_embedded`]): said after the schema's
+            // own definition, which is a server's.
+            statements.push(
+                schema::tenant_access_embedded()
+                    .to_surql_overwrite()
+                    .map_err(map)?,
+            );
+        }
+        self.client
+            .query(&statements.join("\n"))
+            .await
+            .map_err(map)?;
         let moved = crate::repo::expert::adopt_ids(self).await?;
         if moved > 0 {
             eprintln!("antumbra-store: {moved} expert(s) moved to records named for them");

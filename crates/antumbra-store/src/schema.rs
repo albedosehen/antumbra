@@ -810,6 +810,28 @@ pub fn tenant_access() -> AccessDefinition {
     .with_session(format!("{}s", TENANT_SESSION.as_secs()))
 }
 
+/// [`tenant_access`] for an embedded store: the same sign-in, and a session
+/// that does not expire.
+///
+/// An embedded engine has one connection. A request signs it in as its
+/// record, and the server's own work then takes the owner's view back by
+/// invalidating that session. The engine keeps the session's expiry through
+/// the invalidation, so an hour after the last request every query on the
+/// one connection, the owner's too, answered "the session has expired", and
+/// went on answering it: a server left idle for an hour served nothing until
+/// it was restarted. A session there guards nothing a restart of the process
+/// would not undo, and a request signs in afresh every time, which is where a
+/// removed member is refused. So it is given no end.
+pub fn tenant_access_embedded() -> AccessDefinition {
+    record_access(
+        "tenant",
+        RecordAccessConfig::new().with_signin(
+            "SELECT * FROM principal WHERE tenant = $tenant AND user = $user \
+             AND (status IS NONE OR status IS NULL OR status != 'removed')",
+        ),
+    )
+}
+
 /// The record-access method name (the `ac` in a scope signin).
 pub const TENANT_ACCESS: &str = "tenant";
 
@@ -906,13 +928,66 @@ mod tests {
         let changed = defined(&store).await?;
         assert_ne!(changed, first, "the redefinition reached the store");
 
-        // The schema's own definition, applied again, restores it.
-        for statement in schema_statements(4)? {
-            store
-                .query_rows::<serde_json::Value>(&statement, std::collections::BTreeMap::new())
-                .await?;
-        }
+        // The schema, applied again, restores it.
+        store.ensure_schema().await?;
         assert_eq!(defined(&store).await?, first);
+        // An embedded store's sessions have no end: one that ran out there
+        // took the owner's view of the one connection with it.
+        assert!(
+            !first.contains("FOR SESSION 3600s") && !first.contains("FOR SESSION 1h"),
+            "{first}"
+        );
+        Ok(())
+    }
+
+    /// Why an embedded store's sessions are given no end. On the engine's one
+    /// connection a record session that has run out is not left by
+    /// invalidating it: the owner's view answers "the session has expired"
+    /// too, until some record signs in again. With no end to run out, the
+    /// owner's view is there after any wait.
+    ///
+    /// The first half states the engine's behaviour as it is. If it fails,
+    /// the engine has changed and [`tenant_access_embedded`] may no longer be
+    /// needed; the second half is what Antumbra relies on.
+    #[tokio::test]
+    async fn an_ended_session_takes_the_owners_view_with_it_and_an_endless_one_does_not(
+    ) -> Result<()> {
+        use crate::repo::principal;
+        use antumbra_core::{TenantId, UserId};
+        let store = crate::testing::mem_store_of(4).await?;
+        let (tenant, user) = (TenantId::new("ws:a"), UserId::new("user:a"));
+        principal::provision(&store, &tenant, &user).await?;
+        let nothing = std::collections::BTreeMap::new;
+
+        // A server's definition, with its hour cut to a second.
+        let ends = tenant_access()
+            .with_session("1s")
+            .to_surql_overwrite()
+            .map_err(map)?;
+        store
+            .query_rows::<serde_json::Value>(&ends, nothing())
+            .await?;
+        store.signin(&tenant, &user).await?;
+        store.signin_root().await?;
+        tokio::time::sleep(std::time::Duration::from_millis(2200)).await;
+        let owner = principal::is_member(&store, &tenant, &user).await;
+        assert!(
+            owner
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("expired")),
+            "the engine now leaves an ended session when it is invalidated: {owner:?}"
+        );
+        // Only a record signing in again brings the connection back.
+        store.signin(&tenant, &user).await?;
+        store.signin_root().await?;
+
+        // What an embedded store is given: the same wait, and the owner's
+        // view is there, and a member is still a member.
+        store.ensure_schema().await?;
+        store.signin(&tenant, &user).await?;
+        store.signin_root().await?;
+        tokio::time::sleep(std::time::Duration::from_millis(2200)).await;
+        assert!(principal::is_member(&store, &tenant, &user).await?);
         Ok(())
     }
 
