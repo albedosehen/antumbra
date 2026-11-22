@@ -16,7 +16,7 @@
 
 ### The server
 
-- **A server on an embedded store no longer stops answering an hour after its last request** ([#PRNUM](https://github.com/albedosehen/antumbra/pull/PRNUM)). `antumbra-mcp --http` with a `mem://` or `surrealkv://` store and no database credentials has one connection, signed in as each request's member and taken back for the server's own work. The engine keeps a session's expiry when the session is left, so an hour after the last request every query on that connection failed with "the session has expired", the server's own work first and then every request (`session initialization failed`), until a restart. An embedded store's sessions now have no end; each request still signs in afresh, which is where a removed member is refused. A server with database credentials, as `antumbra setup local` starts, was not affected.
+- **A server on an embedded store no longer stops answering an hour after its last request** ([#577](https://github.com/albedosehen/antumbra/pull/577)). `antumbra-mcp --http` with a `mem://` or `surrealkv://` store and no database credentials has one connection, signed in as each request's member and taken back for the server's own work. The engine keeps a session's expiry when the session is left, so an hour after the last request every query on that connection failed with "the session has expired", the server's own work first and then every request (`session initialization failed`), until a restart. An embedded store's sessions now have no end; each request still signs in afresh, which is where a removed member is refused. A server with database credentials, as `antumbra setup local` starts, was not affected.
 
 ### Serving
 
