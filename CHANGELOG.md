@@ -8,7 +8,7 @@
 
 - **A workspace from before roles: make its first call with the operator's token** ([#581](https://github.com/albedosehen/antumbra/pull/581)). 0.5.1 could leave such a workspace with no owner and no way to one (below). With this release a workspace that has no owner is taken by whoever calls it with the server operator's token, so if a 0.5.1 server left yours that way, one call with that token, or opening the Members page signed in with it, puts it right.
 
-- **A coding agent is advertised 21 tools, not 42, once setup is run again** ([#PRNUM](https://github.com/albedosehen/antumbra/pull/PRNUM)). An agent's connection now asks the server for the `agent` profile. If your agent calls a tool outside it through MCP (`list_memories`, `workspace_stats`, the compartment and sharing tools, `forget_memory`), set `ANTUMBRA_AGENT_TOOLS=all` in its environment, or name what you need: `ANTUMBRA_AGENT_TOOLS=agent,list_memories`. The dashboard and the CLI are not affected, and a server older than 0.5.2 ignores the request and serves everything as before.
+- **A coding agent is advertised 21 tools, not 42, once setup is run again** ([#585](https://github.com/albedosehen/antumbra/pull/585)). An agent's connection now asks the server for the `agent` profile. If your agent calls a tool outside it through MCP (`list_memories`, `workspace_stats`, the compartment and sharing tools, `forget_memory`), set `ANTUMBRA_AGENT_TOOLS=all` in its environment, or name what you need: `ANTUMBRA_AGENT_TOOLS=agent,list_memories`. The dashboard and the CLI are not affected, and a server older than 0.5.2 ignores the request and serves everything as before.
 
 ### Accounts
 
@@ -17,7 +17,7 @@
 ### Setup
 
 - **An agent whose command is there and does not run is not taken as installed** ([#571](https://github.com/albedosehen/antumbra/pull/571)). `antumbra setup` with no `--agent` connected Codex wherever a `codex` program was on the PATH. Where that program was another tool's wrapper that fails for want of the real one, setup wrote Codex's hooks, could not register the server, recorded Codex among the machine's agents, and `antumbra setup check` then failed on a machine that had passed it. An agent's command now has to answer `--version`; one that does not is said in a line and left out. `antumbra join --connect` leaves such a Codex out too. A machine 0.5.1 left that way is put right by running setup again with `--agent` naming the agents it has.
-- **Setup gives an agent the `agent` tool profile** ([#PRNUM](https://github.com/albedosehen/antumbra/pull/PRNUM)). The profile was a setting of the whole server, which setup could not turn on without taking the dashboard's and the CLI's tools away with it. A connection now asks for it: `X-Antumbra-Tools`, sent by the headers helper setup writes and by `antumbra mcp bridge`, cuts what that connection is advertised and may call down to what a coding session needs. It narrows what a server serves and never widens it.
+- **Setup gives an agent the `agent` tool profile** ([#585](https://github.com/albedosehen/antumbra/pull/585)). The profile was a setting of the whole server, which setup could not turn on without taking the dashboard's and the CLI's tools away with it. A connection now asks for it: `X-Antumbra-Tools`, sent by the headers helper setup writes and by `antumbra mcp bridge`, cuts what that connection is advertised and may call down to what a coding session needs. It narrows what a server serves and never widens it.
 
 ### The server
 
