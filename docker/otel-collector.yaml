@@ -67,7 +67,7 @@ receivers:
         enabled: true
 
   # SurrealDB serves Prometheus text on /metrics without auth (process CPU,
-  # memory, uptime, build), as on shaman.
+  # memory, uptime, build), as on sparrow.
   prometheus/surrealdb:
     config:
       scrape_configs:

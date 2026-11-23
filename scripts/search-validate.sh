@@ -8,7 +8,7 @@
 # takes the recipes (learning rate, batch size), where seeded sampling draws the
 # re-measurements, and where a whole generation's cost shows up.
 #
-# Expects a source tarball at /tmp/antumbra-$SHA.tar.gz, as kusko-deploy.sh does:
+# Expects a source tarball at /tmp/antumbra-$SHA.tar.gz, as server-deploy.sh does:
 #   git archive --format=tar.gz -o /tmp/antumbra-$(git rev-parse --short HEAD).tar.gz HEAD
 #   scp /tmp/antumbra-<sha>.tar.gz scripts/search-validate.sh <host>:/tmp/
 #   ssh <host> 'nohup bash /tmp/search-validate.sh <sha> >/dev/null 2>&1 &'

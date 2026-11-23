@@ -46,19 +46,19 @@ async fn waiting(s: &McpServer, host: &str, include_done: bool) -> anyhow::Resul
 #[tokio::test]
 async fn a_handoff_waits_where_it_is_addressed_until_it_is_done() -> anyhow::Result<()> {
     let store = mem_store().await?;
-    let s = server_for(&store, "user:a", "kuskokwim");
+    let s = server_for(&store, "user:a", "kestrel");
     let for_gpu = leave(
         &s,
         "Rerun the relevance probe\nwith 2048 tokens",
-        Some(" Kuskokwim "),
+        Some(" Kestrel "),
     )
     .await?;
-    assert_eq!(for_gpu.for_host, "kuskokwim");
+    assert_eq!(for_gpu.for_host, "kestrel");
     let for_any = leave(&s, "Check the dashboard", None).await?;
     assert_eq!(for_any.for_host, "any");
     assert!(for_any.registered_device, "any is always deliverable");
 
-    let here = waiting(&s, "kuskokwim", false).await?;
+    let here = waiting(&s, "kestrel", false).await?;
     let ids: Vec<&str> = here.handoffs.iter().map(|h| h.id.as_str()).collect();
     assert_eq!(
         ids,
@@ -71,33 +71,33 @@ async fn a_handoff_waits_where_it_is_addressed_until_it_is_done() -> anyhow::Res
         anyhow::bail!("two handoffs waited and nothing was announced");
     };
     assert!(
-        said.starts_with("2 handoffs waiting for this machine (kuskokwim):"),
+        said.starts_with("2 handoffs waiting for this machine (kestrel):"),
         "{said}"
     );
 
-    let elsewhere = waiting(&s, "shaman", false).await?;
+    let elsewhere = waiting(&s, "sparrow", false).await?;
     assert_eq!(elsewhere.handoffs.len(), 1, "only the one for any machine");
 
     let done = s
         .complete_handoff(Parameters(CompleteHandoffParams {
             handoff_id: for_gpu.id.clone(),
-            host: Some("kuskokwim".into()),
+            host: Some("kestrel".into()),
         }))
         .await?
         .0;
     assert!(done.found && !done.already_done);
-    let after = waiting(&s, "kuskokwim", false).await?;
+    let after = waiting(&s, "kestrel", false).await?;
     assert_eq!(after.handoffs.len(), 1);
     let Some(still) = after.announcement else {
         anyhow::bail!("one handoff still waited and nothing was announced");
     };
     assert!(still.starts_with("1 handoff waiting"));
 
-    let history = waiting(&s, "kuskokwim", true).await?;
+    let history = waiting(&s, "kestrel", true).await?;
     let Some(kept) = history.handoffs.iter().find(|h| h.id == for_gpu.id) else {
         anyhow::bail!("the completed handoff is no longer readable");
     };
-    assert_eq!(kept.done_by.as_deref(), Some("kuskokwim"));
+    assert_eq!(kept.done_by.as_deref(), Some("kestrel"));
     assert!(kept.done_at.is_some());
 
     let again = s
@@ -171,8 +171,8 @@ async fn nothing_waiting_says_nothing_and_only_handoffs_complete() -> anyhow::Re
 async fn an_unregistered_host_is_accepted_and_flagged() -> anyhow::Result<()> {
     let store = mem_store().await?;
     let s = server_for(&store, "user:a", "windows");
-    let left = leave(&s, "For a box that never registered", Some("kuskokwm")).await?;
-    assert_eq!(left.for_host, "kuskokwm");
+    let left = leave(&s, "For a box that never registered", Some("serverkwm")).await?;
+    assert_eq!(left.for_host, "serverkwm");
     assert!(!left.registered_device);
     Ok(())
 }
@@ -181,11 +181,11 @@ async fn an_unregistered_host_is_accepted_and_flagged() -> anyhow::Result<()> {
 #[tokio::test]
 async fn a_handoff_is_private_to_the_user_who_left_it() -> anyhow::Result<()> {
     let store = mem_store().await?;
-    let a = server_for(&store, "user:a", "kuskokwim");
-    let b = server_for(&store, "user:b", "kuskokwim");
-    leave(&a, "For my own GPU box", Some("kuskokwim")).await?;
-    assert_eq!(waiting(&a, "kuskokwim", false).await?.handoffs.len(), 1);
-    assert!(waiting(&b, "kuskokwim", true).await?.handoffs.is_empty());
+    let a = server_for(&store, "user:a", "kestrel");
+    let b = server_for(&store, "user:b", "kestrel");
+    leave(&a, "For my own GPU box", Some("kestrel")).await?;
+    assert_eq!(waiting(&a, "kestrel", false).await?.handoffs.len(), 1);
+    assert!(waiting(&b, "kestrel", true).await?.handoffs.is_empty());
     Ok(())
 }
 

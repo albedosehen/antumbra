@@ -6,7 +6,7 @@
 # passes or never passes, so before it is trained on, it is measured. The
 # reports this writes are what corpora/workbench/calibrate.py summarizes.
 #
-# Expects a source tarball at /tmp/antumbra-$SHA.tar.gz, as kusko-deploy.sh does:
+# Expects a source tarball at /tmp/antumbra-$SHA.tar.gz, as server-deploy.sh does:
 #   git archive --format=tar.gz -o /tmp/antumbra-$(git rev-parse --short HEAD).tar.gz HEAD
 #   scp /tmp/antumbra-<sha>.tar.gz <host>:/tmp/
 #   scp scripts/workbench-calibrate.sh <host>:/tmp/

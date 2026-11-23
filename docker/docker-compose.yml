@@ -62,10 +62,12 @@ services:
     command:
       - --http
       - 0.0.0.0:8081
+      # The stack's own database, unless this server serves beside a trainer
+      # and shares its database (`antumbra setup local --serve-from`).
       - --url
-      - ws://surrealdb:8000/rpc
+      - ${ANTUMBRA_DB_URL:-ws://surrealdb:8000/rpc}
       - --db-user
-      - root
+      - ${ANTUMBRA_DB_USER:-root}
       - --embedder-url
       - ${ANTUMBRA_EMBEDDER_URL:-http://host.docker.internal:11434/v1/embeddings}
       - --embedder-model
@@ -82,6 +84,9 @@ services:
       # container ID is the name, and every recreate registers this machine
       # as a brand new node while the old rows go on claiming to be trainers.
       - ANTUMBRA_HOST=${ANTUMBRA_HOST:-${HOSTNAME}}
+      # The machine's operating system, for its device row: the container
+      # sees its image's, not the machine's. `antumbra setup local` writes it.
+      - ANTUMBRA_HOST_OS=${ANTUMBRA_HOST_OS:-}
       # The cross-encoder precision stage. Unset = off, and recall returns the
       # RRF order as before. With the `rerank` profile started, the service is
       # reachable on the compose network by name:

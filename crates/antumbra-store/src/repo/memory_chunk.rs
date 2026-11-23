@@ -248,7 +248,7 @@ pub async fn nearest(
 /// `vector`, nearest first. The engine has the distance from walking the index
 /// (`vector::distance::knn()`, one minus the cosine on this COSINE index), so a
 /// piece comes back as a key and a number rather than 384 numbers: on
-/// kuskokwim the leg's 150 pieces were 1.2 MB with their vectors and 6 KB
+/// kestrel the leg's 150 pieces were 1.2 MB with their vectors and 6 KB
 /// without, for the same 30 ms in the engine.
 pub async fn nearest_scored(
     store: &Store,
@@ -268,7 +268,7 @@ pub async fn nearest_scored(
 /// running the read rule on every one. Measured on the embedded engine (a
 /// debug build): 9.2 s for a member who could read 80 of 12,080 pieces, all
 /// 80 returned, against 0.96 s for the owner who read every piece. On
-/// kuskokwim the owner's chunk leg took at most 0.51 s in a day, and an
+/// kestrel the owner's chunk leg took at most 0.51 s in a day, and an
 /// identity that could read almost nothing took 2.9 to 4.6 s on every recall.
 ///
 /// Past this the leg finds nothing and recall goes on with its dense and

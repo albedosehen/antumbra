@@ -22,7 +22,7 @@
 //! Measured on a store of 7,000 memories: a cue word anywhere picked 68% of
 //! the store, because long technical notes say "must" and "never" constantly;
 //! a sentence opening with any imperative verb picked 54%, because labels and
-//! list items open with verbs too ("Deploy: kuskokwim at 42bf9b7"); the shape
+//! list items open with verbs too ("Deploy: kestrel at 42bf9b7"); the shape
 //! below picks 31%, of which 13% is the opinion network. Precision is the
 //! agent's: a fact that opens like a rule is read and passed over. The
 //! ignored test `measure_on_a_sweep` repeats the measurement on a dump. What is left out without a look: behaviors and handoffs,
@@ -102,7 +102,7 @@ pub const STRONG_OPENERS: &[&str] = &[
 ];
 
 /// Imperative verbs a sentence opens with when it states a procedure. A verb
-/// alone is also how a label or a list item begins ("Deploy: kuskokwim at
+/// alone is also how a label or a list item begins ("Deploy: kestrel at
 /// 42bf9b7"), so one of these counts only when the sentence also carries one
 /// of [`CONDITIONS`]. Verbs that are as often a noun or a state ("open",
 /// "merge", "set", "name") are left out: "Open worktrees until merged" is a
@@ -225,7 +225,7 @@ pub fn opener(sentence: &str) -> Option<&'static str> {
 /// The sentences of `content` that open like a rule, each with its opener,
 /// in order. Sentences end at a period, an exclamation or question mark, a
 /// colon, a semicolon, or a line break: "Shon said: never stack pull
-/// requests" carries the rule after its colon, and "Deploy: kuskokwim at
+/// requests" carries the rule after its colon, and "Deploy: kestrel at
 /// 42bf9b7" is a label before its own.
 pub fn rule_sentences(content: &str) -> Vec<(&'static str, String)> {
     content
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn rule_sentences_are_cut_at_sentence_ends_and_keep_their_order() -> anyhow::Result<()> {
-        let note = "Deploy: kuskokwim at 42bf9b7. Shon said: never stack pull requests; \
+        let note = "Deploy: kestrel at 42bf9b7. Shon said: never stack pull requests; \
                     always open them against main. The gate never fires.\n\
                     - Use `pdftotext -layout` for every PDF";
         let hits = rule_sentences(note);

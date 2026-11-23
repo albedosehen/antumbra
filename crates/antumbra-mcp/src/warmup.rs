@@ -2,13 +2,13 @@
 //!
 //! The first embedding and the first rerank after a restart pay for loading
 //! weights and setting up GPU kernels, and the first caller is usually the
-//! session-start hook, which gives up after five seconds. Measured on kuskokwim
+//! session-start hook, which gives up after five seconds. Measured on kestrel
 //! on 2026-10-04: the first recall after a deploy took 5.8 s, the next ones
 //! 0.15 to 0.17 s. So the server spends that time itself, before anyone asks.
 //!
 //! A networked server warms its embedder before it listens. Warmed in the
 //! background, a call that came in meanwhile still waited for it: measured on
-//! kuskokwim on 2026-10-12, a recall 3 s after a restart spent 3.8 s embedding
+//! kestrel on 2026-10-12, a recall 3 s after a restart spent 3.8 s embedding
 //! its query, finishing in the same millisecond as the warm-up, against 16 ms
 //! warm. Every recall and every store embeds, so until the embedder answers
 //! the server has little it can answer quickly, and a client that finds the

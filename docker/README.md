@@ -110,7 +110,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml [-f
   --profile telemetry up -d gpu-exporter otel-collector
 ```
 
-Every metric carries `host.name` from `ANTUMBRA_HOST`. Whoever holds the Docker socket is root on the host, read-only mount or not, which is why the collector is opt-in; it runs as root with every capability dropped, a read-only root file system and no ports. `scripts/kusko-deploy.sh` recreates it on each deploy when `ANTUMBRA_TELEMETRY_AUTHORIZATION` is set.
+Every metric carries `host.name` from `ANTUMBRA_HOST`. Whoever holds the Docker socket is root on the host, read-only mount or not, which is why the collector is opt-in; it runs as root with every capability dropped, a read-only root file system and no ports. `scripts/server-deploy.sh` recreates it on each deploy when `ANTUMBRA_TELEMETRY_AUTHORIZATION` is set.
 
 ## Document of record: copal (optional)
 

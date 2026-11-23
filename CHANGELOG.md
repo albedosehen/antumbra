@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.5.3 - 2026-11-23
+
+A server with no GPU can be set up beside the one that trains: `antumbra setup local --serve-from` starts it on the trainer's database and signing secret. A server run in a container lists its own machine under its name and its operating system.
+
+### Before you upgrade
+
+- **Nothing to do for an existing setup.** Run `antumbra setup local` again on a machine that runs its own stack to give the server its machine's name and operating system; the stack's `.env` gains two lines and the server is restarted.
+- **The deploy script in a clone is renamed.** A script of your own that called it should call `scripts/server-deploy.sh`.
+
+### Setup
+
+- **`antumbra setup local --serve-from <trainer>`** starts a server that serves the experts another server trains, beside it: on the trainer's database (`--db-url`, `--db-pass-file`) and with its signing secret (`--jwt-secret-file`), fetching adapters from it. It starts no database of its own. Setup checks the database answers from this machine first, and refuses on a machine whose stack already has a store of its own. Opening the trainer's database to a second machine is the operator's to do (#602).
+- **A server set up in a container is listed under its machine's name and operating system.** The stack fell back to `HOSTNAME`, which a shell does not always export, so the server's own device could be listed with no name; and the container named its image's system (`Distroless`). Setup now writes both to the stack's `.env` (#603).
+
+### Dependencies
+
+- **`cookie` 0.18.3**, for RUSTSEC-2026-0594 (private cookie nonces can repeat in a process that forks). Antumbra reaches the crate through its HTTP client and makes no private cookies; the patched version is taken all the same.
+
+### The repository
+
+- **Fixtures, comments and scripts use neutral host names** ([#601](https://github.com/albedosehen/antumbra/pull/601)). They named the machines the project was developed on. The deploy script is `scripts/server-deploy.sh`. Nothing a user or an operator sets was renamed.
+
+### Known limits
+
+- **An expert has not been served through a server set up with `--serve-from`.** The setup was run for real against a throwaway database, and the fetch it relies on was run between two machines in 0.5.2, by hand; the two have not been run together.
+- **The base model's first download inside a container is still untimed.**
+- **The trainer's database is the operator's to open** to a second machine, and that connection is the root one to everything the store holds.
+- 0.5.2's other limits stand: signing in by email on a hosted control plane has run in tests only, training needs an NVIDIA GPU, there is no import to go with the export, and the database is not encrypted.
+
 ## 0.5.2 - 2026-11-23
 
 A standard install serves experts: the server image and the installed command both answer through an expert on the machine's CPU. A coding agent's session is advertised the 21 tools it needs and not all 42, and what a joined machine may write to its workspace is kept by its connection and not only said. Your memories can be exported, a member can leave a workspace, and the first measurement of a coding agent with Antumbra and without it is in: a convention it had been given was broken again 3 times in 22 with no memory and never with Antumbra. Two faults a server could be left in are fixed: a server on an embedded store that answered nothing an hour after its last request, and a workspace from before roles left with no owner.
@@ -685,7 +714,7 @@ Relics, and behaviors you can teach. An agent can now keep the pages it writes a
 
 ### Docker
 
-- **SurrealDB health checks run over the websocket.** SurrealDB 3.2.4 answers the `http://` form "Method not allowed" while serving normally, which left both databases unhealthy and kept a recreated server from starting; `kusko-deploy.sh` now fails when a service is not running instead of reporting OK ([#239](https://github.com/albedosehen/antumbra/pull/239)).
+- **SurrealDB health checks run over the websocket.** SurrealDB 3.2.4 answers the `http://` form "Method not allowed" while serving normally, which left both databases unhealthy and kept a recreated server from starting; `server-deploy.sh` now fails when a service is not running instead of reporting OK ([#239](https://github.com/albedosehen/antumbra/pull/239)).
 - **Images built from `main` are also tagged `main-<timestamp>-<short sha>`**, so image automation can order them ([#230](https://github.com/albedosehen/antumbra/pull/230)).
 
 ### Security

@@ -12,18 +12,18 @@ With [Docker](https://docs.docker.com/get-docker/) and [ollama](https://ollama.c
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.5.2/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.5.3/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.5.2/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.5.3/antumbra-cli-installer.ps1 | iex
 ```
 
 To check the archive yourself before anything runs, download it and the `.sha256` the release carries beside it, compare, and unpack the binary onto your PATH (the installer does the same comparison, against the sums built into the pinned script):
 
 ```bash
-v=v0.5.2; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
+v=v0.5.3; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
 curl --proto '=https' --tlsv1.2 -LsSfO "https://github.com/albedosehen/antumbra/releases/download/$v/antumbra-cli-$t.tar.xz"{,.sha256}
 shasum -a 256 -c "antumbra-cli-$t.tar.xz.sha256" && tar -xJf "antumbra-cli-$t.tar.xz"
 ```
@@ -173,7 +173,7 @@ then add the lifecycle hooks. **[`scripts/hooks/README.md`](../scripts/hooks/REA
 
 The stack above serves answers from trained experts (the `answer` tool) on its CPU: the published image is built with the `models` feature. The base model, about 3 GB, is downloaded into the stack's `antumbra-weights` volume the first time the server is asked to answer through an expert, so a server with none never fetches it. While it downloads, and then while the server loads it, `answer` escalates and says so, and your agent does the task as it would have anyway. `antumbra setup check` says whether the server serves experts, on what, and from which form.
 
-What it does not do is train. Turning the behaviors you accept into your own standing expert takes a GPU, so the experts a server with no GPU serves are the ones a GPU server trained, which it fetches from that server (`--expert-source`) or reads back from the archive.
+What it does not do is train. Turning the behaviors you accept into your own standing expert takes a GPU, so the experts a server with no GPU serves are the ones a GPU server trained, which it fetches from that server (`--expert-source`) or reads back from the archive. `antumbra setup local --serve-from <the trainer's address>` sets that up, given the trainer's database and its signing secret.
 
 On a machine with an NVIDIA card (Linux, or Windows via WSL2), the GPU build trains as well as serves:
 

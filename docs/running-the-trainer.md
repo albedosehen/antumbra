@@ -306,6 +306,22 @@ As a server decodes there, the expert's 78 held-out tasks were answered by two m
 
 **Serving them from another machine.** An expert's weights stay on the disk of the machine that trained it, while its row reaches every server on the database, and every store that `antumbra sync` keeps in step with it. A second server, such as one with no GPU, serves those experts when it is told where the first one is: `--expert-source http://trainer:8081` (`ANTUMBRA_EXPERT_SOURCE` in `docker/.env`), the address its own network reaches the training server at. The first time it routes to an expert it does not hold, it asks that server for the adapter (`GET /expert/adapter`), checks the answer against the sha256 and size on the expert's row, and keeps the file under its own adapter directory. From then on it serves the expert without the training server, across restarts too. When the expert is retrained its row names another sha256, and the next request pulls that adapter and removes the one before it.
 
+`antumbra setup local` sets such a server up when told of the trainer:
+
+```bash
+antumbra setup local \
+  --serve-from http://trainer:8081 \
+  --db-url ws://trainer:8000/rpc \
+  --db-pass-file ./trainer-db-pass \
+  --jwt-secret-file ./trainer-jwt-secret
+```
+
+The two files hold the trainer's `SURREAL_PASS` and `ANTUMBRA_JWT_SECRET`, from its stack's `.env`; neither is taken on the command line. Setup checks that the database answers from this machine before it starts anything, starts the server alone (the stack's own database is not started), and mints this machine's token with the shared secret, so it is the same identity on both. Three things it does not do for you:
+
+- **Open the trainer's database.** A stack set up by `antumbra setup local` publishes its database on the trainer's loopback alone. Reaching it from a second machine is yours to arrange, over a private network or a tunnel, and it is the root connection to everything the store holds.
+- **Match the embedder.** Both servers write to one store, so they must embed alike. The default here is ollama's `all-minilm`, which is the model the GPU build runs in-process; a trainer set to another model needs the same one named in this stack's `.env`.
+- **Move a stack that is already here.** On a machine whose stack has a store of its own, setup refuses, since writing the trainer's password and secret over that stack's would strand its data. Move its `.env` aside first.
+
 Both servers run with `--http` and the same `--jwt-secret`: each pull is signed for the user being answered and is good for a minute, and the training server gives an adapter only to its owner (or to anyone, for a shared expert). A server that verifies with `--jwt-public-key` has nothing to sign with, and says at start that `--expert-source` is not in effect. An expert admitted before its sha256 was kept on its card is not pulled, since nothing it could be checked against exists; it is pulled after its next admitted retraining. Without `--expert-source`, an expert placed on another machine escalates here, as before.
 **Keeping a server on an embedded store in step.** An embedded store has one writer, the server that holds it, so `antumbra sync` cannot open it while the server runs. Give the server the remote instead: `--sync-remote ws://host:8000/rpc` (`ANTUMBRA_SYNC_REMOTE`), with the remote's root user and password (`--sync-remote-user`, and `--sync-remote-pass` or `--sync-remote-pass-file`), or neither for a remote with no authentication. It runs the same collector on its own connection every `--sync-interval-secs` (15), carrying memories, behaviors and experts' rows and status both ways, and it holds the store only to read it and to write a batch of rows, never while it waits on the remote, so requests go on being answered. A remote that is down is tried again and does not stop the server. An expert's row that arrives is served like any other placed elsewhere: its adapter is pulled when it is first routed to, from `--expert-source` or the archive.
 

@@ -143,7 +143,7 @@ check "does not ask twice a workspace it already points at" bash -c '! grep -q "
 
 echo "a handoff waiting for this machine"
 jq -nc '{memories: [{id: "memory:a", content: "first small"}],
-  announcement: "1 handoff waiting for this machine (windows):\n- Rerun the probe (from kuskokwim, 2h ago; id memory:h)"}' \
+  announcement: "1 handoff waiting for this machine (windows):\n- Rerun the probe (from kestrel, 2h ago; id memory:h)"}' \
   >"$work/handoff.json"
 ctx=$(run "$work/handoff.json" | context)
 check "announces it" grep -q '1 handoff waiting for this machine (windows):' <<<"$ctx"

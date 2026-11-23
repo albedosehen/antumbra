@@ -46,8 +46,8 @@ pub fn is_compartment(compartment: &CompartmentId) -> bool {
         .ends_with(&format!(":{COMPARTMENT_NAME}"))
 }
 
-/// A host name as handoffs compare them: trimmed and lowercased, so `Kuskokwim`
-/// and `kuskokwim ` are the same machine. Empty means [`ANY`].
+/// A host name as handoffs compare them: trimmed and lowercased, so `Kestrel`
+/// and `kestrel ` are the same machine. Empty means [`ANY`].
 pub fn normalize_host(host: &str) -> String {
     let h = host.trim().to_lowercase();
     if h.is_empty() {
@@ -186,19 +186,19 @@ mod tests {
 
     #[test]
     fn hosts_compare_trimmed_and_lowercased_and_empty_is_any() -> anyhow::Result<()> {
-        assert_eq!(normalize_host(" Kuskokwim "), "kuskokwim");
+        assert_eq!(normalize_host(" Kestrel "), "kestrel");
         assert_eq!(normalize_host(""), ANY);
-        assert_eq!(for_evidence("Shaman"), "handoff-for:shaman");
+        assert_eq!(for_evidence("Sparrow"), "handoff-for:sparrow");
         Ok(())
     }
 
     #[test]
     fn state_reads_back_from_evidence() -> anyhow::Result<()> {
         let now = Utc::now();
-        let waiting = HandoffState::of(&[for_evidence("kuskokwim")]).context("a handoff")?;
-        assert!(waiting.waits_for("KUSKOKWIM") && !waiting.waits_for("windows"));
+        let waiting = HandoffState::of(&[for_evidence("kestrel")]).context("a handoff")?;
+        assert!(waiting.waits_for("KESTREL") && !waiting.waits_for("windows"));
         let any = HandoffState::of(&[for_evidence(ANY)]).context("a handoff")?;
-        assert!(any.waits_for("windows") && any.waits_for("kuskokwim"));
+        assert!(any.waits_for("windows") && any.waits_for("kestrel"));
         let done = HandoffState::of(&[for_evidence(ANY), done_evidence("windows", now)])
             .context("a handoff")?;
         assert!(!done.waits_for("windows"));
@@ -246,7 +246,7 @@ mod tests {
             handoff(
                 "memory:a",
                 "Old note for here",
-                &[for_evidence("kuskokwim")],
+                &[for_evidence("kestrel")],
                 now - Duration::hours(5),
             ),
             handoff(
@@ -258,24 +258,23 @@ mod tests {
             handoff(
                 "memory:c",
                 "For the other box",
-                &[for_evidence("shaman")],
+                &[for_evidence("sparrow")],
                 now,
             ),
             handoff(
                 "memory:d",
                 "Already done",
-                &[for_evidence("kuskokwim"), done_evidence("kuskokwim", now)],
+                &[for_evidence("kestrel"), done_evidence("kestrel", now)],
                 now,
             ),
             handoff("memory:e", "Not a handoff", &[], now),
         ];
-        let waiting = waiting_for(&memories, "Kuskokwim");
+        let waiting = waiting_for(&memories, "Kestrel");
         let ids: Vec<&str> = waiting.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["memory:b", "memory:a"]);
-        let text =
-            announcement(&waiting, "Kuskokwim", now).context("two handoffs are announced")?;
+        let text = announcement(&waiting, "Kestrel", now).context("two handoffs are announced")?;
         assert!(
-            text.starts_with("2 handoffs waiting for this machine (kuskokwim):"),
+            text.starts_with("2 handoffs waiting for this machine (kestrel):"),
             "{text}"
         );
         assert!(

@@ -12,7 +12,7 @@
 #   calibration error, agreement, its rank correlation with the verifier
 #   (what scales its influence in training), and its agreement with the twin.
 #
-# Expects a source tarball at /tmp/antumbra-$SHA.tar.gz, as kusko-deploy.sh does:
+# Expects a source tarball at /tmp/antumbra-$SHA.tar.gz, as server-deploy.sh does:
 #   git archive --format=tar.gz -o /tmp/antumbra-$(git rev-parse --short HEAD).tar.gz HEAD
 #   scp /tmp/antumbra-<sha>.tar.gz scripts/critic-validate.sh <host>:/tmp/
 #   ssh <host> 'nohup bash /tmp/critic-validate.sh <sha> >/dev/null 2>&1 &'

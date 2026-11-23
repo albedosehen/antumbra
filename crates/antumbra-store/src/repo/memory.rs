@@ -234,7 +234,7 @@ struct AnchoredRow {
 
 /// Rows per page in [`list_anchored`]. An anchored row is a few hundred bytes,
 /// so a page this size stays within a few megabytes while holding a whole
-/// workspace: on kuskokwim, 5,672 memories read in pages of 500 took twelve
+/// workspace: on kestrel, 5,672 memories read in pages of 500 took twelve
 /// queries and 3.7 seconds, nearly as long as reading them in full.
 const ANCHORED_PAGE_ROWS: i64 = 10_000;
 
@@ -397,7 +397,7 @@ pub async fn recent(
 /// The memories written from `host`, compared as host names are everywhere
 /// else (`antumbra_core::handoff::normalize_host`): trimmed and lowercased on
 /// both sides. A server stamps its own name as the operating system gives it,
-/// `KUSKOKWIM` on Windows, so an exact match would miss the very rows a
+/// `KESTREL` on Windows, so an exact match would miss the very rows a
 /// machine running its own server wrote. A row with no host is not written
 /// from anywhere, and `?? ''` keeps the function from failing on it.
 fn written_from(host: &str) -> surql::types::operators::Operator {
@@ -579,7 +579,7 @@ pub async fn recall_hybrid(
 
 /// [`recall_hybrid`]'s ranking as memory keys, best first. Each leg ranks keys
 /// with their scores and leaves the rows in the engine, and only the `k` kept
-/// are read whole, by the caller. On kuskokwim a recall read about 6 MB of
+/// are read whole, by the caller. On kestrel a recall read about 6 MB of
 /// rows, mostly embeddings, to keep 3 to 12 memories, and decoding them, not
 /// the engine, was where its time went: the dense leg took 30 ms in the engine
 /// and 200 ms in the leg.
