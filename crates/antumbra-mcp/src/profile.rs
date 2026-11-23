@@ -119,6 +119,36 @@ impl ToolProfile {
         Ok(Some(Self { allowed }))
     }
 
+    /// What one connection asked to be given, read as [`ToolProfile::parse`]
+    /// reads a spec but forgivingly: a name this server does not have is
+    /// passed over, since a client may be newer or older than its server and
+    /// its request costs it nothing but that tool. `None` for `all`, for
+    /// nothing, and for a spec that names no tool this server has.
+    pub fn asked(spec: &str, known: &[String]) -> Option<Self> {
+        let mut allowed = BTreeSet::new();
+        for token in spec.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+            if token.eq_ignore_ascii_case("all") {
+                return None;
+            }
+            if token.eq_ignore_ascii_case("agent") {
+                allowed.extend(AGENT_PROFILE.iter().map(|s| s.to_string()));
+            } else if known.iter().any(|k| k == token) {
+                allowed.insert(token.to_string());
+            }
+        }
+        allowed.retain(|name| known.iter().any(|k| k == name));
+        (!allowed.is_empty()).then_some(Self { allowed })
+    }
+
+    /// This profile cut down to what `asked` also holds. A connection can
+    /// ask for less than its server serves and never for more.
+    #[must_use]
+    pub fn within(&self, asked: &ToolProfile) -> Self {
+        Self {
+            allowed: self.allowed.intersection(&asked.allowed).cloned().collect(),
+        }
+    }
+
     /// Whether `name` is advertised and callable under this profile.
     pub fn allows(&self, name: &str) -> bool {
         self.allowed.contains(name)
@@ -228,6 +258,25 @@ mod tests {
         let p = profile("route,store_memory")?;
         let kept = p.filter(vec!["store_memory", "population", "route"], |t| t);
         assert_eq!(kept, vec!["store_memory", "route"]);
+        Ok(())
+    }
+
+    /// What a connection asks is read forgivingly, and only ever narrows.
+    #[test]
+    fn a_connection_asks_for_less_and_never_for_more() -> anyhow::Result<()> {
+        let known = known();
+        assert!(ToolProfile::asked("all", &known).is_none());
+        assert!(ToolProfile::asked("", &known).is_none());
+        assert!(ToolProfile::asked("a_tool_of_some_other_version", &known).is_none());
+        let asked = ToolProfile::asked("store_memory, a_tool_of_some_other_version ,route", &known)
+            .ok_or_else(|| anyhow::anyhow!("nothing asked"))?;
+        assert_eq!(asked.names().collect::<Vec<_>>(), ["route", "store_memory"]);
+        // Within a server that serves only one of them.
+        let serves = profile("store_memory,population")?;
+        assert_eq!(
+            serves.within(&asked).names().collect::<Vec<_>>(),
+            ["store_memory"]
+        );
         Ok(())
     }
 }

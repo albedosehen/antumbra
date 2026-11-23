@@ -27,4 +27,8 @@ $headers = [ordered]@{ Authorization = "Bearer $token" }
 # Not $host: PowerShell reserves it.
 $hostId = if ($env:ANTUMBRA_HOST_ID) { $env:ANTUMBRA_HOST_ID.Trim() } else { '' }
 if ($hostId) { $headers['X-Antumbra-Host'] = $hostId }
+# What the session is advertised: the agent profile unless ANTUMBRA_AGENT_TOOLS
+# says otherwise (`all`, or tool names as the server's --tools reads them).
+$tools = if ($env:ANTUMBRA_AGENT_TOOLS) { $env:ANTUMBRA_AGENT_TOOLS.Trim() } else { 'agent' }
+if ($tools -and $tools -ne 'all') { $headers['X-Antumbra-Tools'] = $tools }
 $headers | ConvertTo-Json -Compress
