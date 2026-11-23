@@ -3,7 +3,7 @@
 //! The leg matches a row on ANY word of the query, ranked by BM25. SurrealDB's
 //! plain `@@` matches on every word, which a fragment of a memory's own text
 //! satisfies and a question in the caller's words almost never does: on
-//! kuskokwim "dependency graph servers" matched one memory and "the dependency
+//! kestrel "dependency graph servers" matched one memory and "the dependency
 //! graph of my MCP servers" none, so for a natural prompt the leg returned
 //! nothing and recall ran on the dense leg alone. `@1,OR@` matches any word,
 //! and the score still ranks the rows that hold more of them, and rarer ones,

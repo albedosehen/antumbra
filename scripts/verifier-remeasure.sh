@@ -11,7 +11,7 @@
 # set 2 re-measured, and the challenge. So a change to the protocol can be
 # judged on the same evidence as the run it changes.
 #
-# Expects a source tarball at /tmp/antumbra-$SHA.tar.gz, as kusko-deploy.sh does:
+# Expects a source tarball at /tmp/antumbra-$SHA.tar.gz, as server-deploy.sh does:
 #   git archive --format=tar.gz -o /tmp/antumbra-$(git rev-parse --short HEAD).tar.gz HEAD
 #   scp /tmp/antumbra-<sha>.tar.gz scripts/verifier-remeasure.sh <host>:/tmp/
 #   ssh <host> 'nohup bash /tmp/verifier-remeasure.sh <sha> <run directory> >/dev/null 2>&1 &'

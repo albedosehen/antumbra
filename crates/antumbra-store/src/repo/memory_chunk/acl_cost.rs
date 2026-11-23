@@ -3,7 +3,7 @@
 //! pieces in one user's own compartment, a handful in the shared pool, and a
 //! second member of the workspace who owns none of them.
 //!
-//! On kuskokwim a recall by an identity that could see almost nothing spent
+//! On kestrel a recall by an identity that could see almost nothing spent
 //! 3.8 to 4.6 s in `recall chunks`, against 180 ms for the workspace's owner,
 //! while its dense leg over whole memories took 20 ms.
 //!

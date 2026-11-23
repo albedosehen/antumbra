@@ -11,7 +11,7 @@
 //! it moves only memories the caller could already rewrite.
 //!
 //! One call carries every merge the caller knows of, because finding the
-//! memories a merge moves means reading every memory's anchor: on kuskokwim
+//! memories a merge moves means reading every memory's anchor: on kestrel
 //! that read is the cost of the call, and one call a merge read it thirty
 //! times for a thirty-merge report (111 seconds).
 //!

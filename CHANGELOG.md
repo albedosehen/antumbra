@@ -685,7 +685,7 @@ Relics, and behaviors you can teach. An agent can now keep the pages it writes a
 
 ### Docker
 
-- **SurrealDB health checks run over the websocket.** SurrealDB 3.2.4 answers the `http://` form "Method not allowed" while serving normally, which left both databases unhealthy and kept a recreated server from starting; `kusko-deploy.sh` now fails when a service is not running instead of reporting OK ([#239](https://github.com/albedosehen/antumbra/pull/239)).
+- **SurrealDB health checks run over the websocket.** SurrealDB 3.2.4 answers the `http://` form "Method not allowed" while serving normally, which left both databases unhealthy and kept a recreated server from starting; `server-deploy.sh` now fails when a service is not running instead of reporting OK ([#239](https://github.com/albedosehen/antumbra/pull/239)).
 - **Images built from `main` are also tagged `main-<timestamp>-<short sha>`**, so image automation can order them ([#230](https://github.com/albedosehen/antumbra/pull/230)).
 
 ### Security

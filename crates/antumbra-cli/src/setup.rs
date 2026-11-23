@@ -2912,8 +2912,8 @@ mod tests {
         assert_eq!(stamp_of(&said("windows"), " Windows "), Stamp::Named);
         // `local` names no machine, so the server stamps its own name.
         assert_eq!(
-            stamp_of(&said("kuskokwim"), "local"),
-            Stamp::Other("kuskokwim".into())
+            stamp_of(&said("kestrel"), "local"),
+            Stamp::Other("kestrel".into())
         );
         assert_eq!(
             stamp_of(&json!({ "devices": [] }), "windows"),

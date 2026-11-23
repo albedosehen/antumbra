@@ -237,7 +237,7 @@ $env:ANTUMBRA_TOKEN = $tokenBefore
 Write-Output 'a handoff waiting for this machine'
 $handoff = @{
     memories     = @(@{ id = 'memory:a'; content = 'first small' })
-    announcement = "1 handoff waiting for this machine (windows):`n- Rerun the probe (from kuskokwim, 2h ago; id memory:h)"
+    announcement = "1 handoff waiting for this machine (windows):`n- Rerun the probe (from kestrel, 2h ago; id memory:h)"
 } | ConvertTo-Json -Depth 5 -Compress
 $ctx = Get-Context $handoff $stub
 Check 'announces it' $ctx.Contains('1 handoff waiting for this machine (windows):')

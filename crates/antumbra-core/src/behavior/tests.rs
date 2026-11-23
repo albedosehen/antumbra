@@ -12,16 +12,16 @@ fn ssh() -> Spec {
         ],
         examples: vec![
             Example {
-                task: "Run df -h on kuskokwim (10.0.0.132, user nyx).".into(),
-                answer: "ssh kuskokwim 'df -h'".into(),
+                task: "Run df -h on kestrel (10.0.0.132, user nyx).".into(),
+                answer: "ssh kestrel 'df -h'".into(),
             },
             Example {
-                task: "Show uptime on shaman.".into(),
-                answer: "ssh shaman uptime".into(),
+                task: "Show uptime on sparrow.".into(),
+                answer: "ssh sparrow uptime".into(),
             },
             Example {
-                task: "List containers on aur0.".into(),
-                answer: "ssh aur0 'docker ps'".into(),
+                task: "List containers on aux0.".into(),
+                answer: "ssh aux0 'docker ps'".into(),
             },
             Example {
                 task: "Check the GPU on em0.".into(),
@@ -30,7 +30,7 @@ fn ssh() -> Spec {
         ],
         violations: vec![
             "ssh nyx@10.0.0.132 'df -h'".into(),
-            "ssh -i ~/.ssh/id_ed25519 kuskokwim".into(),
+            "ssh -i ~/.ssh/id_ed25519 kestrel".into(),
         ],
     }
 }
@@ -86,13 +86,13 @@ fn a_check_that_only_refuses_is_not_enough() -> anyhow::Result<()> {
 #[test]
 fn the_check_is_shown_to_discriminate_before_it_is_trusted() -> anyhow::Result<()> {
     let mut spec = ssh();
-    spec.violations.push("ssh kuskokwim uptime".into());
+    spec.violations.push("ssh kestrel uptime".into());
     spec.examples[1].answer = "ssh nyx@10.0.0.130 uptime".into();
     let problems = spec.problems();
     assert!(
         problems
             .iter()
-            .any(|p| p.contains("passes the violating answer `ssh kuskokwim uptime`")),
+            .any(|p| p.contains("passes the violating answer `ssh kestrel uptime`")),
         "{problems:?}"
     );
     assert!(
@@ -131,7 +131,7 @@ fn too_few_examples_no_violations_and_bad_patterns_are_named() -> anyhow::Result
         .problems()
         .iter()
         .any(|p| p.contains("does not compile")));
-    assert_eq!(spec.follows("ssh kuskokwim"), None);
+    assert_eq!(spec.follows("ssh kestrel"), None);
     Ok(())
 }
 
@@ -358,7 +358,7 @@ fn a_set_is_known_by_its_behaviors_and_their_content_in_any_order() -> anyhow::R
     assert_eq!(fingerprint(&ab), fingerprint(&ba));
     // Stored with each training and on the expert, so it must not move
     // between builds.
-    assert_eq!(fingerprint(&ab), "d87da319b008f6da");
+    assert_eq!(fingerprint(&ab), "36b4a002573463f9");
     let mut spec = ssh();
     spec.rule = "Reach a host by its alias.".into();
     let mut changed = b;
@@ -562,8 +562,8 @@ fn the_bet_an_audit_checks_is_read_off_the_card_under_either_id() -> anyhow::Res
 fn a_behavior_recorded_again_is_audited_as_the_one_it_supersedes() -> anyhow::Result<()> {
     let mut more = ssh();
     more.examples.push(Example {
-        task: "Tail the journal on aur0.".into(),
-        answer: "ssh aur0 'journalctl -f'".into(),
+        task: "Tail the journal on aux0.".into(),
+        answer: "ssh aux0 'journalctl -f'".into(),
     });
     let again = Memory::new(
         "memory:a2",

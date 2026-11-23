@@ -159,8 +159,8 @@ mod tests {
         );
         assert_eq!(lexical_terms(""), "");
         assert_eq!(
-            lexical_terms("Deploy deploy DEPLOY the shaman"),
-            "Deploy shaman"
+            lexical_terms("Deploy deploy DEPLOY the sparrow"),
+            "Deploy sparrow"
         );
         let page = (0..100)
             .map(|i| format!("word{i}"))
@@ -203,11 +203,11 @@ mod tests {
     fn sentences_and_lines_are_parts() -> anyhow::Result<()> {
         assert_eq!(
             parts(
-                "Check the deploy on kuskokwim. Then roll the shaman pin\nand tell me what changed"
+                "Check the deploy on kestrel. Then roll the sparrow pin\nand tell me what changed"
             ),
             [
-                "Check the deploy on kuskokwim",
-                "Then roll the shaman pin",
+                "Check the deploy on kestrel",
+                "Then roll the sparrow pin",
                 "and tell me what changed"
             ]
         );

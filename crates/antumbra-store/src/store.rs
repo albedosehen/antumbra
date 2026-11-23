@@ -286,7 +286,7 @@ impl Store {
     /// The rows of `table` among the record keys `keys` that belong to
     /// `tenant`, in no particular order: one direct lookup per key. A filter
     /// on a key field (`key INSIDE [...]`) reads every row of the workspace to
-    /// answer instead, 178 ms against 4 ms for 150 memories on kuskokwim.
+    /// answer instead, 178 ms against 4 ms for 150 memories on kestrel.
     /// `also` is any further condition on the row, in SurrealQL.
     pub(crate) async fn rows_by_key<T: DeserializeOwned>(
         &self,
@@ -415,7 +415,7 @@ pub const DEFAULT_EMBED_DIM: usize = EMBED_DIM;
 /// A memory row carries its embedding, 384 floats that serialize to about 5 KB
 /// of JSON, plus its content, which runs to several KB. The first cut paged at
 /// 20,000 rows, so a workspace of 5,672 memories still came back as one
-/// response, and on kuskokwim that reset the connection: `list_memories`,
+/// response, and on kestrel that reset the connection: `list_memories`,
 /// `record_merge` and every other whole-workspace read failed with
 /// "Connection reset". At 500 rows a page is a few megabytes, well inside the
 /// WebSocket limits, and 6,000 memories take twelve round trips.

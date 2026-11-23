@@ -326,7 +326,7 @@ mod tests {
         assert!(!set(None));
         assert!(!set(Some(OsStr::new(""))));
         assert!(!set(Some(OsStr::new(" "))));
-        assert!(set(Some(OsStr::new("antumbra-kuskokwim"))));
+        assert!(set(Some(OsStr::new("antumbra-kestrel"))));
         Ok(())
     }
 }

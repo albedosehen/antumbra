@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the antumbra-mcp image and publish it to GHCR, from the GPU host, as
 # .github/workflows/mcp-image.yml does on the hosted runners: docker/Dockerfile,
-# tagged ghcr.io/albedosehen/antumbra-mcp:<full commit sha> and :latest. Shaman
+# tagged ghcr.io/albedosehen/antumbra-mcp:<full commit sha> and :latest. Sparrow
 # pins the full sha through Flux, so this is how it gets a new image while the
 # runners are unavailable. Detached; logs to $LOG (/tmp/ghcr-publish.log by
 # default).
@@ -48,7 +48,7 @@ trap cleanup EXIT
 echo "== publish $SHA start $(date -u +%FT%TZ) (dry run: $DRY_RUN)"
 
 if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
-    echo "the full 40-character sha is required: shaman pins it"
+    echo "the full 40-character sha is required: sparrow pins it"
     exit 1
 fi
 SHORT="${SHA:0:7}"

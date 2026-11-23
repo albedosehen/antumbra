@@ -12,7 +12,7 @@
 //! Database work runs in owner mode under the auth lock and embedding runs
 //! outside it. Writes take the lock a memory at a time. A full pass's reads
 //! take it once per read, and each reads a whole workspace: 4.5 s on
-//! kuskokwim's 7,300 memories, during which a session being built waits. So
+//! kestrel's 7,300 memories, during which a session being built waits. So
 //! the first pass waits [`FIRST`] after the server starts: a restart answers
 //! the clients reconnecting to it before the index reads anything, and recall
 //! reads whole memories for anything not cut yet.
@@ -33,7 +33,7 @@ use super::HttpState;
 
 /// The pause between passes.
 const INTERVAL: Duration = Duration::from_secs(60);
-/// The wait before the first pass. Measured on kuskokwim: every hook call that
+/// The wait before the first pass. Measured on kestrel: every hook call that
 /// took over two seconds in a day (4.2 to 4.7 s each) bar one came within
 /// seconds of a restart, waiting for the lock behind the first full pass.
 const FIRST: Duration = Duration::from_secs(90);

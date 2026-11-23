@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 # Rebuild the CUDA server at $1 beside the managed checkout and recreate the
-# compose services. Detached; logs to /tmp/kusko-deploy.log.
+# compose services. Detached; logs to /tmp/server-deploy.log.
 #
 # Lives in the repo rather than only on the host: it had been sitting in /tmp on
-# kuskokwim, which is cleared on reboot and versioned nowhere, so the one script
+# kestrel, which is cleared on reboot and versioned nowhere, so the one script
 # that knows how to deploy could vanish without anybody noticing until a deploy
 # was needed.
 #
 # Expects a source tarball at /tmp/antumbra-$SHA.tar.gz:
 #   git archive --format=tar.gz -o /tmp/antumbra-$(git rev-parse --short HEAD).tar.gz HEAD
 #   scp /tmp/antumbra-<sha>.tar.gz <host>:/tmp/
-#   ssh <host> 'nohup bash scripts/kusko-deploy.sh <sha> >/dev/null 2>&1 &'
+#   ssh <host> 'nohup bash scripts/server-deploy.sh <sha> >/dev/null 2>&1 &'
 #
 # Only docker/.env survives the rebuild, so anything host-local -- the bind
 # address, the rerank endpoint -- belongs there and not in a tracked file.
 
 export PATH=$PATH:/run/current-system/sw/bin:/run/wrappers/bin
 SHA="$1"
-exec >/tmp/kusko-deploy.log 2>&1
+exec >/tmp/server-deploy.log 2>&1
 set -e
 echo "== deploy $SHA start $(date -u +%FT%TZ)"
 docker inspect antumbra-mcp --format 'before: {{.Config.Image}} created {{.Created}}'

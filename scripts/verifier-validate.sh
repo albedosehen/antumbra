@@ -11,7 +11,7 @@
 # independently seeded set of completions, and challenged on it. A check that
 # was trusted must hold its bound on the second set.
 #
-# Expects a source tarball at /tmp/antumbra-$SHA.tar.gz, as kusko-deploy.sh does:
+# Expects a source tarball at /tmp/antumbra-$SHA.tar.gz, as server-deploy.sh does:
 #   git archive --format=tar.gz -o /tmp/antumbra-$(git rev-parse --short HEAD).tar.gz HEAD
 #   scp /tmp/antumbra-<sha>.tar.gz scripts/verifier-validate.sh <host>:/tmp/
 #   ssh <host> 'nohup bash /tmp/verifier-validate.sh <sha> >/dev/null 2>&1 &'

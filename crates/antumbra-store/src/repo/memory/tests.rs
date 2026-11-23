@@ -797,7 +797,7 @@ async fn each_part_of_a_compound_query_finds_its_own_memory() -> Result<()> {
     };
     let mut rows: Vec<(String, Vec<f32>)> = vec![
         ("the penpot token".into(), unit(&[(1, 1.0)])),
-        ("the kuskokwim edges".into(), unit(&[(2, 1.0)])),
+        ("the kestrel edges".into(), unit(&[(2, 1.0)])),
     ];
     // Near the blend of both subjects: closer to the whole prompt than either
     // subject's own memory, further from each part.
@@ -826,7 +826,7 @@ async fn each_part_of_a_compound_query_finds_its_own_memory() -> Result<()> {
     }
     let specific = |hits: &[Memory]| {
         let has = |word: &str| hits.iter().any(|m| m.content.contains(word));
-        (has("penpot"), has("kuskokwim"))
+        (has("penpot"), has("kestrel"))
     };
     let whole = ("qqq".to_string(), unit(&[(1, 1.0), (2, 1.0)]));
     let alone = recall_hybrid(&store, &tenant, &whole.0, &whole.1, 3, None, &[]).await?;
