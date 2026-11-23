@@ -1516,6 +1516,48 @@ async fn what_to_share_is_suggested_from_what_was_shared_before() -> anyhow::Res
     Ok(())
 }
 
+/// A connection that asks for the agent's tools is given those and no
+/// others, and one that asks for nothing keeps every tool: the same server,
+/// the same token.
+#[tokio::test]
+async fn a_connection_that_asks_for_the_agents_tools_is_given_only_those() -> anyhow::Result<()> {
+    let st = state().await?;
+    let tok = valid_token()?;
+    let call = |tools: Option<&'static str>, tool: &'static str| {
+        let (st, tok) = (st.clone(), tok.clone());
+        async move {
+            let mut req = Request::builder()
+                .method("POST")
+                .uri("/mcp/call")
+                .header(header::AUTHORIZATION, format!("Bearer {tok}"));
+            if let Some(tools) = tools {
+                req = req.header(TOOLS_HEADER, tools);
+            }
+            let body = serde_json::json!({ "tool": tool, "arguments": {} }).to_string();
+            let res = router(st).oneshot(req.body(Body::from(body))?).await?;
+            let status = res.status();
+            anyhow::Ok((status, body_text(res).await?))
+        }
+    };
+    // The dashboard and the CLI send no such header.
+    let (status, _) = call(None, "list_memories").await?;
+    anyhow::ensure!(status == StatusCode::OK, "{status}");
+    // An agent's connection: a tool of the profile is served, another is not.
+    let (status, _) = call(Some("agent"), "handoffs").await?;
+    anyhow::ensure!(status == StatusCode::OK, "{status}");
+    let (status, why) = call(Some("agent"), "list_memories").await?;
+    anyhow::ensure!(
+        status == StatusCode::BAD_REQUEST && why.contains("not in this server's tool profile"),
+        "{status} {why}"
+    );
+    // `all`, and a name of no tool, ask for nothing.
+    for spec in ["all", "a_tool_of_some_other_version"] {
+        let (status, _) = call(Some(spec), "list_memories").await?;
+        anyhow::ensure!(status == StatusCode::OK, "{spec}: {status}");
+    }
+    Ok(())
+}
+
 /// A workspace from before roles, with two people and no owner (#580): its
 /// own person's first read with an ordinary token closes nothing; with the
 /// operator's token they are its owner and can let people in; and a member

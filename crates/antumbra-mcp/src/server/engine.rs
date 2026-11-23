@@ -136,6 +136,20 @@ impl McpServer {
         call
     }
 
+    /// This server for one request from a connection that asked for fewer
+    /// tools ([`crate::http::TOOLS_HEADER`]): what it serves, cut down to
+    /// what was asked. A copy, like [`McpServer::called_from`]: the server
+    /// cached for an identity is the dashboard's and the CLI's too.
+    #[must_use]
+    pub fn given_only(&self, asked: &crate::profile::ToolProfile) -> Self {
+        let mut call = self.clone();
+        call.profile = Some(Arc::new(match &self.profile {
+            Some(serves) => serves.within(asked),
+            None => asked.clone(),
+        }));
+        call
+    }
+
     /// The machine the current call came from, normalized as host names are
     /// compared: the one its client named, else this server's own.
     pub(super) fn device(&self) -> String {
@@ -633,9 +647,15 @@ impl ServerHandler for McpServer {
         let supports_cache_hints = context
             .protocol_version()
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
+        // What the connection asked to be given, read for each request.
+        let asked = context
+            .extensions
+            .get::<axum::http::request::Parts>()
+            .and_then(|parts| crate::http::caller_tools(&parts.headers))
+            .map(|asked| self.given_only(&asked));
         Ok(rmcp::model::ListToolsResult {
             result_type: Some(rmcp::model::ResultType::COMPLETE),
-            tools: self.advertised_tools(),
+            tools: asked.as_ref().unwrap_or(self).advertised_tools(),
             meta: None,
             next_cursor: None,
             ttl_ms: supports_cache_hints.then_some(0),
@@ -666,6 +686,10 @@ impl ServerHandler for McpServer {
             .and_then(|parts| crate::http::caller_device(&parts.headers))
             .map(|device| self.called_from(device));
         let server = called_from.as_ref().unwrap_or(self);
+        let given_only = parts
+            .and_then(|parts| crate::http::caller_tools(&parts.headers))
+            .map(|asked| server.given_only(&asked));
+        let server = given_only.as_ref().unwrap_or(server);
         let span = crate::telemetry::tool_span(
             &request.name,
             Self::is_tool(&request.name),

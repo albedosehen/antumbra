@@ -26,5 +26,11 @@ if [ -z "$token" ]; then
   exit 1
 fi
 host_id="$(printf '%s' "${ANTUMBRA_HOST_ID:-}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
-jq -nc --arg t "$token" --arg h "$host_id" \
-  '{Authorization: ("Bearer " + $t)} + (if $h == "" then {} else {"X-Antumbra-Host": $h} end)'
+# What the session is advertised: the agent profile unless ANTUMBRA_AGENT_TOOLS
+# says otherwise (`all`, or tool names as the server's --tools reads them).
+tools="$(printf '%s' "${ANTUMBRA_AGENT_TOOLS:-agent}" | tr -d '\r\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+case "$tools" in [Aa][Ll][Ll]) tools="" ;; esac
+jq -nc --arg t "$token" --arg h "$host_id" --arg tools "$tools" \
+  '{Authorization: ("Bearer " + $t)}
+   + (if $h == "" then {} else {"X-Antumbra-Host": $h} end)
+   + (if $tools == "" then {} else {"X-Antumbra-Tools": $tools} end)'

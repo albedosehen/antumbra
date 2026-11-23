@@ -1127,6 +1127,24 @@ pub(crate) fn caller_device(headers: &axum::http::HeaderMap) -> Option<String> {
     named
 }
 
+/// The header a connection asks for fewer tools in: `agent`, or tool names,
+/// as `--tools` reads them. An agent's connection sends it (setup's headers
+/// helper, the bridge), so a coding session is advertised what a session
+/// needs while the dashboard and the CLI, which send none, keep every tool
+/// the server serves. It narrows what the server serves and never widens it.
+pub(crate) const TOOLS_HEADER: &str = "x-antumbra-tools";
+
+/// What a request asks to be given ([`TOOLS_HEADER`]), or `None` for
+/// everything the server serves.
+pub(crate) fn caller_tools(headers: &axum::http::HeaderMap) -> Option<crate::profile::ToolProfile> {
+    static KNOWN: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let spec = headers.get(TOOLS_HEADER)?.to_str().ok()?;
+    crate::profile::ToolProfile::asked(
+        spec,
+        KNOWN.get_or_init(crate::server::McpServer::all_tool_names),
+    )
+}
+
 /// The body of a `POST /mcp/call`: a tool name and its arguments.
 #[derive(serde::Deserialize)]
 struct RestCall {
@@ -1182,6 +1200,7 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
     // Read per request: the identity's server is shared by every machine that
     // holds its token.
     let device = caller_device(req.headers());
+    let asked = caller_tools(req.headers());
 
     let body = match axum::body::to_bytes(req.into_body(), MAX_CALL_BODY).await {
         Ok(b) => b,
@@ -1207,6 +1226,10 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
     };
     let mcp = match device {
         Some(device) => mcp.called_from(device),
+        None => mcp,
+    };
+    let mcp = match asked {
+        Some(asked) => mcp.given_only(&asked),
         None => mcp,
     };
     // Dispatch. The call binds its connection for itself: embedded, it takes

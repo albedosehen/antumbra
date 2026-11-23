@@ -1119,6 +1119,14 @@ async fn a_tool_profile_narrows_what_is_advertised_and_served() -> anyhow::Resul
     );
 
     assert_eq!(server().await?.advertised_tools().len(), 42);
+    // A connection that asked for the agent's tools is advertised those.
+    let known = McpServer::all_tool_names();
+    let agent = crate::profile::ToolProfile::asked("agent", &known)
+        .ok_or_else(|| anyhow::anyhow!("the agent profile names no tool"))?;
+    assert_eq!(
+        server().await?.given_only(&agent).advertised_tools().len(),
+        21
+    );
     Ok(())
 }
 
