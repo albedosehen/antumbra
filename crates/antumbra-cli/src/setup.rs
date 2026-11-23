@@ -112,6 +112,15 @@ pub struct LocalArgs {
     /// runs from a clone.
     #[arg(long)]
     pub gpu: bool,
+    /// Also start the reranker: a second model that reads each recalled
+    /// memory against the prompt, so recall can put the right one first and
+    /// can say that nothing it found is relevant. A few hundred megabytes,
+    /// about two minutes to be ready the first time, and slow on a CPU: it
+    /// adds to every recall. Setup keeps it on once asked for; take
+    /// `ANTUMBRA_RERANK_URL` out of the stack's `.env` to turn it off. The
+    /// GPU build starts its own.
+    #[arg(long)]
+    pub rerank: bool,
     /// The workspace the token grants.
     #[arg(long, default_value = "ws:default")]
     pub workspace: String,
@@ -406,6 +415,19 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
             steps.ok(format!("{env_name}: {part}"));
         }
     }
+    // The reranker, when asked for now or by an earlier run.
+    let (with_reranker, starts_reranker) = reranker(&env_text, args.rerank, args.gpu);
+    if with_reranker != env_text {
+        env_text = with_reranker;
+        if steps.dry_run {
+            steps.would(format!(
+                "write {env_name}: the reranker's address and model"
+            ));
+        } else {
+            write_private(&env_path, &env_text)?;
+            steps.ok(format!("{env_name}: the reranker's address and model"));
+        }
+    }
     let data_dir = env_file::get(&env_text, "ANTUMBRA_SURREAL_DATA")
         .map(PathBuf::from)
         .unwrap_or(data);
@@ -423,7 +445,14 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
         Stack::Pulled { .. } => "--no-build",
     };
     let mut up: Vec<String> = compose_args(&compose_files);
+    if starts_reranker {
+        // A profile is the compose command's own option, before `up`.
+        up.extend(["--profile", "rerank"].map(String::from));
+    }
     up.extend(["up", "-d", build, "surrealdb", "antumbra-mcp"].map(String::from));
+    if starts_reranker {
+        up.push("rerank".to_string());
+    }
     if steps.dry_run {
         if matches!(stack, Stack::Pulled { .. }) {
             steps.would(format!("pull {image} unless Docker has it"));
@@ -443,6 +472,9 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
         }
         println!();
         steps.ok("the store and the server are up");
+        if starts_reranker {
+            steps.info("the reranker is starting: it takes about two minutes the first time, and recall uses it once it answers. On a CPU it adds to every recall");
+        }
     }
 
     let bind = env_file::get(&env_text, "ANTUMBRA_MCP_BIND")
@@ -710,6 +742,34 @@ fn ensure_ollama(base: &str, steps: &Steps) -> anyhow::Result<()> {
         Reach::No => anyhow::bail!("{}", unreachable_from_container(port)),
     }
     Ok(())
+}
+
+/// Where the stack's server reaches the stack's reranker, and the model both
+/// are told of.
+const RERANK_URL: &str = "http://rerank/rerank";
+const RERANK_MODEL: &str = "BAAI/bge-reranker-base";
+
+/// The stack's `.env` with the reranker's address and model in it, and
+/// whether setup starts the reranker: when it is asked for, or an earlier run
+/// asked and the `.env` still names it. An address of the user's own is
+/// theirs: it is kept, and nothing is started for it. The GPU stack brings a
+/// reranker of its own and is left as it is.
+fn reranker(env_text: &str, asked: bool, gpu: bool) -> (String, bool) {
+    if gpu {
+        return (env_text.to_string(), false);
+    }
+    let have = env_file::get(env_text, "ANTUMBRA_RERANK_URL").filter(|url| !url.is_empty());
+    match have {
+        Some(url) => (env_text.to_string(), url == RERANK_URL),
+        None if asked => {
+            let mut text = env_file::set(env_text, "ANTUMBRA_RERANK_URL", RERANK_URL);
+            if env_file::get(&text, "ANTUMBRA_RERANK_MODEL").is_none_or(str::is_empty) {
+                text = env_file::set(&text, "ANTUMBRA_RERANK_MODEL", RERANK_MODEL);
+            }
+            (text, true)
+        }
+        None => (env_text.to_string(), false),
+    }
 }
 
 /// ollama's tag list through the Docker bridge gateway, from this machine.
@@ -3242,5 +3302,41 @@ mod tests {
         std::fs::write(&wrapper, "#!/bin/sh\nexit 0\n")?;
         assert!(!runs(&wrapper));
         Ok(())
+    }
+
+    /// The reranker is started when asked for and stays on for later runs;
+    /// it is not started unasked, nor over an address of the user's own, nor
+    /// with the GPU stack, which has one.
+    #[test]
+    fn the_reranker_is_started_when_asked_and_kept_on() {
+        let bare = "SURREAL_PASS=x\nANTUMBRA_RERANK_URL=\n";
+        // Not asked: nothing changes.
+        assert_eq!(reranker(bare, false, false), (bare.to_string(), false));
+        // Asked: its address and model are written, and it is started.
+        let (text, starts) = reranker(bare, true, false);
+        assert!(starts);
+        assert_eq!(
+            env_file::get(&text, "ANTUMBRA_RERANK_URL"),
+            Some("http://rerank/rerank")
+        );
+        assert_eq!(
+            env_file::get(&text, "ANTUMBRA_RERANK_MODEL"),
+            Some("BAAI/bge-reranker-base")
+        );
+        assert_eq!(env_file::get(&text, "SURREAL_PASS"), Some("x"));
+        // A later run that does not say so still starts it, and writes nothing.
+        assert_eq!(reranker(&text, false, false), (text.clone(), true));
+        // The user's own reranker is theirs: kept, and none is started.
+        let theirs =
+            "ANTUMBRA_RERANK_URL=http://gpu-box:8091/rerank\nANTUMBRA_RERANK_MODEL=their/model\n";
+        assert_eq!(reranker(theirs, true, false), (theirs.to_string(), false));
+        // A model of theirs with no address is kept when ours is started.
+        let (text, _) = reranker("ANTUMBRA_RERANK_MODEL=their/model\n", true, false);
+        assert_eq!(
+            env_file::get(&text, "ANTUMBRA_RERANK_MODEL"),
+            Some("their/model")
+        );
+        // The GPU stack has its own.
+        assert_eq!(reranker(bare, true, true), (bare.to_string(), false));
     }
 }
