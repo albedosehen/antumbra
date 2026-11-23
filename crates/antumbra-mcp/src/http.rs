@@ -623,6 +623,26 @@ async fn propagate(
     }
 }
 
+/// Whether this server can serve a request: one cheap read of the store, in
+/// the owner's view, as a request's own first step is. The dashboard's page
+/// is served from the binary and says nothing of the store, so a server whose
+/// store had stopped answering looked well to a check that loaded it (#576).
+/// It names no workspace and says nothing but well or not.
+async fn healthz(State(state): State<Arc<HttpState>>) -> Response {
+    let probe = TenantId::new("ws:healthz");
+    match members::as_owner(&state, |store| async move {
+        antumbra_store::repo::memory::count(&store, &probe).await
+    })
+    .await
+    {
+        Ok(_) => (StatusCode::OK, "ok").into_response(),
+        Err(e) => {
+            eprintln!("antumbra-mcp: /healthz: the store did not answer: {e}");
+            (StatusCode::SERVICE_UNAVAILABLE, "store unreachable").into_response()
+        }
+    }
+}
+
 /// The `/mcp` router. Extracted so the auth boundary can be exercised with
 /// `oneshot` (no socket) in tests.
 ///
@@ -634,6 +654,7 @@ fn router(state: Arc<HttpState>) -> Router {
         .route("/mcp", any(handle))
         .route("/mcp/call", post(handle_call))
         .route("/github/webhook", post(github::handle))
+        .route("/healthz", axum::routing::get(healthz))
         .merge(console::routes())
         .merge(members::routes())
         .merge(join::routes())

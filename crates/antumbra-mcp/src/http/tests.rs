@@ -1611,6 +1611,39 @@ async fn a_workspace_from_before_roles_is_opened_by_the_operator_and_left_by_a_m
     Ok(())
 }
 
+/// `/healthz` answers without a token, from the store: well after a member's
+/// request has left the one connection signed in as them, and saying nothing
+/// of any workspace.
+#[tokio::test]
+async fn healthz_answers_from_the_store_with_no_token() -> anyhow::Result<()> {
+    let st = state().await?;
+    let get = || {
+        let st = st.clone();
+        async move {
+            let res = router(st)
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/healthz")
+                        .body(Body::empty())?,
+                )
+                .await?;
+            let status = res.status();
+            anyhow::Ok((status, body_text(res).await?))
+        }
+    };
+    anyhow::ensure!(get().await? == (StatusCode::OK, "ok".to_string()));
+    // After a member's call, which signs the embedded connection in as them.
+    let tok = valid_token()?;
+    let body = serde_json::json!({ "tool": "store_memory", "arguments": { "content": "a note", "network": "world" } }).to_string();
+    let res = router(st.clone())
+        .oneshot(call_request(Some(&tok), &body)?)
+        .await?;
+    anyhow::ensure!(res.status() == StatusCode::OK);
+    anyhow::ensure!(get().await? == (StatusCode::OK, "ok".to_string()));
+    Ok(())
+}
+
 /// A server whose tokens a control plane signs: its admins make join codes
 /// here, and whoever asks or collects here is told where to go instead. With
 /// no control plane and no secret, it makes none and says only that.
