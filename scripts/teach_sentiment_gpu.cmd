@@ -19,7 +19,7 @@ set "CUDARC_CUDA_VERSION=13020"
 
 REM The verifier shells out to `python`; point it at a real interpreter so corrections
 REM actually verify (else 0 verify -> UNTRAINED adapter, a silent no-op).
-set "ANTUMBRA_PYTHON=C:\Users\shonp\AppData\Local\Programs\Python\Python312\python.exe"
+set "ANTUMBRA_PYTHON=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
 
 REM `--features models,cuda`: `cuda` selects the GPU backend and now also pulls in `models`
 REM (the cfg that gates the candle trainer into `teach`), so `--features cuda` alone is

@@ -14,7 +14,7 @@ fn hub(store: &Store) -> McpServer {
         Arc::new(FixedEmbedder::new(EMBED_DIM)),
         TenantId::new("ws:test"),
         UserId::new("user:a"),
-        "Kuskokwim".into(),
+        "Kestrel".into(),
         CompartmentId::new("comp:test:user:a:default"),
         None,
     )
@@ -71,7 +71,7 @@ async fn a_memory_is_stamped_with_the_machine_its_call_names() -> anyhow::Result
 
     let all = listed(&hub, None, None).await?;
     assert_eq!(host_of(&all, &from_mac).as_deref(), Some("mac"));
-    assert_eq!(host_of(&all, &unnamed).as_deref(), Some("kuskokwim"));
+    assert_eq!(host_of(&all, &unnamed).as_deref(), Some("kestrel"));
     Ok(())
 }
 
@@ -88,7 +88,7 @@ async fn two_machines_sharing_one_server_stamp_their_own_names() -> anyhow::Resu
     assert_eq!(host_of(&all, &mac).as_deref(), Some("mac"));
     assert_eq!(host_of(&all, &windows).as_deref(), Some("windows"));
     let said = shared.devices().await?.0;
-    assert_eq!(said.this_device, "kuskokwim");
+    assert_eq!(said.this_device, "kestrel");
     assert!(!said.named_by_client, "the cached server names no machine");
     Ok(())
 }
@@ -125,7 +125,7 @@ async fn list_memories_returns_only_the_named_machines() -> anyhow::Result<()> {
     let mut expected = vec![win_1, win_2];
     expected.sort();
     assert_eq!(whole, expected);
-    assert_eq!(listed(&hub, Some("kuskokwim"), None).await?.len(), 1);
+    assert_eq!(listed(&hub, Some("kestrel"), None).await?.len(), 1);
     assert!(listed(&hub, Some("linux"), Some(5)).await?.is_empty());
     // A blank filter is no filter.
     assert_eq!(listed(&hub, Some("  "), None).await?.len(), 5);

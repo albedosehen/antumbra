@@ -106,7 +106,7 @@ The fleet (MacBook M4 Pro 48 GB, RTX 3080 mobile, GTX 1080, Jetson Orin Nano) an
 
 ## 5. Schema (SurrealDB) - summary
 
-Full DDL in [`crates/antumbra-store/src/schema.rs`](../crates/antumbra-store/src/schema.rs). In v0 an `expert` row describes a **frozen LoRA adapter over the shared base** (`base_model` = the shared base, `artifact_uri` = adapter path). Patterns reuse a **prior memory engine** (HNSW recall, `evaluation_run` + `regression_fingerprint`) and the local **data-plane-builder-graph** (`C:\Users\shonp\repos\data-plane-builder-graph`: schema-as-code, drift detection, migrations, tenant perms).
+Full DDL in [`crates/antumbra-store/src/schema.rs`](../crates/antumbra-store/src/schema.rs). In v0 an `expert` row describes a **frozen LoRA adapter over the shared base** (`base_model` = the shared base, `artifact_uri` = adapter path). Patterns reuse a **prior memory engine** (HNSW recall, `evaluation_run` + `regression_fingerprint`) and the local **data-plane-builder-graph** (`a separate checkout`: schema-as-code, drift detection, migrations, tenant perms).
 
 ```mermaid
 erDiagram

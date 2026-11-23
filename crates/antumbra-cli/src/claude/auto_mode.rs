@@ -491,7 +491,7 @@ mod tests {
             similarity: Some(similarity),
         };
         let far = candidate("memory:far", "the kettle is in the kitchen", 0.11);
-        let near = candidate("memory:near", "shaman is the production cluster", 0.88);
+        let near = candidate("memory:near", "sparrow is the production cluster", 0.88);
         let unscored = Candidate {
             id: "memory:old".to_string(),
             content: "from a surface that does not score".to_string(),
@@ -532,7 +532,7 @@ mod tests {
                 .and_then(Value::as_str)
                 .is_some_and(|q| q.contains("deploy"));
             Ok(if about_deploys {
-                json!({ "memories": [{ "id": "memory:1", "content": "shaman is production;\n  kuskokwim is a test node" }] })
+                json!({ "memories": [{ "id": "memory:1", "content": "sparrow is production;\n  kestrel is a test node" }] })
             } else {
                 json!({ "memories": [] })
             })
@@ -547,7 +547,7 @@ mod tests {
 
         let text = render(&[], &Memory::Asked(found));
         assert!(
-            text.contains("memory:1  shaman is production; kuskokwim is a test node"),
+            text.contains("memory:1  sparrow is production; kestrel is a test node"),
             "{text}"
         );
         assert!(text.contains("Candidates, not entries"), "{text}");
@@ -558,7 +558,7 @@ mod tests {
     fn a_memory_offered_for_many_slots_is_shown_once_with_all_of_them() -> anyhow::Result<()> {
         let everything = Candidate {
             id: "memory:1".to_string(),
-            content: "shaman is production".to_string(),
+            content: "sparrow is production".to_string(),
             similarity: Some(0.42),
         };
         let found: Vec<(Slot, Vec<Candidate>)> = slots()

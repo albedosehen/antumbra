@@ -38,7 +38,7 @@ async fn devices(s: &McpServer) -> anyhow::Result<DevicesOut> {
 #[tokio::test]
 async fn a_session_names_its_machine_and_the_fabric_lists_it() -> anyhow::Result<()> {
     let store = mem_store().await?;
-    let hub = server_for(&store, "user:a", "kuskokwim");
+    let hub = server_for(&store, "user:a", "kestrel");
 
     let mac = register(&hub, " Mac ").await?;
     assert_eq!(mac.host, "mac", "the same normalization handoffs use");
@@ -73,7 +73,7 @@ async fn a_session_names_its_machine_and_the_fabric_lists_it() -> anyhow::Result
 #[tokio::test]
 async fn naming_a_machine_again_refreshes_it_and_adds_no_row() -> anyhow::Result<()> {
     let store = mem_store().await?;
-    let hub = server_for(&store, "user:a", "kuskokwim");
+    let hub = server_for(&store, "user:a", "kestrel");
     register(&hub, "mac").await?;
     let first = devices(&hub).await?.devices[0].last_seen.clone();
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -94,15 +94,15 @@ async fn a_server_registered_machine_is_left_as_its_server_wrote_it() -> anyhow:
     let rig = DeviceProfile::detected(
         tenant.clone(),
         user.clone(),
-        "kuskokwim",
+        "kestrel",
         "cuda",
         Some(24_576),
         Utc::now(),
     );
     store_device::upsert(&store, &rig).await?;
-    let hub = server_for(&store, "user:a", "shaman");
+    let hub = server_for(&store, "user:a", "sparrow");
 
-    let named = register(&hub, "Kuskokwim").await?;
+    let named = register(&hub, "Kestrel").await?;
     assert!(!named.registered);
     assert_eq!(named.role, "genesis");
     let Some(note) = named.note else {
@@ -114,9 +114,9 @@ async fn a_server_registered_machine_is_left_as_its_server_wrote_it() -> anyhow:
     assert_eq!(listed.devices.len(), 1);
     assert_eq!(listed.devices[0].backend, "cuda");
     assert_eq!(listed.devices[0].vram_mib, Some(24_576));
-    assert_eq!(listed.trainer.as_deref(), Some("kuskokwim"));
+    assert_eq!(listed.trainer.as_deref(), Some("kestrel"));
     let trainer = store_device::genesis_for_user(&store, &tenant, &user).await?;
-    assert_eq!(trainer.map(|d| d.host), Some("kuskokwim".to_string()));
+    assert_eq!(trainer.map(|d| d.host), Some("kestrel".to_string()));
     Ok(())
 }
 
@@ -125,8 +125,8 @@ async fn a_server_registered_machine_is_left_as_its_server_wrote_it() -> anyhow:
 #[tokio::test]
 async fn the_servers_own_machine_is_not_written_as_a_client() -> anyhow::Result<()> {
     let store = mem_store().await?;
-    let hub = server_for(&store, "user:a", "kuskokwim");
-    let named = register(&hub, "kuskokwim").await?;
+    let hub = server_for(&store, "user:a", "kestrel");
+    let named = register(&hub, "kestrel").await?;
     assert!(!named.registered);
     let Some(note) = named.note else {
         anyhow::bail!("naming the server's own machine came with no note");
@@ -141,7 +141,7 @@ async fn the_servers_own_machine_is_not_written_as_a_client() -> anyhow::Result<
 #[tokio::test]
 async fn a_name_that_is_no_machine_is_refused() -> anyhow::Result<()> {
     let store = mem_store().await?;
-    let hub = server_for(&store, "user:a", "kuskokwim");
+    let hub = server_for(&store, "user:a", "kestrel");
     for unnamed in ["local", " LOCAL ", "any", "", "   "] {
         let Err(refused) = hub
             .register_device(Parameters(RegisterDeviceParams {
@@ -172,8 +172,8 @@ async fn each_user_names_and_sees_only_their_own_machines_under_signin() -> anyh
     let (ua, ub) = (UserId::new("user:a"), UserId::new("user:b"));
     crate::provision_identity(&store, &tenant, &ua).await?;
     crate::provision_identity(&store, &tenant, &ub).await?;
-    let a = server_for(&store, "user:a", "kuskokwim");
-    let b = server_for(&store, "user:b", "kuskokwim");
+    let a = server_for(&store, "user:a", "kestrel");
+    let b = server_for(&store, "user:b", "kestrel");
 
     store.signin(&tenant, &ua).await?;
     assert!(register(&a, "mac").await?.registered);
@@ -205,7 +205,7 @@ async fn each_user_names_and_sees_only_their_own_machines_under_signin() -> anyh
 #[tokio::test]
 async fn the_rest_dispatcher_reaches_the_device_tools() -> anyhow::Result<()> {
     let store = mem_store().await?;
-    let hub = server_for(&store, "user:a", "kuskokwim");
+    let hub = server_for(&store, "user:a", "kestrel");
     let named = hub
         .call_tool("register_device", serde_json::json!({ "host": "mac" }))
         .await?;

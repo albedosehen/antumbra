@@ -17,7 +17,7 @@
 # Both sweeps score the same withheld tasks under the same seeds, and their
 # outcomes land in the copy as sweep-exemplars.json and sweep-outcomes.json.
 #
-# Expects a source tarball at /tmp/antumbra-$SHA.tar.gz, as kusko-deploy.sh does:
+# Expects a source tarball at /tmp/antumbra-$SHA.tar.gz, as server-deploy.sh does:
 #   git archive --format=tar.gz -o /tmp/antumbra-$(git rev-parse --short HEAD).tar.gz HEAD
 #   scp /tmp/antumbra-<sha>.tar.gz scripts/router-compare.sh <host>:/tmp/
 #   ssh <host> 'nohup bash /tmp/router-compare.sh <sha> <run directory> >/dev/null 2>&1 &'

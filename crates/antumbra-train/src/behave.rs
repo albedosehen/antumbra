@@ -3,7 +3,7 @@
 //! of them held out; the shipped replay prompts and controls; and the rule an
 //! expert is admitted by.
 //!
-//! The configuration is the validated one. On kuskokwim, ten examples per
+//! The configuration is the validated one. On kestrel, ten examples per
 //! behavior with the base model's own answers to 214 everyday prompts as
 //! replay taught four of the user's behaviors (0% to 89-100% on held-out
 //! phrasings) and kept unrelated tasks at the base model's level (32/40
