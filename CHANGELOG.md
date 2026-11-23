@@ -6,6 +6,8 @@
 
 - **The published server image serves experts, and writes to two volumes** ([#574](https://github.com/albedosehen/antumbra/pull/574)). `ghcr.io/albedosehen/antumbra-mcp` is built with the `models` feature, and the stack mounts the named volumes `antumbra-weights` on `/weights` (the Hugging Face cache, `HF_HOME`) and `antumbra-adapters` on `/adapters`; the root stays read-only. Run `antumbra setup local` again to move to the image and create them. A server with no expert to serve never fetches the base; one that has an expert fetches it, about 3 GB, the first time it is asked to answer through one. `--build-arg FEATURES=` builds the light server.
 
+- **A workspace from before roles: make its first call with the operator's token** ([#581](https://github.com/albedosehen/antumbra/pull/581)). 0.5.1 could leave such a workspace with no owner and no way to one (below). With this release a workspace that has no owner is taken by whoever calls it with the server operator's token, so if a 0.5.1 server left yours that way, one call with that token, or opening the Members page signed in with it, puts it right.
+
 ### Accounts
 
 - **A followed link is answered with a page** ([#568](https://github.com/albedosehen/antumbra/pull/568), [#570](https://github.com/albedosehen/antumbra/pull/570)). A browser that follows a link from the control plane is told what happened and what to run next, in a page that runs no script, loads nothing and is not kept; a signup's token is shown on it once. A program is still answered with JSON. It was written for 0.5.1 and merged after that release was cut.
@@ -17,6 +19,8 @@
 ### The server
 
 - **A server on an embedded store no longer stops answering an hour after its last request** ([#577](https://github.com/albedosehen/antumbra/pull/577)). `antumbra-mcp --http` with a `mem://` or `surrealkv://` store and no database credentials has one connection, signed in as each request's member and taken back for the server's own work. The engine keeps a session's expiry when the session is left, so an hour after the last request every query on that connection failed with "the session has expired", the server's own work first and then every request (`session initialization failed`), until a restart. An embedded store's sessions now have no end; each request still signs in afresh, which is where a removed member is refused. A server with database credentials, as `antumbra setup local` starts, was not affected.
+- **A workspace from before roles can no longer be left with no owner** ([#581](https://github.com/albedosehen/antumbra/pull/581)). On 0.5.1 the first call to such a workspace, a read among them, recorded its caller as a member unless the call carried the operator's token or they were alone in it. With several people and an ordinary token that closed the workspace: nobody could change a role or make a join code, and an operator's new identity became one more member. Now a member's role is recorded only once the workspace has an owner, and a workspace with no owner is taken by whoever holds the operator's token, whatever their own row says.
+- **A member can leave** ([#581](https://github.com/albedosehen/antumbra/pull/581)). A member removes themselves through `POST /members/remove`, whatever their role, unless they are the workspace's last owner. `antumbra join --leave` does it from a joined machine and deletes what the machine kept.
 
 ### Serving
 

@@ -183,11 +183,20 @@ async fn set(
 /// A member's role in a workspace, `None` for someone who is not in it (or
 /// was removed).
 ///
-/// A member from before roles has none recorded, and is given one the first
-/// time it is asked for: owner where the workspace has no owner yet and they
-/// are the one to ask who could be (they hold the server operator's token, or
-/// they are the only person in it), and member otherwise. So a workspace that
-/// existed before roles gets its owner from whoever ran it.
+/// A workspace from before roles has none recorded, and gets its owner from
+/// whoever ran it:
+///
+/// - **A workspace with no owner is taken by whoever holds the server
+///   operator's token,** whatever role their own row has recorded. Without
+///   this a workspace whose members were all recorded as members had no way
+///   to an owner short of editing the store: nobody could change a role, and
+///   an operator's new identity was one more member.
+/// - **Someone alone in a workspace with no role recorded is its owner.**
+/// - **Anyone else with no role recorded is a member, and it is recorded
+///   only once the workspace has an owner,** who can then change it. Until
+///   then it is an answer and not a record: an ask is often a read (a page
+///   listing members), and a read that fixed the first asker as a member
+///   closed the workspace to the person it belonged to.
 pub async fn role_of(
     store: &Store,
     tenant: &TenantId,
@@ -200,17 +209,29 @@ pub async fn role_of(
     if row.removed() || user.is_system() {
         return Ok(None);
     }
-    if let Some(role) = row.role() {
-        return Ok(Some(role));
+    let recorded = row.role();
+    match recorded {
+        Some(Role::Owner) => return Ok(recorded),
+        // The common ask, answered from the caller's own row.
+        Some(_) if !runs_the_server => return Ok(recorded),
+        _ => {}
     }
     let everyone = people(store, tenant).await?;
     let owned = everyone.iter().any(|r| r.role() == Some(Role::Owner));
-    let role = match !owned && (runs_the_server || everyone.len() == 1) {
-        true => Role::Owner,
-        false => Role::Member,
-    };
-    set(store, tenant, user, json!({ "role": role.as_str() })).await?;
-    Ok(Some(role))
+    if !owned && (runs_the_server || (recorded.is_none() && everyone.len() == 1)) {
+        set(store, tenant, user, json!({ "role": Role::Owner.as_str() })).await?;
+        return Ok(Some(Role::Owner));
+    }
+    if recorded.is_none() && owned {
+        set(
+            store,
+            tenant,
+            user,
+            json!({ "role": Role::Member.as_str() }),
+        )
+        .await?;
+    }
+    Ok(Some(recorded.unwrap_or(Role::Member)))
 }
 
 /// Whether the pair is a member now: provisioned, and not removed.
@@ -294,7 +315,9 @@ pub async fn set_role(
     set(store, tenant, target, json!({ "role": to.as_str() })).await
 }
 
-/// Remove `target` from the workspace, as `actor` ([`membership::may_remove`]).
+/// Remove `target` from the workspace, as `actor` ([`membership::may_remove`]),
+/// or leave it: a member removes themselves whatever their role, unless they
+/// are its last owner.
 /// Their row stays, marked, so a token they still hold is refused and not
 /// provisioned afresh; what they wrote stays where it is.
 pub async fn remove(
@@ -307,7 +330,10 @@ pub async fn remove(
         standing(store, tenant, actor).await?,
         standing(store, tenant, target).await?,
     );
-    membership::may_remove(acting, held)?;
+    // Anyone may leave; removing someone else goes by role.
+    if actor != target {
+        membership::may_remove(acting, held)?;
+    }
     if held == Role::Owner {
         keeps_an_owner(store, tenant, target).await?;
     }
@@ -539,6 +565,118 @@ mod tests {
         assert_eq!(
             role_of(&store, &alone, &UserId::new("user:default"), false).await?,
             Some(Role::Owner)
+        );
+        Ok(())
+    }
+
+    /// A member leaves by removing themselves, whatever their role, and is
+    /// then refused as anyone removed is; the last owner cannot leave.
+    #[tokio::test]
+    async fn a_member_leaves_and_the_last_owner_does_not() -> Result<()> {
+        let store = mem_store().await?;
+        let t = TenantId::new("ws:crew");
+        let (ada, bo) = (UserId::new("user:ada"), UserId::new("user:bo"));
+        provision(&store, &t, &ada).await?;
+        provision(&store, &t, &bo).await?;
+        // A member cannot remove the owner, and can leave.
+        assert!(remove(&store, &t, &bo, &ada).await.is_err());
+        remove(&store, &t, &bo, &bo).await?;
+        assert!(!is_member(&store, &t, &bo).await?);
+        assert!(provision(&store, &t, &bo).await.is_err());
+        // The workspace keeps its owner.
+        let Err(kept) = remove(&store, &t, &ada, &ada).await else {
+            return Err(AntumbraError::other("the last owner left"));
+        };
+        assert!(kept.is_rejection(), "{kept}");
+        assert!(is_member(&store, &t, &ada).await?);
+        Ok(())
+    }
+
+    /// A workspace from before roles, with several people and no owner, as
+    /// one was found after an upgrade: its first asker is told member and no
+    /// more is recorded, so the one who runs the server can still be made its
+    /// owner; and a workspace already left with members only is taken by
+    /// whoever holds the operator's token, a new identity among them.
+    #[tokio::test]
+    async fn a_workspace_with_no_owner_is_not_closed_by_being_asked() -> Result<()> {
+        let store = mem_store().await?;
+        let t = TenantId::new("ws:old");
+        let put = |user: &str, role: Option<Role>| {
+            let (store, t, user) = (store.clone(), t.clone(), UserId::new(user));
+            async move {
+                let mut row = json!({ "tenant": t.as_str(), "user": user.as_str() });
+                if let Some(role) = role {
+                    row["role"] = json!(role.as_str());
+                }
+                store.put(TABLE, key(&t, &user).as_str(), &row).await
+            }
+        };
+        let recorded = |user: &str| {
+            let (store, t, user) = (store.clone(), t.clone(), UserId::new(user));
+            async move {
+                Ok::<_, AntumbraError>(row_of(&store, &t, &user).await?.and_then(|r| r.role()))
+            }
+        };
+        let (own, check) = (UserId::new("user:default"), UserId::new("user:check"));
+        put("user:default", None).await?;
+        put("user:check", None).await?;
+
+        // A read by the workspace's real owner, with an ordinary token: a
+        // member for now, and nothing is written.
+        assert_eq!(role_of(&store, &t, &own, false).await?, Some(Role::Member));
+        assert_eq!(recorded("user:default").await?, None);
+        // The same person with the operator's token is its owner.
+        assert_eq!(role_of(&store, &t, &own, true).await?, Some(Role::Owner));
+        assert_eq!(recorded("user:default").await?, Some(Role::Owner));
+        // Now that it has one, the other is recorded as a member when asked.
+        assert_eq!(
+            role_of(&store, &t, &check, false).await?,
+            Some(Role::Member)
+        );
+        assert_eq!(recorded("user:check").await?, Some(Role::Member));
+        // And an operator's token makes no second owner.
+        assert_eq!(role_of(&store, &t, &check, true).await?, Some(Role::Member));
+
+        // A workspace the earlier rule left with members only.
+        let stuck = TenantId::new("ws:stuck");
+        for user in ["user:a", "user:b"] {
+            store
+                .put(
+                    TABLE,
+                    &format!("stuck-{user}"),
+                    &json!({ "tenant": "ws:stuck", "user": user, "role": "member" }),
+                )
+                .await?;
+        }
+        let a = UserId::new("user:a");
+        assert_eq!(
+            role_of(&store, &stuck, &a, false).await?,
+            Some(Role::Member)
+        );
+        // A new identity with the operator's token: provisioned a member,
+        // and the workspace's owner when it asks, since there is none.
+        let operator = UserId::new("user:operator");
+        provision(&store, &stuck, &operator).await?;
+        assert_eq!(
+            role_of(&store, &stuck, &operator, true).await?,
+            Some(Role::Owner)
+        );
+        set_role(&store, &stuck, &operator, &a, Role::Owner).await?;
+        assert_eq!(role_of(&store, &stuck, &a, false).await?, Some(Role::Owner));
+        // An ordinary token never takes a workspace that others are in.
+        let other = TenantId::new("ws:two");
+        for user in ["user:x", "user:y"] {
+            store
+                .put(
+                    TABLE,
+                    &format!("two-{user}"),
+                    &json!({ "tenant": "ws:two", "user": user, "role": "member" }),
+                )
+                .await?;
+        }
+        assert_eq!(
+            role_of(&store, &other, &UserId::new("user:x"), false).await?,
+            Some(Role::Member)
         );
         Ok(())
     }

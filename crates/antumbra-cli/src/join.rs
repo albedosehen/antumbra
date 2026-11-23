@@ -56,6 +56,16 @@ pub struct JoinArgs {
     /// Take those MCP servers back out.
     #[arg(long, conflicts_with_all = ["code", "handle", "name", "note", "status", "forget"])]
     pub disconnect: bool,
+    /// Leave a workspace this machine joined: you are removed from it on its
+    /// server, your agent's tools for it are taken out, and what this
+    /// machine kept of it (its token among it) is deleted. What you shared
+    /// there stays there.
+    #[arg(long, conflicts_with_all = ["code", "handle", "name", "note", "status", "forget", "connect", "disconnect", "write"])]
+    pub leave: bool,
+    /// With `--leave`: drop only what this machine keeps, and ask nothing of
+    /// the server. For a server that is gone, or that refuses.
+    #[arg(long, requires = "leave")]
+    pub local: bool,
     /// Where an agent's new memories go once this machine is in a workspace:
     /// `private` (your own store; the default), `workspace` (what is learned
     /// about the team's work goes to the workspace), or `ask` (your own
@@ -688,6 +698,76 @@ fn copilot_home(antumbra: &Path) -> Option<PathBuf> {
         .or_else(|| antumbra.parent().map(|home| home.join(".copilot")))
 }
 
+/// One request to a server as a member: the path, the member's token, the
+/// body, and what came back. A seam, like [`Send`].
+pub(crate) type SendAs<'a> = &'a dyn Fn(&str, &str, &str, Value) -> anyhow::Result<(u16, Value)>;
+
+/// Leave one workspace: be removed on its server (unless `local`), take the
+/// agent's tools for it out, and delete what this machine keeps of it.
+fn leave(
+    antumbra: &Path,
+    to: Option<&str>,
+    local: bool,
+    register: Register<'_>,
+    send_as: SendAs<'_>,
+) -> anyhow::Result<Vec<String>> {
+    let found = recorded(antumbra, to)?;
+    let [(file, kept)] = found.as_slice() else {
+        let names: Vec<&str> = found
+            .iter()
+            .filter_map(|(_, kept)| kept.get("workspace").and_then(Value::as_str))
+            .collect();
+        anyhow::bail!(
+            "this machine has joined more than one workspace ({}). Say which to leave with --to",
+            names.join(", ")
+        );
+    };
+    let field = |name: &str| {
+        kept.get(name)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let (workspace, url, user, token_file) = (
+        field("workspace"),
+        field("url"),
+        field("user"),
+        field("token_file"),
+    );
+    let mut lines = Vec::new();
+    if !local {
+        let token = std::fs::read_to_string(&token_file)
+            .map(|t| t.trim().to_string())
+            .unwrap_or_default();
+        if token.is_empty() || user.is_empty() {
+            anyhow::bail!(
+                "this machine no longer holds a token for {workspace}, so its server cannot be told. To drop what the machine keeps of it: antumbra join --leave --local"
+            );
+        }
+        let (status, answer) = send_as(&url, "/members/remove", &token, json!({ "user": user }))?;
+        if status != 200 {
+            anyhow::bail!(
+                "{url} did not let you leave {workspace}: {}\nNothing on this machine was changed. To drop what the machine keeps of it anyway: antumbra join --leave --local",
+                said(status, &answer)
+            );
+        }
+        lines.push(format!(
+            "You have left {workspace} at {url}. What you shared there stays there."
+        ));
+    }
+    // The agent's tools for it, then the record and the token.
+    let name = server_name(&workspace);
+    let _ = register(&name, None);
+    if let Some(dir) = file.parent() {
+        std::fs::remove_dir_all(dir)?;
+    }
+    lines.push(match local {
+        true => format!("This machine has dropped what it kept of {workspace}. You are still a member there until one of its admins removes you."),
+        false => "This machine has dropped its token for it and your agent's tools for it.".to_string(),
+    });
+    Ok(lines)
+}
+
 /// Note which agents were told and which could not be, and say whether any
 /// was: one agent that fails does not keep the others from being told.
 fn tell_each<const N: usize>(
@@ -784,7 +864,47 @@ pub(crate) fn over_the_network(
 
 pub fn run(args: JoinArgs) -> anyhow::Result<()> {
     let home = crate::machine::home().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
-    for line in run_in(&home.join(".antumbra"), &args, &over_the_network)? {
+    let antumbra = home.join(".antumbra");
+    let lines = if args.leave {
+        let register = |name: &str, server: Option<&str>| {
+            let results = [
+                ("Claude Code", with_claude(name, server)),
+                ("Codex", with_codex(name, server)),
+                (
+                    "Copilot CLI",
+                    match copilot_home(&antumbra) {
+                        Some(dir) => with_copilot_at(&dir, name, server),
+                        None => Ok(false),
+                    },
+                ),
+            ];
+            Ok(results.into_iter().any(|(_, told)| told.unwrap_or(false)))
+        };
+        let send_as =
+            |server: &str, path: &str, token: &str, body: Value| -> anyhow::Result<(u16, Value)> {
+                let mut response = antumbra_http::agent(Duration::from_secs(30))
+                    .post(format!("{}{path}", server.trim_end_matches('/')))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .send_json(body)
+                    .map_err(|e| anyhow::anyhow!("could not reach {server}: {e}"))?;
+                let status = response.status().as_u16();
+                Ok((
+                    status,
+                    response.body_mut().read_json().unwrap_or(Value::Null),
+                ))
+            };
+        leave(
+            &antumbra,
+            args.to.as_deref(),
+            args.local,
+            &register,
+            &send_as,
+        )?
+    } else {
+        run_in(&antumbra, &args, &over_the_network)?
+    };
+    for line in lines {
         println!("{line}");
     }
     Ok(())
@@ -803,6 +923,8 @@ mod tests {
             name: Some("Bodil Lindqvist".to_string()),
             note: None,
             email: None,
+            leave: false,
+            local: false,
             status: false,
             forget: false,
             connect: false,
@@ -1330,6 +1452,86 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(dir.join("workspace.json"))?)?;
         assert_eq!(kept["url"], server);
         assert!(read_waiting(&antumbra).is_none());
+        Ok(())
+    }
+
+    /// Leaving: the server is asked first, and a refusal changes nothing
+    /// here; left, the agent's tools and the machine's record of the
+    /// workspace go, and another workspace is untouched. `--local` asks no
+    /// server.
+    #[test]
+    fn a_workspace_is_left_on_its_server_and_then_on_this_machine() -> anyhow::Result<()> {
+        let (_home, antumbra) = joined_home("join-leave")?;
+        for dir in ["a__ws_crew", "b__ws_lab"] {
+            std::fs::write(
+                antumbra.join("workspaces").join(dir).join("token.txt"),
+                "the-token\n",
+            )?;
+        }
+        let taken = RefCell::new(Vec::new());
+        let register = |name: &str, server: Option<&str>| {
+            taken
+                .borrow_mut()
+                .push((name.to_string(), server.is_none()));
+            Ok(true)
+        };
+        let asked = RefCell::new(Vec::new());
+        let refuse = RefCell::new(true);
+        let send_as =
+            |server: &str, path: &str, token: &str, body: Value| -> anyhow::Result<(u16, Value)> {
+                asked.borrow_mut().push((
+                    server.to_string(),
+                    path.to_string(),
+                    token.to_string(),
+                    body,
+                ));
+                Ok(match *refuse.borrow() {
+                    true => (400, json!({ "error": "a workspace keeps an owner" })),
+                    false => (200, json!({ "removed": true })),
+                })
+            };
+        // Two joined: which one has to be said.
+        assert!(leave(&antumbra, None, false, &register, &send_as).is_err());
+        assert!(asked.borrow().is_empty());
+
+        // Refused: said, and nothing here is changed.
+        let Err(why) = leave(&antumbra, Some("crew"), false, &register, &send_as) else {
+            anyhow::bail!("left a workspace whose server refused");
+        };
+        assert!(
+            why.to_string().contains("keeps an owner") && why.to_string().contains("--local"),
+            "{why}"
+        );
+        assert!(antumbra
+            .join("workspaces/a__ws_crew/workspace.json")
+            .exists());
+        assert!(taken.borrow().is_empty());
+
+        *refuse.borrow_mut() = false;
+        let said = leave(&antumbra, Some("crew"), false, &register, &send_as)?;
+        assert!(said[0].contains("You have left ws:crew"), "{said:?}");
+        let (server, path, token, body) = asked
+            .borrow()
+            .last()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("nothing asked"))?;
+        assert_eq!(
+            (server.as_str(), path.as_str(), token.as_str()),
+            ("https://team.example", "/members/remove", "the-token")
+        );
+        assert_eq!(body, json!({ "user": "user:bodil" }));
+        assert_eq!(*taken.borrow(), [("antumbra-crew".to_string(), true)]);
+        assert!(!antumbra.join("workspaces/a__ws_crew").exists());
+        assert!(antumbra
+            .join("workspaces/b__ws_lab/workspace.json")
+            .exists());
+
+        // The other, on this machine only: no server is asked.
+        let before = asked.borrow().len();
+        let said = leave(&antumbra, None, true, &register, &send_as)?;
+        assert!(said[0].contains("still a member"), "{said:?}");
+        assert_eq!(asked.borrow().len(), before);
+        assert!(!antumbra.join("workspaces/b__ws_lab").exists());
         Ok(())
     }
 }
