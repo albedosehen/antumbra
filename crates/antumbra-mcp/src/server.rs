@@ -103,7 +103,14 @@ pub struct McpServer {
     /// shown, the turns judged. One per process where the HTTP surface shares
     /// it ([`McpServer::with_steward`]); a server of its own otherwise.
     steward: Arc<Steward>,
+    /// When each machine's device row was last moved by a call
+    /// ([`McpServer::note_seen`]), by machine name. Shared by every copy of
+    /// an identity's server, so the calls of one identity are throttled as one.
+    seen: Arc<std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>>,
 }
+
+/// The least time between two writes of one machine's last-seen.
+pub(crate) const SEEN_EVERY: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// The cross-encoder candidate pool: rerank re-scores a wide RRF pool, then
 /// truncates to the caller's k. ~100 candidates is the precision/latency knee for

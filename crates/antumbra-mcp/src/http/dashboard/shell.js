@@ -234,6 +234,65 @@ function ago(iso) {
   return stamps.format(at);
 }
 
+/** A device as it is told apart: the name its user gave it when there is
+ *  one, the host it goes by, and its operating system as a tag. */
+function deviceWho(d) {
+  return [
+    d.name ? h("span", { class: "device-name" }, d.name) : null,
+    h("span", { class: d.name ? "mono small muted" : "mono" }, d.host),
+    d.os ? h("span", { class: "os-tag" }, d.os) : null,
+  ].filter(Boolean);
+}
+
+/** One device's row: who it is, what it does, when it was last heard from,
+ *  and a way to name it. */
+function deviceRow(d) {
+  const who = h("th", { scope: "row" }, h("span", { class: "device-who" }, ...deviceWho(d)));
+  const act = h("td", { class: "device-act" });
+  const rename = h("button", { type: "button", class: "quiet" }, d.name ? "Rename" : "Name");
+  rename.addEventListener("click", () => {
+    const input = h("input", {
+      type: "text",
+      maxlength: 64,
+      value: d.name || "",
+      placeholder: d.host,
+      "aria-label": `A name for ${d.host}`,
+    });
+    const save = h("button", { type: "submit" }, "Save");
+    const cancel = h("button", { type: "button", class: "quiet" }, "Cancel");
+    const said = h("span", { class: "small failed", role: "alert" });
+    const form = h("form", { class: "device-naming" }, input, save, cancel, said);
+    cancel.addEventListener("click", () => section(byId("devices"), loadDevices));
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      save.disabled = true;
+      try {
+        await consoleFetch("devices/name", { host: d.host, name: input.value });
+        await section(byId("devices"), loadDevices);
+      } catch (error) {
+        if (error instanceof SignedOut) return signOut("Your token is no longer accepted. Sign in again.");
+        said.textContent = error.message;
+        save.disabled = false;
+      }
+    });
+    who.replaceChildren(form);
+    act.replaceChildren();
+    input.focus();
+    input.select();
+  });
+  act.append(rename);
+  const registered = d.registered ? ` Registered ${stamps.format(new Date(d.registered))}.` : "";
+  return h(
+    "tr",
+    {},
+    who,
+    h("td", {}, d.role === "memory" ? "Memory" : d.role === "train" ? "Trains experts" : d.role || "unknown"),
+    h("td", { class: "mono" }, d.backend || "unknown"),
+    h("td", { title: `${d.last_seen || ""}${registered}` }, d.last_seen ? ago(d.last_seen) : "never"),
+    act,
+  );
+}
+
 async function loadDevices() {
   const out = await call("devices");
   const devices = out.devices ?? [];
@@ -242,18 +301,9 @@ async function loadDevices() {
   byId("devices-summary").textContent = devices.length
     ? `${numbers.format(devices.length)} registered`
     : "";
-  const rows = devices.map((d) =>
-    h(
-      "tr",
-      {},
-      h("th", { scope: "row", class: "mono" }, d.host),
-      h("td", {}, d.role === "memory" ? "Memory" : d.role === "train" ? "Trains experts" : d.role || "unknown"),
-      h("td", { class: "mono" }, d.backend || "unknown"),
-      h("td", { title: d.last_seen || "" }, d.last_seen ? ago(d.last_seen) : "never"),
-    ),
-  );
+  const rows = devices.map(deviceRow);
   byId("devices").replaceChildren(
-    ...(rows.length ? rows : [h("tr", {}, h("td", { colspan: 4, class: "empty" }, "No device has registered yet: an agent's session registers the machine it runs on."))]),
+    ...(rows.length ? rows : [h("tr", {}, h("td", { colspan: 5, class: "empty" }, "No device has registered yet: an agent's session registers the machine it runs on."))]),
   );
   byId("devices-brief").replaceChildren(
     ...(devices.length
@@ -261,7 +311,7 @@ async function loadDevices() {
           h(
             "li",
             { class: "brief" },
-            h("span", { class: "mono" }, d.host),
+            h("span", { class: "device-who" }, ...deviceWho(d)),
             h("span", { class: "small muted", title: d.last_seen || "" }, d.last_seen ? `seen ${ago(d.last_seen)}` : "never seen"),
           ),
         )

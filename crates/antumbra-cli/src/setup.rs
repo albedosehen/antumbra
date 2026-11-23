@@ -1695,6 +1695,15 @@ fn session_host(settings: &Value) -> String {
         .unwrap_or_else(host_id)
 }
 
+/// What setup tells the server of this machine: the name it goes by, and
+/// its operating system when that was found.
+fn registration(host: &str, os: Option<String>) -> Value {
+    match os {
+        Some(os) => json!({ "host": host, "os": os }),
+        None => json!({ "host": host }),
+    }
+}
+
 /// Name this machine in the user's fabric, as every session start does, so it
 /// is listed from now rather than from its first session. A server older than
 /// device registration does not know the tool; that is a warning, not a
@@ -1708,7 +1717,7 @@ fn register_machine(url: &str, token: &str, host: &str, steps: &Steps) {
         url,
         token,
         "register_device",
-        json!({ "host": host }),
+        registration(host, antumbra_http::os_label()),
     ) {
         Ok(said) if said["registered"] == true => steps.ok(format!(
             "this machine is listed among your devices as {} (a {} node)",

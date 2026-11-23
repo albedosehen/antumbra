@@ -85,6 +85,41 @@ impl McpServer {
             shared_bind: None,
             decider: None,
             steward: Arc::new(Steward::default()),
+            seen: Arc::default(),
+        }
+    }
+
+    /// Note that the machine this call came from was heard from: its device
+    /// row's last-seen moves to now (#597). At most one write per machine
+    /// every [`SEEN_EVERY`], so a hook that recalls on every prompt does not
+    /// write on every prompt. A machine with no row is not given one. Run
+    /// once the connection is this caller's; a failure is said and costs the
+    /// call nothing.
+    pub(super) async fn note_seen(&self) {
+        let device = self.device();
+        let now = std::time::Instant::now();
+        {
+            let Ok(mut seen) = self.seen.lock() else {
+                return;
+            };
+            if seen
+                .get(&device)
+                .is_some_and(|at| now.duration_since(*at) < SEEN_EVERY)
+            {
+                return;
+            }
+            seen.insert(device.clone(), now);
+        }
+        if let Err(e) = antumbra_store::repo::device::saw(
+            &self.store,
+            &self.tenant,
+            &self.user,
+            &device,
+            Utc::now(),
+        )
+        .await
+        {
+            eprintln!("antumbra-mcp: could not note {device} seen: {e}");
         }
     }
 
@@ -547,6 +582,7 @@ impl McpServer {
         // Held to the end of the dispatch: a shared connection stays this
         // caller's for the whole tool.
         let _bound = self.bound().await?;
+        self.note_seen().await;
         // Deserialize `arguments` into the tool's params, call it, and serialize
         // the result -- one arm per tool, mirroring the `#[tool]` methods.
         macro_rules! dispatch {
@@ -702,6 +738,7 @@ impl ServerHandler for McpServer {
             // Held until the router returns: a shared connection stays this
             // caller's for the whole tool.
             let _bound = server.bound().await?;
+            server.note_seen().await;
             let tcc = rmcp::handler::server::tool::ToolCallContext::new(server, request, context);
             Self::tool_router().call(tcc).await
         }

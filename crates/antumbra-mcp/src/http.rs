@@ -74,6 +74,7 @@ mod behaviors;
 mod chunker;
 mod console;
 mod dashboard;
+mod devices;
 mod experts;
 mod github;
 mod join;
@@ -416,6 +417,7 @@ pub async fn serve(
     }
     revocation::spawn(state.clone());
     spawn_live_propagation(state.clone(), announced);
+    spawn_own_heartbeat(state.clone());
     chunker::spawn(state.clone(), chunk_in_flight);
     behaviors::spawn(state.clone());
     sync::spawn(state.clone(), sync);
@@ -657,6 +659,7 @@ fn router(state: Arc<HttpState>) -> Router {
         .route("/healthz", axum::routing::get(healthz))
         .merge(console::routes())
         .merge(members::routes())
+        .merge(devices::routes())
         .merge(join::routes())
         .merge(pool::routes())
         .merge(dashboard::routes())
@@ -1264,6 +1267,36 @@ async fn handle_call(State(state): State<Arc<HttpState>>, req: Request<Body>) ->
         // A tool error (unknown tool, bad arguments, not found) is the caller's
         // fault -> 400 with the tool's message; auth/ACL failures returned above.
         Err(e) => bad_request(e.message.as_ref()),
+    }
+}
+
+/// Note this server's own machine up, now and every
+/// [`crate::server::SEEN_EVERY`]: the device rows it wrote for its own
+/// machine are otherwise as old as its start, though it has answered since
+/// (#597). Only rows a server wrote move; a session's row for a machine of
+/// the same name is that session's to move.
+fn spawn_own_heartbeat(state: Arc<HttpState>) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(crate::server::SEEN_EVERY);
+        loop {
+            tick.tick().await;
+            note_own_machine_up(&state).await;
+        }
+    });
+}
+
+/// One beat of [`spawn_own_heartbeat`]. A failure is said and waits for the
+/// next beat.
+async fn note_own_machine_up(state: &HttpState) {
+    let _guard = state.auth.lock().await;
+    let noted = async {
+        state.store.signin_root().await?;
+        antumbra_store::repo::device::saw_server(&state.store, &state.host, chrono::Utc::now())
+            .await
+    }
+    .await;
+    if let Err(e) = noted {
+        eprintln!("antumbra-mcp: could not note this server's machine up: {e}");
     }
 }
 

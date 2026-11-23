@@ -215,3 +215,148 @@ async fn each_json_rpc_call_is_stamped_with_the_machine_it_names() -> anyhow::Re
     );
     Ok(())
 }
+
+/// `POST /devices/name` as `tok`, with `body`.
+fn naming(tok: &str, body: serde_json::Value) -> anyhow::Result<Request<Body>> {
+    Ok(Request::builder()
+        .method("POST")
+        .uri("/devices/name")
+        .header(header::AUTHORIZATION, format!("Bearer {tok}"))
+        .body(Body::from(body.to_string()))?)
+}
+
+/// The caller's devices, as the `devices` tool lists them.
+async fn devices_of(st: &Arc<HttpState>, tok: &str) -> anyhow::Result<Vec<serde_json::Value>> {
+    let listed = router(st.clone())
+        .oneshot(call_from(
+            tok,
+            None,
+            serde_json::json!({ "tool": "devices", "arguments": {} }),
+        )?)
+        .await?;
+    Ok(json_of(listed).await?["devices"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// A user names one of their machines and takes the name away; the host it
+/// goes by stays. Another member cannot name it, a machine nobody registered
+/// cannot be named, and a name that is not one is refused.
+#[tokio::test]
+async fn a_user_names_their_own_machine() -> anyhow::Result<()> {
+    let st = state().await?;
+    let (mine, theirs) = (token("ws:dev", "user:dev")?, token("ws:dev", "user:other")?);
+    for tok in [&mine, &theirs] {
+        router(st.clone())
+            .oneshot(call_from(
+                tok,
+                None,
+                serde_json::json!({ "tool": "register_device", "arguments": { "host": "Laptop", "os": "macOS 15.6" } }),
+            )?)
+            .await?;
+    }
+    let named = router(st.clone())
+        .oneshot(naming(
+            &mine,
+            serde_json::json!({ "host": " LAPTOP ", "name": "  Work laptop " }),
+        )?)
+        .await?;
+    assert_eq!(named.status(), StatusCode::OK);
+    assert_eq!(
+        json_of(named).await?,
+        serde_json::json!({ "host": "laptop", "name": "Work laptop" })
+    );
+    let of = |devices: Vec<serde_json::Value>| {
+        devices
+            .into_iter()
+            .find(|d| d["host"] == "laptop")
+            .unwrap_or_default()
+    };
+    let laptop = of(devices_of(&st, &mine).await?);
+    assert_eq!(
+        (laptop["name"].clone(), laptop["os"].clone()),
+        (
+            serde_json::json!("Work laptop"),
+            serde_json::json!("macOS 15.6")
+        )
+    );
+    // The other member's machine of the same host is theirs, and unnamed.
+    assert!(of(devices_of(&st, &theirs).await?).get("name").is_none());
+
+    for (body, why) in [
+        (
+            serde_json::json!({ "host": "desktop", "name": "x" }),
+            "no such device",
+        ),
+        (
+            serde_json::json!({ "host": "laptop", "name": "x".repeat(65) }),
+            "too long",
+        ),
+        (
+            serde_json::json!({ "host": "any", "name": "x" }),
+            "no machine",
+        ),
+    ] {
+        let refused = router(st.clone()).oneshot(naming(&mine, body)?).await?;
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST, "{why}");
+    }
+    let unsigned = router(st.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/devices/name")
+                .body(Body::from(r#"{"host":"laptop","name":"x"}"#))?,
+        )
+        .await?;
+    assert_eq!(unsigned.status(), StatusCode::UNAUTHORIZED);
+
+    // A blank name takes it away.
+    let cleared = router(st.clone())
+        .oneshot(naming(
+            &mine,
+            serde_json::json!({ "host": "laptop", "name": " " }),
+        )?)
+        .await?;
+    assert_eq!(cleared.status(), StatusCode::OK);
+    assert!(of(devices_of(&st, &mine).await?).get("name").is_none());
+    Ok(())
+}
+
+/// #597: the server's own row moves when the server notes itself up, and a
+/// machine a session named does not.
+#[tokio::test]
+async fn the_servers_own_row_moves_on_its_beat() -> anyhow::Result<()> {
+    let st = state().await?;
+    let tok = token("ws:dev", "user:dev")?;
+    router(st.clone())
+        .oneshot(call_from(
+            &tok,
+            None,
+            serde_json::json!({ "tool": "register_device", "arguments": { "host": "laptop" } }),
+        )?)
+        .await?;
+    let long_ago = chrono::Utc::now() - chrono::Duration::days(2);
+    let (tenant, user) = (
+        antumbra_core::TenantId::new("ws:dev"),
+        antumbra_core::UserId::new("user:dev"),
+    );
+    {
+        let _guard = st.auth.lock().await;
+        st.store.signin_root().await?;
+        for mut d in antumbra_store::repo::device::list_for_user(&st.store, &tenant, &user).await? {
+            d.updated_at = long_ago;
+            d.seen_at = Some(long_ago);
+            antumbra_store::repo::device::upsert(&st.store, &d).await?;
+        }
+    }
+    note_own_machine_up(&st).await;
+    let devices = devices_of(&st, &tok).await?;
+    assert_eq!(devices.len(), 2, "{devices:?}");
+    for d in devices {
+        let moved = d["last_seen"] != long_ago.to_rfc3339();
+        assert_eq!(moved, d["backend"] != "client", "{d}");
+        assert_eq!(d["registered"], long_ago.to_rfc3339());
+    }
+    Ok(())
+}

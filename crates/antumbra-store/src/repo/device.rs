@@ -40,6 +40,12 @@ struct DeviceRow {
     // listing out from under the roles it does understand.
     role: String,
     updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    seen_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    os: Option<String>,
 }
 
 impl DeviceRow {
@@ -53,6 +59,9 @@ impl DeviceRow {
             vram_mib: d.vram_mib,
             role: d.role.as_str().to_string(),
             updated_at: d.updated_at.to_rfc3339(),
+            seen_at: d.seen_at.map(|at| at.to_rfc3339()),
+            name: d.name.clone(),
+            os: d.os.clone(),
         }
     }
 
@@ -71,6 +80,9 @@ impl DeviceRow {
             vram_mib: self.vram_mib,
             role,
             updated_at: parse_dt(&self.updated_at)?,
+            seen_at: self.seen_at.as_deref().map(parse_dt).transpose()?,
+            name: self.name,
+            os: self.os,
         }))
     }
 }
@@ -87,17 +99,115 @@ fn record_key(profile: &DeviceProfile) -> &str {
 
 /// Register a node, or update what it can do. Idempotent per (tenant, user,
 /// host): the same machine coming back keeps its row.
+///
+/// What a registration does not say stays as the row has it: the name its
+/// user gave it, when it was last seen, and its operating system when this
+/// registration names none. A registration is what the machine says of
+/// itself, and none of those is its to take away.
 pub async fn upsert(store: &Store, profile: &DeviceProfile) -> Result<()> {
-    store
-        .put(
-            DEVICE,
-            record_key(profile),
-            &DeviceRow::from_domain(profile),
-        )
-        .await
+    let mut row = DeviceRow::from_domain(profile);
+    if let Some(had) = store
+        .get_row::<DeviceRow>(DEVICE, record_key(profile))
+        .await?
+    {
+        row.name = row.name.or(had.name);
+        row.seen_at = row.seen_at.or(had.seen_at);
+        row.os = row.os.or(had.os);
+    }
+    store.put(DEVICE, record_key(profile), &row).await
 }
 
-/// Every machine a user has registered in a tenant, newest registration first.
+fn vars<const N: usize>(
+    pairs: [(&str, serde_json::Value); N],
+) -> std::collections::BTreeMap<String, serde_json::Value> {
+    pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+}
+
+/// Note that a call named one of a user's machines: its row's `seen_at`
+/// moves to `now`, and nothing else of it. Whether there was a row to move:
+/// a machine that never registered is not made one by being named.
+pub async fn saw(
+    store: &Store,
+    tenant: &TenantId,
+    user: &UserId,
+    host: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<bool> {
+    let moved: Vec<serde_json::Value> = store
+        .query_rows(
+            &format!(
+                "UPDATE {DEVICE} SET seen_at = $now \
+                 WHERE tenant_id = $tenant AND user = $user AND string::lowercase(host) = $host RETURN AFTER"
+            ),
+            vars([
+                ("now", serde_json::json!(now.to_rfc3339())),
+                ("tenant", serde_json::json!(tenant.as_str())),
+                ("user", serde_json::json!(user.as_str())),
+                ("host", serde_json::json!(host.trim().to_lowercase())),
+            ]),
+        )
+        .await?;
+    Ok(!moved.is_empty())
+}
+
+/// Note that the server on `host` is up: every row a server wrote for that
+/// machine, whoever's fabric it is in, is seen at `now`. A row a session
+/// wrote for a machine of that name is a client's and is left. How many.
+pub async fn saw_server(
+    store: &Store,
+    host: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<usize> {
+    let moved: Vec<serde_json::Value> = store
+        .query_rows(
+            &format!(
+                "UPDATE {DEVICE} SET seen_at = $now \
+                 WHERE string::lowercase(host) = $host AND backend != $client RETURN AFTER"
+            ),
+            vars([
+                ("now", serde_json::json!(now.to_rfc3339())),
+                ("host", serde_json::json!(host.trim().to_lowercase())),
+                (
+                    "client",
+                    serde_json::json!(antumbra_core::device::CLIENT_BACKEND),
+                ),
+            ]),
+        )
+        .await?;
+    Ok(moved.len())
+}
+
+/// Give one of a user's machines a name, or take it away (`None`). Whether
+/// they have a machine by that host.
+pub async fn rename(
+    store: &Store,
+    tenant: &TenantId,
+    user: &UserId,
+    host: &str,
+    name: Option<&str>,
+) -> Result<bool> {
+    let set = match name {
+        Some(_) => "SET name = $name",
+        None => "UNSET name",
+    };
+    let moved: Vec<serde_json::Value> = store
+        .query_rows(
+            &format!(
+                "UPDATE {DEVICE} {set} \
+                 WHERE tenant_id = $tenant AND user = $user AND string::lowercase(host) = $host RETURN AFTER"
+            ),
+            vars([
+                ("name", serde_json::json!(name)),
+                ("tenant", serde_json::json!(tenant.as_str())),
+                ("user", serde_json::json!(user.as_str())),
+                ("host", serde_json::json!(host.trim().to_lowercase())),
+            ]),
+        )
+        .await?;
+    Ok(!moved.is_empty())
+}
+
+/// Every machine a user has registered in a tenant, the most recently seen first.
 /// Rows naming an unknown role are left out (see [`DeviceRow::into_domain`]).
 pub async fn list_for_user(
     store: &Store,
@@ -120,7 +230,7 @@ pub async fn list_for_user(
         .into_iter()
         .flatten()
         .collect();
-    found.sort_by_key(|d| std::cmp::Reverse(d.updated_at));
+    found.sort_by_key(|d| std::cmp::Reverse(d.last_seen()));
     Ok(found)
 }
 
@@ -237,6 +347,110 @@ mod tests {
             listed.iter().map(|d| d.host.as_str()).collect::<Vec<_>>(),
             vec!["laptop"],
             "the unknown node is not routable, and does not take the known one down with it"
+        );
+        Ok(())
+    }
+
+    /// A call that names a machine moves its `seen_at` and nothing else; a
+    /// machine that never registered is not made one; a name is given and
+    /// taken away; and registering again keeps the name, the operating
+    /// system and when it was last seen.
+    #[tokio::test]
+    async fn a_device_is_seen_named_and_keeps_both_when_it_registers_again() -> Result<()> {
+        let s = mem_store().await?;
+        let (t, u) = (TenantId::new("ws:t"), UserId::new("user:a"));
+        let registered = chrono::Utc::now() - chrono::Duration::hours(11);
+        let mut laptop = DeviceProfile::client(t.clone(), u.clone(), "laptop", registered)
+            .with_os(Some("macOS 15.6".into()));
+        upsert(&s, &laptop).await?;
+        let one = || async {
+            Ok::<_, antumbra_core::AntumbraError>(list_for_user(&s, &t, &u).await?.remove(0))
+        };
+        assert_eq!(one().await?.last_seen(), registered);
+
+        let now = registered + chrono::Duration::hours(11);
+        assert!(saw(&s, &t, &u, " Laptop ", now).await?);
+        let seen = one().await?;
+        assert_eq!(
+            (seen.updated_at, seen.seen_at, seen.last_seen()),
+            (registered, Some(now), now)
+        );
+        assert_eq!(
+            (seen.backend.as_str(), seen.os.as_deref()),
+            ("client", Some("macOS 15.6"))
+        );
+        // Never registered, another user's, another workspace's: no row moves or is made.
+        assert!(!saw(&s, &t, &u, "desktop", now).await?);
+        assert!(!saw(&s, &t, &UserId::new("user:b"), "laptop", now).await?);
+        assert!(!saw(&s, &TenantId::new("ws:other"), &u, "laptop", now).await?);
+        assert_eq!(list_for_user(&s, &t, &u).await?.len(), 1);
+
+        assert!(rename(&s, &t, &u, "laptop", Some("Work laptop")).await?);
+        assert!(!rename(&s, &t, &u, "desktop", Some("x")).await?);
+        assert_eq!(one().await?.name.as_deref(), Some("Work laptop"));
+
+        // A new session registers it again and names no operating system.
+        laptop.updated_at = now + chrono::Duration::minutes(5);
+        laptop.os = None;
+        upsert(&s, &laptop).await?;
+        let again = one().await?;
+        assert_eq!(again.name.as_deref(), Some("Work laptop"));
+        assert_eq!(again.os.as_deref(), Some("macOS 15.6"));
+        assert_eq!(again.seen_at, Some(now));
+        assert_eq!(again.last_seen(), now + chrono::Duration::minutes(5));
+
+        assert!(rename(&s, &t, &u, "laptop", None).await?);
+        assert_eq!(one().await?.name, None);
+        Ok(())
+    }
+
+    /// The server's own rows move when it notes itself up, and a client's
+    /// row for a machine of the same name does not.
+    #[tokio::test]
+    async fn a_server_notes_itself_up_on_its_own_rows() -> Result<()> {
+        let s = mem_store().await?;
+        let then = chrono::Utc::now() - chrono::Duration::days(2);
+        let t = TenantId::new("ws:t");
+        upsert(
+            &s,
+            &DeviceProfile::new(
+                t.clone(),
+                UserId::new("user:a"),
+                "Hub",
+                "cuda",
+                DeviceRole::Genesis,
+                then,
+            ),
+        )
+        .await?;
+        upsert(
+            &s,
+            &DeviceProfile::new(
+                t.clone(),
+                UserId::new("user:b"),
+                "Hub",
+                "cuda",
+                DeviceRole::Genesis,
+                then,
+            ),
+        )
+        .await?;
+        upsert(
+            &s,
+            &DeviceProfile::client(t.clone(), UserId::new("user:c"), "hub", then),
+        )
+        .await?;
+        let now = chrono::Utc::now();
+        assert_eq!(saw_server(&s, "hub", now).await?, 2);
+        for user in ["user:a", "user:b"] {
+            assert_eq!(
+                list_for_user(&s, &t, &UserId::new(user)).await?[0].last_seen(),
+                now
+            );
+        }
+        assert_eq!(
+            list_for_user(&s, &t, &UserId::new("user:c")).await?[0].last_seen(),
+            then
         );
         Ok(())
     }

@@ -152,7 +152,55 @@ pub struct DeviceProfile {
     /// it means the node did not know, and a role should not be inferred from it.
     pub vram_mib: Option<u64>,
     pub role: DeviceRole,
+    /// When the machine last registered: a server when it starts or an
+    /// identity first calls it, a client at each session start.
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// When a call last named the machine, or the server running on it last
+    /// noted itself up. Later than `updated_at` for a machine in a long
+    /// session, or a server that has been up a while. `None` on a row from
+    /// before this was kept.
+    #[serde(default)]
+    pub seen_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// What its user calls it, when they named it. The host is what it calls
+    /// itself and what handoffs are addressed to; this is for people.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Its operating system, as it said: `macOS 15.6`, `Windows 11 Pro`,
+    /// `Ubuntu 24.04.1 LTS`.
+    #[serde(default)]
+    pub os: Option<String>,
+}
+
+/// The longest a device's name or its operating system's is kept.
+pub const MAX_LABEL_CHARS: usize = 64;
+
+/// A name a user gives a device, trimmed; `None` when blank, which takes a
+/// name away. Refused when too long or holding a control character.
+pub fn name_of(raw: &str) -> crate::Result<Option<String>> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Ok(None);
+    }
+    if name.chars().count() > MAX_LABEL_CHARS || name.chars().any(char::is_control) {
+        return Err(crate::AntumbraError::rejected(format!(
+            "a device's name is at most {MAX_LABEL_CHARS} characters, on one line"
+        )));
+    }
+    Ok(Some(name.to_string()))
+}
+
+/// An operating system's name as a machine reported it, kept when it is one:
+/// trimmed, on one line, cut to [`MAX_LABEL_CHARS`]. It is a label, so a
+/// value that is not one costs the label and never the registration.
+pub fn os_of(raw: &str) -> Option<String> {
+    let os: String = raw
+        .trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_LABEL_CHARS)
+        .collect();
+    let os = os.trim().to_string();
+    (!os.is_empty()).then_some(os)
 }
 
 impl DeviceProfile {
@@ -176,7 +224,24 @@ impl DeviceProfile {
             vram_mib: None,
             role,
             updated_at: now,
+            seen_at: None,
+            name: None,
+            os: None,
         }
+    }
+
+    /// When the machine was last heard from: its last call, or its last
+    /// registration when that is later or no call was noted.
+    pub fn last_seen(&self) -> chrono::DateTime<chrono::Utc> {
+        self.seen_at
+            .map_or(self.updated_at, |seen| seen.max(self.updated_at))
+    }
+
+    /// With the operating system it reported.
+    #[must_use]
+    pub fn with_os(mut self, os: Option<String>) -> Self {
+        self.os = os;
+        self
     }
 
     /// A node describing itself from what it found, taking the role that
@@ -413,6 +478,32 @@ mod tests {
         assert_eq!(unknown.vram_mib, None);
         assert_eq!(unknown.clone().with_vram(0).vram_mib, Some(0));
         assert!(!unknown.is_genesis());
+        Ok(())
+    }
+
+    /// A device is last seen at its last call when that is later than its
+    /// registration; a name is trimmed and bounded; an operating system's
+    /// name is kept when it is one.
+    #[test]
+    fn last_seen_names_and_operating_systems() -> anyhow::Result<()> {
+        let registered = chrono::Utc::now();
+        let mut d = profile("ws:t", "user:a", "laptop");
+        d.updated_at = registered;
+        assert_eq!(d.last_seen(), registered);
+        d.seen_at = Some(registered + chrono::Duration::minutes(40));
+        assert_eq!(d.last_seen(), registered + chrono::Duration::minutes(40));
+        // Registered again since: the registration is the later.
+        d.updated_at = registered + chrono::Duration::hours(2);
+        assert_eq!(d.last_seen(), registered + chrono::Duration::hours(2));
+
+        assert_eq!(name_of("  Work laptop ")?, Some("Work laptop".to_string()));
+        assert_eq!(name_of("   ")?, None);
+        assert!(name_of(&"x".repeat(65)).is_err());
+        assert!(name_of("two\nlines").is_err());
+
+        assert_eq!(os_of(" macOS 15.6\n"), Some("macOS 15.6".to_string()));
+        assert_eq!(os_of(""), None);
+        assert_eq!(os_of(&"y".repeat(200)).map(|o| o.chars().count()), Some(64));
         Ok(())
     }
 }

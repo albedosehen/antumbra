@@ -46,6 +46,11 @@ pub(super) struct RegisterDeviceParams {
     /// are addressed to (`ANTUMBRA_HOST_ID`, which the session-start block
     /// names).
     pub(super) host: String,
+    /// Its operating system, as a person would name it (`macOS 15.6`,
+    /// `Windows 11 Pro`, `Ubuntu 24.04.1 LTS`). Left out, what it said before
+    /// stays.
+    #[serde(default)]
+    pub(super) os: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -73,10 +78,20 @@ pub(super) struct DeviceView {
     pub(super) backend: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) vram_mib: Option<u64>,
-    /// When it last registered: a server when it starts or an identity first
-    /// calls it, a client at each session start. A machine no longer in use
-    /// keeps the last time it was.
+    /// What you named it, when you did (the dashboard's Devices page).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) name: Option<String>,
+    /// Its operating system, as it reported: `macOS 15.6`, `Windows 11 Pro`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) os: Option<String>,
+    /// When it was last heard from: its last call that named it (noted at
+    /// most every few minutes), or for a machine a server runs on, when that
+    /// server last noted itself up. A machine no longer in use keeps the last
+    /// time it was.
     pub(super) last_seen: String,
+    /// When it last registered: a server when it starts or an identity first
+    /// calls it, a client at each session start.
+    pub(super) registered: String,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -151,7 +166,8 @@ impl McpServer {
             self.user.clone(),
             host.clone(),
             Utc::now(),
-        );
+        )
+        .with_os(p.os.as_deref().and_then(antumbra_core::device::os_of));
         store_device::upsert(&self.store, &profile)
             .await
             .map_err(err)?;
@@ -172,16 +188,19 @@ impl McpServer {
             .await
             .map_err(err)?;
         // The same rule the store uses to name the trainer: the freshest
-        // genesis row. `mine` is newest first already.
+        // genesis row. `mine` is the most recently seen first already.
         let trainer = mine.iter().find(|d| d.is_genesis()).map(|d| d.host.clone());
         let devices = mine
             .into_iter()
             .map(|d| DeviceView {
-                host: d.host,
                 role: d.role.as_str().to_string(),
-                backend: d.backend,
                 vram_mib: d.vram_mib,
-                last_seen: d.updated_at.to_rfc3339(),
+                last_seen: d.last_seen().to_rfc3339(),
+                registered: d.updated_at.to_rfc3339(),
+                host: d.host,
+                backend: d.backend,
+                name: d.name,
+                os: d.os,
             })
             .collect();
         Ok(Json(DevicesOut {

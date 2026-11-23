@@ -253,6 +253,7 @@ $ctx = Get-Context $small $stub
 $asked = @(Get-Content $calls | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json })
 $named = @($asked | Where-Object { $_.tool -eq 'register_device' })
 Check 'registers it under its name' (($named.Count -eq 1) -and ($named[0].arguments.host -eq 'mac'))
+Check 'says its operating system' (($named.Count -eq 1) -and ([string]$named[0].arguments.os).Trim().Length -gt 0)
 Check 'still answers' $ctx.Contains('first small')
 $env:ANTUMBRA_HOST_ID = ''
 Set-Content -Path $calls -Value ''
