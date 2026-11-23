@@ -85,6 +85,53 @@ pub struct BridgeArgs {
     /// of the machine's own server.
     #[arg(long, requires = "token_file")]
     pub file_token_only: bool,
+    /// The record `antumbra join` keeps of the workspace this bridge is to
+    /// (its `workspace.json`). While that record says new memories stay
+    /// private, a call that would write one to the workspace is refused here
+    /// and never sent. Read for each such call, so `antumbra join --write`
+    /// takes effect on a session that is already open.
+    #[arg(long, value_name = "FILE")]
+    pub writes_as: Option<PathBuf>,
+}
+
+/// The tools that put something new into a workspace: what the write setting
+/// of a joined workspace is about.
+pub const WRITES: [&str; 4] = [
+    "store_memory",
+    "record_behavior",
+    "ingest_document",
+    "publish_relic",
+];
+
+/// Why a message is refused by the write setting `record` holds, or nothing:
+/// a call of one of [`WRITES`] while the record's `write` is `private`, or
+/// is missing, which a workspace joined before the setting is.
+pub fn refused_by_the_write_setting(message: &Value, record: &std::path::Path) -> Option<String> {
+    if method_of(message) != Some("tools/call") {
+        return None;
+    }
+    let tool = message.pointer("/params/name").and_then(Value::as_str)?;
+    if !WRITES.contains(&tool) {
+        return None;
+    }
+    let kept: Value = std::fs::read_to_string(record)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or(Value::Null);
+    let write = kept
+        .get("write")
+        .and_then(Value::as_str)
+        .unwrap_or("private");
+    if write != "private" {
+        return None;
+    }
+    let workspace = kept
+        .get("workspace")
+        .and_then(Value::as_str)
+        .unwrap_or("this workspace");
+    Some(format!(
+        "`{tool}` was not sent: on this machine new memories stay in the user's own store and nothing is written to {workspace}. Store it with your own Antumbra tools. If the user wants this in the workspace, they turn that on with `antumbra join --write ask` or `antumbra join --write workspace`."
+    ))
 }
 
 /// What became of one message sent to the endpoint.
@@ -510,6 +557,10 @@ impl Endpoint for HttpEndpoint {
         if let Some(host) = &self.reach.host {
             request = request.header(DEVICE_HEADER, host);
         }
+        // An agent is advertised what a session needs, unless told otherwise.
+        if let Some(tools) = antumbra_http::agent_tools() {
+            request = request.header(antumbra_http::TOOLS_HEADER, tools);
+        }
         let response = request
             .send_json(message)
             .map_err(|e| anyhow::anyhow!("{} did not answer: {e}", self.name()))?;
@@ -592,6 +643,22 @@ pub fn run(args: &BridgeArgs) -> anyhow::Result<()> {
                 continue;
             }
         };
+        // A write the workspace's setting keeps private is answered here, as
+        // a tool's own refusal, so the agent reads why and nothing is sent.
+        if let Some(why) = args
+            .writes_as
+            .as_deref()
+            .and_then(|record| refused_by_the_write_setting(&message, record))
+        {
+            if asks(&message) {
+                bridge.write(&json!({
+                    "jsonrpc": "2.0",
+                    "id": message["id"],
+                    "result": { "content": [{ "type": "text", "text": why }], "isError": true },
+                }));
+            }
+            continue;
+        }
         if takes_its_turn(&message) {
             bridge.take(message);
         } else {

@@ -56,4 +56,14 @@ check "sends no name when unset" test "$(machine <<<"$out")" = "<none>"
 out=$(ANTUMBRA_TOKEN_FILE="$file" ANTUMBRA_HOST_ID="  " bash "$helper" 2>/dev/null)
 check "sends no name when blank" test "$(machine <<<"$out")" = "<none>"
 
+tools() { jq -r '."X-Antumbra-Tools" // "<none>"'; }
+echo "what the session is advertised"
+out=$(env -u ANTUMBRA_AGENT_TOOLS ANTUMBRA_TOKEN_FILE="$file" bash "$helper" 2>/dev/null)
+check "asks for the agent profile when nothing says otherwise" test "$(tools <<<"$out")" = "agent"
+out=$(ANTUMBRA_AGENT_TOOLS=all ANTUMBRA_TOKEN_FILE="$file" bash "$helper" 2>/dev/null)
+check "asks for nothing when told all" test "$(tools <<<"$out")" = "<none>"
+out=$(ANTUMBRA_AGENT_TOOLS=" agent,population " ANTUMBRA_TOKEN_FILE="$file" bash "$helper" 2>/dev/null)
+check "asks for what it is told, trimmed" test "$(tools <<<"$out")" = "agent,population"
+check "still sends the bearer" test "$(bearer <<<"$out")" = "Bearer test-token"
+
 [ "$failed" = 0 ] && echo "all passed" || { echo "FAILED"; exit 1; }
