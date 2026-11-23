@@ -155,6 +155,23 @@ impl JsonPost for UreqJson {
 /// that machine writes. The hooks send it from `ANTUMBRA_HOST_ID`.
 pub const DEVICE_HEADER: &str = "X-Antumbra-Host";
 
+/// The header an agent's connection asks for fewer tools in. A coding
+/// session needs the `agent` profile's tools and pays, on every turn, for the
+/// description of every tool it is advertised.
+pub const TOOLS_HEADER: &str = "X-Antumbra-Tools";
+
+/// What an agent's connection asks to be given: `agent` unless
+/// `ANTUMBRA_AGENT_TOOLS` says otherwise (`all`, or tool names as the
+/// server's `--tools` reads them); `None` for `all`, which asks nothing.
+pub fn agent_tools() -> Option<String> {
+    let asked = std::env::var("ANTUMBRA_AGENT_TOOLS").unwrap_or_default();
+    match asked.trim() {
+        "" => Some("agent".to_string()),
+        all if all.eq_ignore_ascii_case("all") => None,
+        other => Some(other.to_string()),
+    }
+}
+
 /// The name this process's machine goes by, as the hooks name it: the
 /// `ANTUMBRA_HOST_ID` the operator set, lower-cased; `None` when nothing
 /// names it, and the server stamps its writes as before.
