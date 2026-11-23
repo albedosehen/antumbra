@@ -557,6 +557,10 @@ impl Endpoint for HttpEndpoint {
         if let Some(host) = &self.reach.host {
             request = request.header(DEVICE_HEADER, host);
         }
+        // An agent is advertised what a session needs, unless told otherwise.
+        if let Some(tools) = antumbra_http::agent_tools() {
+            request = request.header(antumbra_http::TOOLS_HEADER, tools);
+        }
         let response = request
             .send_json(message)
             .map_err(|e| anyhow::anyhow!("{} did not answer: {e}", self.name()))?;

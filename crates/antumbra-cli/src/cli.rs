@@ -241,6 +241,10 @@ pub enum Command {
     /// collect your token once you are let in (`join --status`). Asking
     /// changes nothing about this machine's own setup.
     Join(crate::join::JoinArgs),
+    /// Write every memory that is yours on your server to a file, as JSON
+    /// Lines, whole: `export`, `export --out mine.jsonl`, or `export --from
+    /// <workspace>` for what is yours in a workspace this machine joined.
+    Export(crate::export::ExportArgs),
     /// Sign this machine in again to a workspace your account is in, where a
     /// control plane signs its tokens: `login <server> --email <address>`
     /// sends a link to follow, and `login --status` collects the token.
