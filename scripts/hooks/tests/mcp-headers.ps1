@@ -62,6 +62,20 @@ $env:ANTUMBRA_HOST_ID = '  '
 Check 'sends no name when blank' ((Get-Machine (Invoke-Helper $file).Out) -eq '<none>')
 $env:ANTUMBRA_HOST_ID = $hostBefore
 
+function Get-Tools([string]$Out) {
+    $said = ($Out | ConvertFrom-Json).'X-Antumbra-Tools'
+    if ($said) { return $said } else { return '<none>' }
+}
+Write-Output 'what the session is advertised'
+$toolsBefore = $env:ANTUMBRA_AGENT_TOOLS
+Remove-Item Env:ANTUMBRA_AGENT_TOOLS -ErrorAction SilentlyContinue
+Check 'asks for the agent profile when nothing says otherwise' ((Get-Tools (Invoke-Helper $file).Out) -eq 'agent')
+$env:ANTUMBRA_AGENT_TOOLS = 'all'
+Check 'asks for nothing when told all' ((Get-Tools (Invoke-Helper $file).Out) -eq '<none>')
+$env:ANTUMBRA_AGENT_TOOLS = ' agent,population '
+Check 'asks for what it is told, trimmed' ((Get-Tools (Invoke-Helper $file).Out) -eq 'agent,population')
+if ($null -eq $toolsBefore) { Remove-Item Env:ANTUMBRA_AGENT_TOOLS -ErrorAction SilentlyContinue } else { $env:ANTUMBRA_AGENT_TOOLS = $toolsBefore }
+
 Remove-Item Env:ANTUMBRA_TOKEN_FILE
 Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 if ($script:failed -eq 0) { Write-Output 'all passed'; exit 0 } else { Write-Output 'FAILED'; exit 1 }

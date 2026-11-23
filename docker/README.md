@@ -15,7 +15,7 @@ docker compose -f docker/docker-compose.yml up -d
 ```
 
 - **SurrealDB** comes up on `ws://127.0.0.1:8000/rpc` (namespace `antumbra`, database `main`, isolated from anything else on the server).
-- **antumbra-mcp** comes up on `http://127.0.0.1:8081` once SurrealDB is healthy.
+- **antumbra-mcp** comes up on `http://127.0.0.1:8081` once SurrealDB is healthy. `GET /healthz` there answers `200 ok` when the server can read its store and `503` when it cannot, with no token: that, and not the dashboard's page, is what to point a health check at.
 
 Because the database is a real `ws://` server, the MCP server and the CLI can both connect to it at the same time (the console, `antumbra tui`, and your coding agent reach it through the MCP server), unlike the single-writer embedded `surrealkv` file.
 
