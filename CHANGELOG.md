@@ -14,7 +14,7 @@
 
 ### Your data
 
-- **`antumbra export`** ([#PRNUM](https://github.com/albedosehen/antumbra/pull/PRNUM)). Every memory that is yours on a server, whole, to a file of JSON Lines: its text, kind, confidence, compartment, the machine it was written on, when, and its git anchor. `--from <workspace>` exports what is yours in a workspace the machine joined. The file is its owner's alone to read, since it holds what looks like a secret too.
+- **`antumbra export`** ([#589](https://github.com/albedosehen/antumbra/pull/589)). Every memory that is yours on a server, whole, to a file of JSON Lines: its text, kind, confidence, compartment, the machine it was written on, when, and its git anchor. `--from <workspace>` exports what is yours in a workspace the machine joined. The file is its owner's alone to read, since it holds what looks like a secret too.
 
 ### Setup
 
