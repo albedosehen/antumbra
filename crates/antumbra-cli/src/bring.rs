@@ -75,7 +75,7 @@ pub(crate) fn joined(antumbra: &Path) -> Vec<Joined> {
 }
 
 /// The workspace `--to` names among those joined, or the only one.
-fn target(all: &[Joined], to: Option<&str>) -> anyhow::Result<Joined> {
+pub(crate) fn target(all: &[Joined], to: Option<&str>) -> anyhow::Result<Joined> {
     let named = |j: &&Joined| {
         to.is_none_or(|to| {
             let to = to.trim().trim_end_matches('/');

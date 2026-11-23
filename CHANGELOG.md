@@ -12,6 +12,10 @@
 
 - **A followed link is answered with a page** ([#568](https://github.com/albedosehen/antumbra/pull/568), [#570](https://github.com/albedosehen/antumbra/pull/570)). A browser that follows a link from the control plane is told what happened and what to run next, in a page that runs no script, loads nothing and is not kept; a signup's token is shown on it once. A program is still answered with JSON. It was written for 0.5.1 and merged after that release was cut.
 
+### Your data
+
+- **`antumbra export`** ([#PRNUM](https://github.com/albedosehen/antumbra/pull/PRNUM)). Every memory that is yours on a server, whole, to a file of JSON Lines: its text, kind, confidence, compartment, the machine it was written on, when, and its git anchor. `--from <workspace>` exports what is yours in a workspace the machine joined. The file is its owner's alone to read, since it holds what looks like a secret too.
+
 ### Setup
 
 - **An agent whose command is there and does not run is not taken as installed** ([#571](https://github.com/albedosehen/antumbra/pull/571)). `antumbra setup` with no `--agent` connected Codex wherever a `codex` program was on the PATH. Where that program was another tool's wrapper that fails for want of the real one, setup wrote Codex's hooks, could not register the server, recorded Codex among the machine's agents, and `antumbra setup check` then failed on a machine that had passed it. An agent's command now has to answer `--version`; one that does not is said in a line and left out. `antumbra join --connect` leaves such a Codex out too. A machine 0.5.1 left that way is put right by running setup again with `--agent` naming the agents it has.
