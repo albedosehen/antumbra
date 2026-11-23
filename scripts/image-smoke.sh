@@ -5,7 +5,7 @@
 # `answer` escalates cleanly. It needs no database and downloads no model: an
 # in-memory store, a fixed embedder, and no expert, so the base is never read.
 #
-#   scripts/image-smoke.sh ghcr.io/albedosehen/antumbra-mcp:0.5.2
+#   scripts/image-smoke.sh ghcr.io/albedosehen/antumbra-mcp:0.5.3
 #   SMOKE_PORT=18082 scripts/image-smoke.sh antumbra-mcp:local
 #
 # Needs docker, curl and jq. The token and the signing secret are made here and
