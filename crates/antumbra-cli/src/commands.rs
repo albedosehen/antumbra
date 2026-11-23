@@ -679,7 +679,7 @@ pub async fn serve(url: &str, args: ServeArgs) -> anyhow::Result<()> {
     #[cfg(not(feature = "models"))]
     {
         let _ = (url, &task, max_new_tokens, threshold, temperature);
-        anyhow::bail!("`serve` requires building with --features models (candle + a GPU)")
+        anyhow::bail!("`serve`: this `antumbra` was built without the model backend. The released command has it: install it from a release, or build with --features models")
     }
 }
 
