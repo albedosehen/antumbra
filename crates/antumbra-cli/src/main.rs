@@ -25,6 +25,7 @@ mod cli;
 mod commands;
 mod critic_cmd;
 mod eval_args;
+mod export;
 mod gate_outcomes;
 mod gate_sweep;
 #[cfg(feature = "models")]
@@ -166,6 +167,10 @@ async fn run() -> anyhow::Result<()> {
         Command::Setup { mode } => {
             // Files, Docker, HTTP and prompts: all blocking, so off the runtime.
             tokio::task::spawn_blocking(move || setup::run(mode)).await??;
+        }
+        Command::Export(args) => {
+            // Files and HTTP: blocking, so off the runtime.
+            tokio::task::spawn_blocking(move || export::run(args)).await??;
         }
         Command::Bring(args) => {
             // Files and HTTP: blocking, so off the runtime.
