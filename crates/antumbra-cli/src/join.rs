@@ -521,7 +521,7 @@ fn connect(
             ));
         } else {
             lines.push(format!(
-                "{workspace}: no agent that takes a server by name was found (Claude Code, Codex, Copilot CLI). For Claude Code, once it is installed:"
+                "{workspace}: none of the agents setup connects was found on this machine. For Claude Code, once it is installed:"
             ));
             lines.push(format!(
                 "  claude mcp add-json {name} --scope user '{server}'"
@@ -768,6 +768,167 @@ fn leave(
     Ok(lines)
 }
 
+/// A text file written whole, its directory made when it is not there.
+fn write_whole(path: &Path, text: &str) -> anyhow::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(path, text)?;
+    Ok(())
+}
+
+/// A value as a file's text.
+fn pretty(value: &Value) -> String {
+    let mut text = serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string());
+    text.push('\n');
+    text
+}
+
+/// Register with Gemini CLI, whose config is in `gemini`: an extension of
+/// the workspace's own, beside the one setup wrote, holding its server and
+/// nothing else. `Ok(false)` when setup has not connected Gemini CLI here.
+fn with_gemini_at(gemini: &Path, name: &str, server: Option<&str>) -> anyhow::Result<bool> {
+    let extensions = gemini.join("extensions");
+    if !extensions.join(crate::agents::gemini::EXTENSION).is_dir() {
+        return Ok(false);
+    }
+    let dir = extensions.join(name);
+    match server {
+        None => {
+            if dir.is_dir() {
+                std::fs::remove_dir_all(&dir)?;
+            }
+        }
+        Some(server) => {
+            let (command, args) = bridge_for(server, "gemini")?;
+            write_whole(
+                &dir.join("gemini-extension.json"),
+                &pretty(&json!({
+                    "name": name,
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "description": "A workspace this machine joined, through Antumbra. Written by `antumbra join --connect`; `antumbra join --disconnect` takes it out.",
+                    "mcpServers": { name: { "command": command, "args": args } },
+                })),
+            )?;
+        }
+    }
+    Ok(true)
+}
+
+/// Register with goose, whose plugins are in `plugins`: a plugin of the
+/// workspace's own holding its server. `Ok(false)` when setup has not
+/// connected goose here.
+fn with_goose_at(plugins: &Path, name: &str, server: Option<&str>) -> anyhow::Result<bool> {
+    if !plugins.join(crate::agents::goose::PLUGIN).is_dir() {
+        return Ok(false);
+    }
+    let dir = plugins.join(name);
+    match server {
+        None => {
+            if dir.is_dir() {
+                std::fs::remove_dir_all(&dir)?;
+            }
+        }
+        Some(server) => {
+            let (command, args) = bridge_for(server, "goose")?;
+            write_whole(
+                &dir.join("plugin.json"),
+                &pretty(&json!({
+                    "name": name,
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "description": "A workspace this machine joined, through Antumbra. Written by `antumbra join --connect`.",
+                })),
+            )?;
+            write_whole(
+                &dir.join(".mcp.json"),
+                &pretty(&json!({ "mcpServers": { name: { "command": command, "args": args } } })),
+            )?;
+        }
+    }
+    Ok(true)
+}
+
+/// Register with OpenCode, whose config is in `config`: a plugin file of the
+/// workspace's own that registers its server the two ways OpenCode's two
+/// release lines take one, as setup's own plugin registers the machine's.
+/// `Ok(false)` when setup has not connected OpenCode here.
+fn with_opencode_at(config: &Path, name: &str, server: Option<&str>) -> anyhow::Result<bool> {
+    let plugins = config.join("plugins");
+    if !plugins.join("antumbra.js").is_file() {
+        return Ok(false);
+    }
+    let file = plugins.join(format!("{name}.js"));
+    match server {
+        None => {
+            if file.is_file() {
+                std::fs::remove_file(&file)?;
+            }
+        }
+        Some(server) => {
+            let (command, args) = bridge_for(server, "opencode")?;
+            let mut line = vec![command];
+            line.extend(args);
+            // Strings as JavaScript: JSON's escapes are JavaScript's.
+            let (name_js, line_js) = (json!(name).to_string(), json!(line).to_string());
+            write_whole(
+                &file,
+                &format!(
+                    "// A workspace this machine joined, through Antumbra. Written by `antumbra join --connect`;\n\
+                     // `antumbra join --disconnect` takes it out.\n\
+                     const NAME = {name_js}\n\
+                     const SERVER = {{ type: \"local\", command: {line_js} }}\n\n\
+                     export default {{\n  id: NAME,\n\n  // OpenCode 2.x.\n  async setup(ctx) {{\n    try {{\n      ctx.mcp.transform((servers) => {{\n        if (!servers.get(NAME)) servers.set(NAME, SERVER)\n      }})\n    }} catch {{}}\n  }},\n\n  // OpenCode 1.x.\n  async server() {{\n    return {{\n      config: async (config) => {{\n        config.mcp = {{ ...(config.mcp ?? {{}}) }}\n        if (!config.mcp[NAME]) config.mcp[NAME] = {{ ...SERVER, enabled: true }}\n      }},\n    }}\n  }},\n}}\n"
+                ),
+            )?;
+        }
+    }
+    Ok(true)
+}
+
+/// Every agent told of a workspace's server, or asked to drop it, each with
+/// how it went: Claude Code and Codex by their own commands, Copilot CLI by
+/// an entry in its file, and Gemini CLI, goose and OpenCode by a bundle of
+/// the workspace's own beside the one setup wrote them.
+fn every_agent(
+    antumbra: &Path,
+    name: &str,
+    server: Option<&str>,
+) -> [(&'static str, anyhow::Result<bool>); 6] {
+    // `antumbra` is `.antumbra` in the user's home.
+    let home = antumbra.parent().unwrap_or(antumbra);
+    let variable = |name: &str| std::env::var(name).ok();
+    let nowhere = |_: &str| None;
+    let ground = crate::agents::Ground {
+        home,
+        antumbra: crate::agents::Program::Named,
+        env: &variable,
+        find: &nowhere,
+    };
+    [
+        ("Claude Code", with_claude(name, server)),
+        ("Codex", with_codex(name, server)),
+        (
+            "Copilot CLI",
+            match copilot_home(antumbra) {
+                Some(dir) => with_copilot_at(&dir, name, server),
+                None => Ok(false),
+            },
+        ),
+        (
+            "Gemini CLI",
+            with_gemini_at(&crate::agents::gemini::home(&ground), name, server),
+        ),
+        (
+            "goose",
+            with_goose_at(&crate::agents::goose::plugins_dir(&ground), name, server),
+        ),
+        (
+            "OpenCode",
+            with_opencode_at(&crate::agents::opencode::config_dir(&ground), name, server),
+        ),
+    ]
+}
+
 /// Note which agents were told and which could not be, and say whether any
 /// was: one agent that fails does not keep the others from being told.
 fn tell_each<const N: usize>(
@@ -807,18 +968,11 @@ fn run_in(antumbra: &Path, args: &JoinArgs, send: Send<'_>) -> anyhow::Result<Ve
         let told = std::cell::RefCell::new(std::collections::BTreeSet::new());
         let failed = std::cell::RefCell::new(std::collections::BTreeSet::new());
         let register = |name: &str, server: Option<&str>| {
-            let results = [
-                ("Claude Code", with_claude(name, server)),
-                ("Codex", with_codex(name, server)),
-                (
-                    "Copilot CLI",
-                    match copilot_home(antumbra) {
-                        Some(dir) => with_copilot_at(&dir, name, server),
-                        None => Ok(false),
-                    },
-                ),
-            ];
-            Ok(tell_each(results, &told, &failed))
+            Ok(tell_each(
+                every_agent(antumbra, name, server),
+                &told,
+                &failed,
+            ))
         };
         let mut lines = connect(
             antumbra,
@@ -867,18 +1021,9 @@ pub fn run(args: JoinArgs) -> anyhow::Result<()> {
     let antumbra = home.join(".antumbra");
     let lines = if args.leave {
         let register = |name: &str, server: Option<&str>| {
-            let results = [
-                ("Claude Code", with_claude(name, server)),
-                ("Codex", with_codex(name, server)),
-                (
-                    "Copilot CLI",
-                    match copilot_home(&antumbra) {
-                        Some(dir) => with_copilot_at(&dir, name, server),
-                        None => Ok(false),
-                    },
-                ),
-            ];
-            Ok(results.into_iter().any(|(_, told)| told.unwrap_or(false)))
+            Ok(every_agent(&antumbra, name, server)
+                .into_iter()
+                .any(|(_, told)| told.unwrap_or(false)))
         };
         let send_as =
             |server: &str, path: &str, token: &str, body: Value| -> anyhow::Result<(u16, Value)> {
@@ -1532,6 +1677,105 @@ mod tests {
         assert!(said[0].contains("still a member"), "{said:?}");
         assert_eq!(asked.borrow().len(), before);
         assert!(!antumbra.join("workspaces/b__ws_lab").exists());
+        Ok(())
+    }
+
+    /// Gemini CLI, goose and OpenCode are each told by a bundle of the
+    /// workspace's own beside the one setup wrote: nothing is made where
+    /// setup has not connected the agent, setup's own bundle is untouched,
+    /// and taking it out removes only the workspace's.
+    #[test]
+    fn three_agents_are_told_by_a_bundle_of_the_workspaces_own() -> anyhow::Result<()> {
+        let home = crate::agents::scratch::Scratch::new("join-bundles")?;
+        let server = json!({ "type": "stdio", "command": "/bin/antumbra",
+            "args": ["mcp", "bridge", "--agent", "claude", "--surface", "https://team.example", "--token-file", "/t", "--file-token-only"] })
+        .to_string();
+        let name = "antumbra-crew";
+        let expects = |args: &Value, agent: &str| {
+            let args: Vec<&str> = args
+                .as_array()
+                .map(|a| a.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            args.windows(2).any(|w| w == ["--agent", agent])
+                && args.contains(&"--file-token-only")
+                && !args.contains(&"claude")
+        };
+
+        // Gemini CLI.
+        let gemini = home.path().join(".gemini");
+        assert!(!with_gemini_at(&gemini, name, Some(&server))?);
+        assert!(!gemini.exists());
+        let own = gemini.join("extensions").join("antumbra");
+        std::fs::create_dir_all(&own)?;
+        std::fs::write(own.join("gemini-extension.json"), "{}")?;
+        assert!(with_gemini_at(&gemini, name, Some(&server))?);
+        let manifest: Value = serde_json::from_str(&std::fs::read_to_string(
+            gemini
+                .join("extensions")
+                .join(name)
+                .join("gemini-extension.json"),
+        )?)?;
+        assert_eq!(manifest["name"], name);
+        assert_eq!(manifest["mcpServers"][name]["command"], "/bin/antumbra");
+        assert!(
+            expects(&manifest["mcpServers"][name]["args"], "gemini"),
+            "{manifest}"
+        );
+        assert!(with_gemini_at(&gemini, name, None)?);
+        assert!(!gemini.join("extensions").join(name).exists());
+        assert_eq!(
+            std::fs::read_to_string(own.join("gemini-extension.json"))?,
+            "{}"
+        );
+
+        // goose.
+        let plugins = home.path().join(".agents").join("plugins");
+        assert!(!with_goose_at(&plugins, name, Some(&server))?);
+        std::fs::create_dir_all(plugins.join("antumbra"))?;
+        assert!(with_goose_at(&plugins, name, Some(&server))?);
+        let plugin: Value = serde_json::from_str(&std::fs::read_to_string(
+            plugins.join(name).join("plugin.json"),
+        )?)?;
+        let servers: Value = serde_json::from_str(&std::fs::read_to_string(
+            plugins.join(name).join(".mcp.json"),
+        )?)?;
+        assert_eq!(plugin["name"], name);
+        assert!(
+            expects(&servers["mcpServers"][name]["args"], "goose"),
+            "{servers}"
+        );
+        assert!(with_goose_at(&plugins, name, None)?);
+        assert!(!plugins.join(name).exists() && plugins.join("antumbra").is_dir());
+
+        // OpenCode.
+        let config = home.path().join(".config").join("opencode");
+        assert!(!with_opencode_at(&config, name, Some(&server))?);
+        std::fs::create_dir_all(config.join("plugins"))?;
+        std::fs::write(
+            config.join("plugins").join("antumbra.js"),
+            "// setup's own\n",
+        )?;
+        assert!(with_opencode_at(&config, name, Some(&server))?);
+        let plugin = std::fs::read_to_string(config.join("plugins").join(format!("{name}.js")))?;
+        assert!(
+            plugin.contains("const NAME = \"antumbra-crew\""),
+            "{plugin}"
+        );
+        assert!(
+            plugin.contains("\"--agent\",\"opencode\"") && plugin.contains("\"--file-token-only\""),
+            "{plugin}"
+        );
+        assert!(
+            plugin.contains("servers.set(NAME, SERVER)")
+                && plugin.contains("config.mcp[NAME] = { ...SERVER, enabled: true }"),
+            "{plugin}"
+        );
+        assert!(with_opencode_at(&config, name, None)?);
+        assert!(!config.join("plugins").join(format!("{name}.js")).exists());
+        assert_eq!(
+            std::fs::read_to_string(config.join("plugins").join("antumbra.js"))?,
+            "// setup's own\n"
+        );
         Ok(())
     }
 }

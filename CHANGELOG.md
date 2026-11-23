@@ -15,6 +15,7 @@
 ### Setup
 
 - **An agent whose command is there and does not run is not taken as installed** ([#571](https://github.com/albedosehen/antumbra/pull/571)). `antumbra setup` with no `--agent` connected Codex wherever a `codex` program was on the PATH. Where that program was another tool's wrapper that fails for want of the real one, setup wrote Codex's hooks, could not register the server, recorded Codex among the machine's agents, and `antumbra setup check` then failed on a machine that had passed it. An agent's command now has to answer `--version`; one that does not is said in a line and left out. `antumbra join --connect` leaves such a Codex out too. A machine 0.5.1 left that way is put right by running setup again with `--agent` naming the agents it has.
+- **Gemini CLI, goose and OpenCode are given a joined workspace's tools** ([#PRNUM](https://github.com/albedosehen/antumbra/pull/PRNUM)). `antumbra join --connect` told Claude Code, Codex and Copilot CLI. The other three are connected by setup through a bundle it writes whole, so each is now given a second one, the workspace's own, holding its server and nothing else: `~/.gemini/extensions/antumbra-<workspace>/`, `~/.agents/plugins/antumbra-<workspace>/`, and `plugins/antumbra-<workspace>.js` in OpenCode's config. Only where setup has connected the agent; `--disconnect` and `--leave` remove them.
 
 ### The server
 
