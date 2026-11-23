@@ -1516,6 +1516,176 @@ async fn what_to_share_is_suggested_from_what_was_shared_before() -> anyhow::Res
     Ok(())
 }
 
+/// A connection that asks for the agent's tools is given those and no
+/// others, and one that asks for nothing keeps every tool: the same server,
+/// the same token.
+#[tokio::test]
+async fn a_connection_that_asks_for_the_agents_tools_is_given_only_those() -> anyhow::Result<()> {
+    let st = state().await?;
+    let tok = valid_token()?;
+    let call = |tools: Option<&'static str>, tool: &'static str| {
+        let (st, tok) = (st.clone(), tok.clone());
+        async move {
+            let mut req = Request::builder()
+                .method("POST")
+                .uri("/mcp/call")
+                .header(header::AUTHORIZATION, format!("Bearer {tok}"));
+            if let Some(tools) = tools {
+                req = req.header(TOOLS_HEADER, tools);
+            }
+            let body = serde_json::json!({ "tool": tool, "arguments": {} }).to_string();
+            let res = router(st).oneshot(req.body(Body::from(body))?).await?;
+            let status = res.status();
+            anyhow::Ok((status, body_text(res).await?))
+        }
+    };
+    // The dashboard and the CLI send no such header.
+    let (status, _) = call(None, "list_memories").await?;
+    anyhow::ensure!(status == StatusCode::OK, "{status}");
+    // An agent's connection: a tool of the profile is served, another is not.
+    let (status, _) = call(Some("agent"), "handoffs").await?;
+    anyhow::ensure!(status == StatusCode::OK, "{status}");
+    let (status, why) = call(Some("agent"), "list_memories").await?;
+    anyhow::ensure!(
+        status == StatusCode::BAD_REQUEST && why.contains("not in this server's tool profile"),
+        "{status} {why}"
+    );
+    // `all`, and a name of no tool, ask for nothing.
+    for spec in ["all", "a_tool_of_some_other_version"] {
+        let (status, _) = call(Some(spec), "list_memories").await?;
+        anyhow::ensure!(status == StatusCode::OK, "{spec}: {status}");
+    }
+    Ok(())
+}
+
+/// A workspace from before roles, with two people and no owner (#580): its
+/// own person's first read with an ordinary token closes nothing; with the
+/// operator's token they are its owner and can let people in; and a member
+/// leaves by removing themselves.
+#[tokio::test]
+async fn a_workspace_from_before_roles_is_opened_by_the_operator_and_left_by_a_member(
+) -> anyhow::Result<()> {
+    let st = state().await?;
+    let with = |tok: String, method: &'static str, path: &'static str, body: serde_json::Value| {
+        let st = st.clone();
+        async move {
+            let req = Request::builder()
+                .method(method)
+                .uri(path)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, format!("Bearer {tok}"));
+            let res = router(st)
+                .oneshot(req.body(Body::from(body.to_string()))?)
+                .await?;
+            let status = res.status();
+            let text = body_text(res).await?;
+            anyhow::Ok((
+                status,
+                serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default(),
+            ))
+        }
+    };
+    // Two principals as a store from before roles holds them: no role.
+    antumbra_store::testing::members_from_before_roles(
+        &st.store,
+        &TenantId::new("ws:old"),
+        &[&UserId::new("user:own"), &UserId::new("user:check")],
+    )
+    .await?;
+    let none = serde_json::Value::Null;
+    let ordinary = token("ws:old", "user:own")?;
+    let (status, listed) = with(ordinary.clone(), "GET", "/join/codes", none.clone()).await?;
+    anyhow::ensure!(
+        status == StatusCode::FORBIDDEN,
+        "a member listed join codes: {status} {listed}"
+    );
+    let (status, _) = with(
+        ordinary.clone(),
+        "POST",
+        "/join/codes",
+        serde_json::json!({}),
+    )
+    .await?;
+    anyhow::ensure!(status == StatusCode::FORBIDDEN, "{status}");
+
+    // The same person with the operator's token: the workspace has no owner,
+    // so it is theirs, and stays theirs for their ordinary token.
+    let operator = antumbra_auth::mint_hs256_operator(
+        b"test-secret",
+        "ws:old",
+        "user:own",
+        std::time::Duration::from_secs(600),
+    )?;
+    let (status, made) = with(operator, "POST", "/join/codes", serde_json::json!({})).await?;
+    anyhow::ensure!(
+        status == StatusCode::OK,
+        "the operator could not open the workspace: {status} {made}"
+    );
+    let (status, _) = with(ordinary.clone(), "GET", "/join/codes", none.clone()).await?;
+    anyhow::ensure!(status == StatusCode::OK, "{status}");
+
+    // The other leaves by removing themselves; the owner, the last, cannot.
+    let check = token("ws:old", "user:check")?;
+    let (status, left) = with(
+        check.clone(),
+        "POST",
+        "/members/remove",
+        serde_json::json!({ "user": "user:check" }),
+    )
+    .await?;
+    anyhow::ensure!(
+        status == StatusCode::OK,
+        "a member could not leave: {status} {left}"
+    );
+    let (status, _) = with(check, "GET", "/members", none.clone()).await?;
+    anyhow::ensure!(
+        status != StatusCode::OK,
+        "someone who left was still served"
+    );
+    let (status, why) = with(
+        ordinary,
+        "POST",
+        "/members/remove",
+        serde_json::json!({ "user": "user:own" }),
+    )
+    .await?;
+    anyhow::ensure!(status != StatusCode::OK, "the last owner left: {why}");
+    Ok(())
+}
+
+/// `/healthz` answers without a token, from the store: well after a member's
+/// request has left the one connection signed in as them, and saying nothing
+/// of any workspace.
+#[tokio::test]
+async fn healthz_answers_from_the_store_with_no_token() -> anyhow::Result<()> {
+    let st = state().await?;
+    let get = || {
+        let st = st.clone();
+        async move {
+            let res = router(st)
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/healthz")
+                        .body(Body::empty())?,
+                )
+                .await?;
+            let status = res.status();
+            anyhow::Ok((status, body_text(res).await?))
+        }
+    };
+    anyhow::ensure!(get().await? == (StatusCode::OK, "ok".to_string()));
+    // After a member's call, which signs the embedded connection in as them.
+    let tok = valid_token()?;
+    let body = serde_json::json!({ "tool": "store_memory", "arguments": { "content": "a note", "network": "world" } }).to_string();
+    let res = router(st.clone())
+        .oneshot(call_request(Some(&tok), &body)?)
+        .await?;
+    anyhow::ensure!(res.status() == StatusCode::OK);
+    anyhow::ensure!(get().await? == (StatusCode::OK, "ok".to_string()));
+    Ok(())
+}
+
 /// A server whose tokens a control plane signs: its admins make join codes
 /// here, and whoever asks or collects here is told where to go instead. With
 /// no control plane and no secret, it makes none and says only that.

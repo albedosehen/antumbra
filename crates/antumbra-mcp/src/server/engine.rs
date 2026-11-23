@@ -85,6 +85,41 @@ impl McpServer {
             shared_bind: None,
             decider: None,
             steward: Arc::new(Steward::default()),
+            seen: Arc::default(),
+        }
+    }
+
+    /// Note that the machine this call came from was heard from: its device
+    /// row's last-seen moves to now (#597). At most one write per machine
+    /// every [`SEEN_EVERY`], so a hook that recalls on every prompt does not
+    /// write on every prompt. A machine with no row is not given one. Run
+    /// once the connection is this caller's; a failure is said and costs the
+    /// call nothing.
+    pub(super) async fn note_seen(&self) {
+        let device = self.device();
+        let now = std::time::Instant::now();
+        {
+            let Ok(mut seen) = self.seen.lock() else {
+                return;
+            };
+            if seen
+                .get(&device)
+                .is_some_and(|at| now.duration_since(*at) < SEEN_EVERY)
+            {
+                return;
+            }
+            seen.insert(device.clone(), now);
+        }
+        if let Err(e) = antumbra_store::repo::device::saw(
+            &self.store,
+            &self.tenant,
+            &self.user,
+            &device,
+            Utc::now(),
+        )
+        .await
+        {
+            eprintln!("antumbra-mcp: could not note {device} seen: {e}");
         }
     }
 
@@ -133,6 +168,20 @@ impl McpServer {
     pub fn called_from(&self, device: String) -> Self {
         let mut call = self.clone();
         call.device = Some(device);
+        call
+    }
+
+    /// This server for one request from a connection that asked for fewer
+    /// tools ([`crate::http::TOOLS_HEADER`]): what it serves, cut down to
+    /// what was asked. A copy, like [`McpServer::called_from`]: the server
+    /// cached for an identity is the dashboard's and the CLI's too.
+    #[must_use]
+    pub fn given_only(&self, asked: &crate::profile::ToolProfile) -> Self {
+        let mut call = self.clone();
+        call.profile = Some(Arc::new(match &self.profile {
+            Some(serves) => serves.within(asked),
+            None => asked.clone(),
+        }));
         call
     }
 
@@ -533,6 +582,7 @@ impl McpServer {
         // Held to the end of the dispatch: a shared connection stays this
         // caller's for the whole tool.
         let _bound = self.bound().await?;
+        self.note_seen().await;
         // Deserialize `arguments` into the tool's params, call it, and serialize
         // the result -- one arm per tool, mirroring the `#[tool]` methods.
         macro_rules! dispatch {
@@ -633,9 +683,15 @@ impl ServerHandler for McpServer {
         let supports_cache_hints = context
             .protocol_version()
             .is_some_and(|version| version >= rmcp::model::ProtocolVersion::V_2026_07_28);
+        // What the connection asked to be given, read for each request.
+        let asked = context
+            .extensions
+            .get::<axum::http::request::Parts>()
+            .and_then(|parts| crate::http::caller_tools(&parts.headers))
+            .map(|asked| self.given_only(&asked));
         Ok(rmcp::model::ListToolsResult {
             result_type: Some(rmcp::model::ResultType::COMPLETE),
-            tools: self.advertised_tools(),
+            tools: asked.as_ref().unwrap_or(self).advertised_tools(),
             meta: None,
             next_cursor: None,
             ttl_ms: supports_cache_hints.then_some(0),
@@ -666,6 +722,10 @@ impl ServerHandler for McpServer {
             .and_then(|parts| crate::http::caller_device(&parts.headers))
             .map(|device| self.called_from(device));
         let server = called_from.as_ref().unwrap_or(self);
+        let given_only = parts
+            .and_then(|parts| crate::http::caller_tools(&parts.headers))
+            .map(|asked| server.given_only(&asked));
+        let server = given_only.as_ref().unwrap_or(server);
         let span = crate::telemetry::tool_span(
             &request.name,
             Self::is_tool(&request.name),
@@ -678,6 +738,7 @@ impl ServerHandler for McpServer {
             // Held until the router returns: a shared connection stays this
             // caller's for the whole tool.
             let _bound = server.bound().await?;
+            server.note_seen().await;
             let tcc = rmcp::handler::server::tool::ToolCallContext::new(server, request, context);
             Self::tool_router().call(tcc).await
         }

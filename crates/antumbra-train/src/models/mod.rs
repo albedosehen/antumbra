@@ -2,4 +2,4 @@
 
 pub mod qwen;
 
-pub use qwen::{GenTiming, QwenCausalLm, Together};
+pub use qwen::{base_is_cached, fetch_base, GenTiming, QwenCausalLm, Together};

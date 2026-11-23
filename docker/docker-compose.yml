@@ -201,7 +201,14 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # The root stays read-only. The server writes in two places, each a named
+    # volume: base weights (the Hugging Face cache, about 3 GB, fetched the
+    # first time an expert is served) and adapters (pulled from the server
+    # that trained them, or read back from the archive).
     read_only: true
+    volumes:
+      - ${ANTUMBRA_WEIGHTS:-antumbra-weights}:/weights
+      - ${ANTUMBRA_ADAPTERS:-antumbra-adapters}:/adapters
     tmpfs:
       - /tmp
     restart: unless-stopped
@@ -524,5 +531,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  antumbra-weights:
+  antumbra-adapters:
   antumbra-rerank-cache:
   antumbra-copal-blobs:

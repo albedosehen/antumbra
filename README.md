@@ -16,18 +16,20 @@ Antumbra is a private memory and specialist substrate for the coding agent you a
 - **Sharing is deliberate.** Memory lives in compartments you own and grant, tenancy is enforced in the database engine, and a store on a laptop syncs with one a team shares.
 - **You can see it.** A web dashboard, an operator console in the terminal, and relics: the pages an agent writes for you, kept where you can find them again.
 
+Measured on one series of sessions: an agent that broke 3 of 22 conventions it had already been given broke none with Antumbra. What was run, and what that does not show, is in [docs/measured.md](docs/measured.md).
+
 ## Quick start
 
 Install the CLI from a release. The command names a tag rather than `latest`, so what it runs is a published, unchanging asset, and the installer checks the archive against the sha256 built into it.
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.5.1/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.5.2/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.5.1/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.5.2/antumbra-cli-installer.ps1 | iex
 ```
 
 Then, with Docker and ollama running:
@@ -88,7 +90,7 @@ A server built with the `models` feature answers through the experts (the `answe
 
 Measured with a 1.5B base and one expert. An Apple M4 Pro decodes 136 tokens a second from Q6_K. One 8-core laptop CPU, clocking about half its rating, decoded an expert's 78 held-out tasks at 26.8 tokens a second a token a pass, at 33.6 reading ahead, and at 105.7 when the same tasks were asked again, where llama.cpp (build b12359) decoded the same prompts with the same expert as a LoRA at about 18. A desktop CPU with AVX2 alone (an Intel Core i9-12900KS) decodes 46.5 tokens a second from Q6_K a token a pass and reads a 2,300-token pair of prompts at 582, where llama.cpp on that machine decodes 39.5 and reads them at 406; the 78 tasks it decodes at 71.4 reading ahead, and at 378 asked again. An RTX 3090 Ti decodes the same 78 tasks from the dense base at 107.6 tokens a second a token a pass, at 158.9 reading ahead once it has answered the tasks the expert was taught, and at 1,106 when they are asked again. The conditions, and the figures for requests answered together, are in the [changelog](CHANGELOG.md) and in [Running the trainer](docs/running-the-trainer.md#the-gpu-server-serving--standing-experts).
 
-The prebuilt binaries and the published image are the light build, which does everything but train and serve: see [Builds](#builds).
+The published server image, the one `antumbra setup local` runs, is a `models` build: it serves experts on the CPU, reading the base into a volume the first time it has an expert to serve, and it trains none. The prebuilt `antumbra` command is a `models` build too, so `antumbra ask` and `antumbra serve` answer on the machine's CPU; training on a GPU is a build from source: see [Builds](#builds).
 
 ## What runs where
 
@@ -116,8 +118,8 @@ The Compose stack is in [`docker/`](docker/README.md): SurrealDB and the server 
 
 | Build | How | Adds |
 | --- | --- | --- |
-| Light | the installers above, the published image, `just install` | memory, recall, documents, routing, sync, the dashboard and the console |
-| `models` | `cargo build --release -p antumbra-mcp -p antumbra-cli --features models` | serving on the CPU, the in-process embedder, the trainer's commands |
+| Light | `just install`, or a plain `cargo build` | memory, recall, documents, routing, sync, the dashboard and the console |
+| `models` | the installers above and the published server image, which `antumbra setup local` runs; or `cargo build --release -p antumbra-mcp -p antumbra-cli --features models` | serving on the CPU, the in-process embedder, the trainer's commands |
 | `models,cuda` | the same with `--features models,cuda`, or `antumbra setup local --gpu` from a clone | training and serving on an NVIDIA GPU |
 | `models,metal` | the same with `--features models,metal` | training on Apple silicon's GPU; it serves from the CPU, which decodes faster there |
 

@@ -241,6 +241,10 @@ pub enum Command {
     /// collect your token once you are let in (`join --status`). Asking
     /// changes nothing about this machine's own setup.
     Join(crate::join::JoinArgs),
+    /// Write every memory that is yours on your server to a file, as JSON
+    /// Lines, whole: `export`, `export --out mine.jsonl`, or `export --from
+    /// <workspace>` for what is yours in a workspace this machine joined.
+    Export(crate::export::ExportArgs),
     /// Sign this machine in again to a workspace your account is in, where a
     /// control plane signs its tokens: `login <server> --email <address>`
     /// sends a link to follow, and `login --status` collects the token.
@@ -333,15 +337,16 @@ pub enum Command {
     /// capability card with the active embedder (real BERT under --features
     /// models). Pair with a persistent --url to then `route` against them.
     Seed,
-    /// Route a task to an expert and serve a real answer from its adapter
-    /// (needs --features models + a GPU; the expert must have a trained adapter).
+    /// Route a task to an expert and serve a real answer from its adapter.
+    /// The released command does this on the machine's CPU; the expert must
+    /// have a trained adapter this machine holds.
     Ask(crate::models::AskArgs),
     /// Resident multi-adapter server with hardware-adaptive serving: load the shared base ONCE and
     /// hot-swap each routed expert's adapter per prompt, instead of cold-loading
     /// a model per call. Reads prompts from stdin (one per line) or a single
     /// --task, routes each via the learned router, and serves the answer from the
     /// resident engine, so a stream of prompts pays the base load only once.
-    /// Needs --features models. A build with no GPU backend serves on the CPU,
+    /// The released command has the model backend. A build with no GPU backend serves on the CPU,
     /// from a Q6_K base where the CPU has its fast kernels and a Q8_0 base
     /// where it does not.
     Serve(crate::commands::ServeArgs),

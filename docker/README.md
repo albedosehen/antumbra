@@ -15,13 +15,14 @@ docker compose -f docker/docker-compose.yml up -d
 ```
 
 - **SurrealDB** comes up on `ws://127.0.0.1:8000/rpc` (namespace `antumbra`, database `main`, isolated from anything else on the server).
-- **antumbra-mcp** comes up on `http://127.0.0.1:8081` once SurrealDB is healthy.
+- **antumbra-mcp** comes up on `http://127.0.0.1:8081` once SurrealDB is healthy. `GET /healthz` there answers `200 ok` when the server can read its store and `503` when it cannot, with no token: that, and not the dashboard's page, is what to point a health check at.
+- **The reranker** is opt-in: `antumbra setup local --rerank` starts it and points the server at it, and keeps it on in later runs. It reads each recalled memory against the prompt, so recall can order by relevance and can say nothing it found is relevant. A few hundred megabytes, about two minutes to be ready the first time, and slow on a CPU.
 
 Because the database is a real `ws://` server, the MCP server and the CLI can both connect to it at the same time (the console, `antumbra tui`, and your coding agent reach it through the MCP server), unlike the single-writer embedded `surrealkv` file.
 
 ## Why these choices
 
-- **Non-root, zero privilege.** The SurrealDB image already runs as uid 65532; the `antumbra-mcp` image ships on `distroless/cc:nonroot`. Both drop all capabilities and set `no-new-privileges`. `antumbra-mcp` runs read-only (it talks to the DB over the wire).
+- **Non-root, zero privilege.** The SurrealDB image already runs as uid 65532; the `antumbra-mcp` image ships on `distroless/cc:nonroot`. Both drop all capabilities and set `no-new-privileges`. `antumbra-mcp` runs with a read-only root (it talks to the DB over the wire); it writes only to its two named volumes, `antumbra-weights` (`/weights`, the base model it reads the first time it serves an expert) and `antumbra-adapters` (`/adapters`).
 - **Host bind-mount for the data.** A named volume is created root-owned, which the non-root server cannot write. A host bind-mount is writable by the container on Docker Desktop. On a **Linux** host, `chown -R 65532:65532` the `ANTUMBRA_SURREAL_DATA` directory once.
 - **rocksdb backend.** A standard server KV backend; the v3 client is agnostic to it over `ws://`.
 

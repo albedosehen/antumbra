@@ -155,6 +155,108 @@ impl JsonPost for UreqJson {
 /// that machine writes. The hooks send it from `ANTUMBRA_HOST_ID`.
 pub const DEVICE_HEADER: &str = "X-Antumbra-Host";
 
+/// This machine's operating system as a person would name it: `macOS 15.6`,
+/// `Windows 11 Pro`, `Ubuntu 24.04.1 LTS`. `None` when it could not be told.
+/// Found once a process.
+pub fn os_label() -> Option<String> {
+    static FOUND: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    FOUND.get_or_init(find_os).clone()
+}
+
+fn said(program: &str, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new(program)
+        .args(args)
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn find_os() -> Option<String> {
+    match std::env::consts::OS {
+        "macos" => Some(match said("sw_vers", &["-productVersion"]) {
+            Some(version) => format!("macOS {version}"),
+            None => "macOS".to_string(),
+        }),
+        "windows" => {
+            let key = r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+            let value = |name: &str| {
+                said("reg", &["query", key, "/v", name]).and_then(|out| reg_value(&out, name))
+            };
+            Some(windows_name(
+                value("ProductName").as_deref(),
+                value("CurrentBuildNumber").as_deref(),
+            ))
+        }
+        "linux" => Some(
+            std::fs::read_to_string("/etc/os-release")
+                .ok()
+                .and_then(|text| os_release_name(&text))
+                .unwrap_or_else(|| "Linux".to_string()),
+        ),
+        other => Some(other.to_string()),
+    }
+}
+
+/// The value `reg query ... /v name` printed: the line's text after its type.
+fn reg_value(out: &str, name: &str) -> Option<String> {
+    out.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix(name)?.trim_start();
+        let value = rest.strip_prefix("REG_SZ")?.trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })
+}
+
+/// Windows as it names itself. The registry's product name still says
+/// `Windows 10` on Windows 11, which is told by its build (22000 and later).
+fn windows_name(product: Option<&str>, build: Option<&str>) -> String {
+    let product = product.unwrap_or("Windows");
+    let eleven = build.and_then(|b| b.trim().parse::<u32>().ok()) >= Some(22000);
+    if eleven {
+        product.replacen("Windows 10", "Windows 11", 1)
+    } else {
+        product.to_string()
+    }
+}
+
+/// A distribution's name and version from `/etc/os-release`: its
+/// `PRETTY_NAME`, else its `NAME` and `VERSION_ID`.
+fn os_release_name(text: &str) -> Option<String> {
+    let field = |key: &str| {
+        text.lines().find_map(|line| {
+            let value = line.trim().strip_prefix(key)?.strip_prefix('=')?;
+            let value = value.trim().trim_matches(|c| c == '"' || c == '\'').trim();
+            (!value.is_empty()).then(|| value.to_string())
+        })
+    };
+    field("PRETTY_NAME").or_else(|| {
+        let name = field("NAME")?;
+        Some(match field("VERSION_ID") {
+            Some(version) => format!("{name} {version}"),
+            None => name,
+        })
+    })
+}
+
+/// The header an agent's connection asks for fewer tools in. A coding
+/// session needs the `agent` profile's tools and pays, on every turn, for the
+/// description of every tool it is advertised.
+pub const TOOLS_HEADER: &str = "X-Antumbra-Tools";
+
+/// What an agent's connection asks to be given: `agent` unless
+/// `ANTUMBRA_AGENT_TOOLS` says otherwise (`all`, or tool names as the
+/// server's `--tools` reads them); `None` for `all`, which asks nothing.
+pub fn agent_tools() -> Option<String> {
+    let asked = std::env::var("ANTUMBRA_AGENT_TOOLS").unwrap_or_default();
+    match asked.trim() {
+        "" => Some("agent".to_string()),
+        all if all.eq_ignore_ascii_case("all") => None,
+        other => Some(other.to_string()),
+    }
+}
+
 /// The name this process's machine goes by, as the hooks name it: the
 /// `ANTUMBRA_HOST_ID` the operator set, lower-cased; `None` when nothing
 /// names it, and the server stamps its writes as before.
@@ -829,5 +931,47 @@ mod tests {
             Duration::from_secs(20)
         );
         Ok(())
+    }
+
+    /// A machine's operating system is named from what the system says of
+    /// itself: Windows 11 by its build, a distribution by its release file.
+    #[test]
+    fn an_operating_system_is_named_as_a_person_would() {
+        let reg = "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\r\n    ProductName    REG_SZ    Windows 10 Pro\r\n\r\n";
+        assert_eq!(
+            reg_value(reg, "ProductName").as_deref(),
+            Some("Windows 10 Pro")
+        );
+        assert_eq!(reg_value(reg, "CurrentBuildNumber"), None);
+        assert_eq!(
+            windows_name(Some("Windows 10 Pro"), Some("26100")),
+            "Windows 11 Pro"
+        );
+        assert_eq!(
+            windows_name(Some("Windows 10 Pro"), Some("19045")),
+            "Windows 10 Pro"
+        );
+        assert_eq!(
+            windows_name(Some("Windows Server 2022 Standard"), Some("20348")),
+            "Windows Server 2022 Standard"
+        );
+        assert_eq!(windows_name(None, None), "Windows");
+
+        let ubuntu = "NAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nPRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\n";
+        assert_eq!(
+            os_release_name(ubuntu).as_deref(),
+            Some("Ubuntu 24.04.1 LTS")
+        );
+        assert_eq!(
+            os_release_name("NAME=Alpine\nVERSION_ID=3.20\n").as_deref(),
+            Some("Alpine 3.20")
+        );
+        assert_eq!(
+            os_release_name("NAME='Arch Linux'\n").as_deref(),
+            Some("Arch Linux")
+        );
+        assert_eq!(os_release_name("ID=x\n"), None);
+        // Whatever this machine is, it has a name.
+        assert!(os_label().is_some_and(|os| !os.is_empty()));
     }
 }

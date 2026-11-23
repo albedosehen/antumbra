@@ -12,18 +12,18 @@ With [Docker](https://docs.docker.com/get-docker/) and [ollama](https://ollama.c
 
 ```bash
 # macOS / Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.5.1/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.5.2/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.5.1/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.5.2/antumbra-cli-installer.ps1 | iex
 ```
 
 To check the archive yourself before anything runs, download it and the `.sha256` the release carries beside it, compare, and unpack the binary onto your PATH (the installer does the same comparison, against the sums built into the pinned script):
 
 ```bash
-v=v0.5.1; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
+v=v0.5.2; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
 curl --proto '=https' --tlsv1.2 -LsSfO "https://github.com/albedosehen/antumbra/releases/download/$v/antumbra-cli-$t.tar.xz"{,.sha256}
 shasum -a 256 -c "antumbra-cli-$t.tar.xz.sha256" && tar -xJf "antumbra-cli-$t.tar.xz"
 ```
@@ -171,18 +171,17 @@ then add the lifecycle hooks. **[`scripts/hooks/README.md`](../scripts/hooks/REA
 
 ## Optional: answers from experts, and training your own
 
-The stack above is the light server: memory, recall, routing. Two more things take a server built with the `models` feature, which the published image is not:
+The stack above serves answers from trained experts (the `answer` tool) on its CPU: the published image is built with the `models` feature. The base model, about 3 GB, is downloaded into the stack's `antumbra-weights` volume the first time the server is asked to answer through an expert, so a server with none never fetches it. While it downloads, and then while the server loads it, `answer` escalates and says so, and your agent does the task as it would have anyway. `antumbra setup check` says whether the server serves experts, on what, and from which form.
 
-- **Answers served from trained experts** (the `answer` tool). A server with a GPU serves them from it, and one with none serves them from its CPU.
-- **Training the behaviors you accept into your own standing expert**, which takes a GPU.
+What it does not do is train. Turning the behaviors you accept into your own standing expert takes a GPU, so the experts a server with no GPU serves are the ones a GPU server trained, which it fetches from that server (`--expert-source`) or reads back from the archive.
 
-On a machine with an NVIDIA card (Linux, or Windows via WSL2), the GPU build does both:
+On a machine with an NVIDIA card (Linux, or Windows via WSL2), the GPU build trains as well as serves:
 
 ```bash
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d
 ```
 
-See [Running the trainer → the GPU server](running-the-trainer.md#the-gpu-server-serving--standing-experts) for the build details, the native (non-Docker) recipe, standing experts, and serving on a CPU, which includes a server with no GPU serving the experts another one trained (`--expert-source`). With the light server, `answer` escalates cleanly and everything else works as normal.
+See [Running the trainer → the GPU server](running-the-trainer.md#the-gpu-server-serving--standing-experts) for the build details, the native (non-Docker) recipe, standing experts, and serving on a CPU, which includes a server with no GPU serving the experts another one trained (`--expert-source`). With no expert to serve, `answer` escalates cleanly and everything else works as normal.
 
 ## Just kicking the tires?
 

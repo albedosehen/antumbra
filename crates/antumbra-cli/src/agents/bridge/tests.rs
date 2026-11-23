@@ -650,3 +650,65 @@ fn the_endpoint_sends_what_a_request_says_of_itself() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+/// A workspace's write setting is kept by its bridge: while it is private,
+/// or was never set, a call that would write is refused with the reason and
+/// reads go on; `ask` and `workspace` let a write through; and the setting is
+/// read again for each call.
+#[test]
+fn a_private_write_setting_refuses_what_would_write() -> anyhow::Result<()> {
+    let dir = crate::agents::scratch::Scratch::new("bridge-writes")?;
+    let record = dir.path().join("workspace.json");
+    let call = |tool: &str| json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": { "name": tool, "arguments": {} } });
+    let set = |write: Option<&str>| -> anyhow::Result<()> {
+        let mut kept = json!({ "workspace": "ws:crew", "url": "https://team.example" });
+        if let Some(write) = write {
+            kept["write"] = json!(write);
+        }
+        Ok(std::fs::write(&record, kept.to_string())?)
+    };
+    for private in [Some("private"), None] {
+        set(private)?;
+        for tool in WRITES {
+            let why = refused_by_the_write_setting(&call(tool), &record)
+                .ok_or_else(|| anyhow::anyhow!("{tool} was let through under {private:?}"))?;
+            assert!(
+                why.contains(tool)
+                    && why.contains("ws:crew")
+                    && why.contains("antumbra join --write"),
+                "{why}"
+            );
+        }
+        // Reading and judging are not writing something new.
+        for tool in [
+            "recall_memories",
+            "list_memories",
+            "reinforce_memory",
+            "handoffs",
+        ] {
+            assert!(
+                refused_by_the_write_setting(&call(tool), &record).is_none(),
+                "{tool}"
+            );
+        }
+    }
+    // Turned on while the session is open: the next call goes through.
+    for open in ["ask", "workspace"] {
+        set(Some(open))?;
+        assert!(
+            refused_by_the_write_setting(&call("store_memory"), &record).is_none(),
+            "{open}"
+        );
+    }
+    // What is not a tool call is never the setting's business.
+    set(Some("private"))?;
+    assert!(refused_by_the_write_setting(
+        &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+        &record
+    )
+    .is_none());
+    // A record that cannot be read is read as private: the careful side.
+    std::fs::remove_file(&record)?;
+    assert!(refused_by_the_write_setting(&call("store_memory"), &record).is_some());
+    Ok(())
+}

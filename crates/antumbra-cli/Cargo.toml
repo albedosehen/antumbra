@@ -1,12 +1,18 @@
 [package]
 name = "antumbra-cli"
-version = "0.5.1"
+version = "0.5.2"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 authors.workspace = true
 description = "Antumbra operator CLI: migrate, inspect the population, and drive the generational loop."
+
+# The released `antumbra` is a `models` build: `ask` and `serve` answer
+# through an expert on the machine's CPU, as the published server image does.
+# A GPU backend (`cuda`, `metal`) is still a build from source.
+[package.metadata.dist]
+features = ["models"]
 
 [package.metadata.wix]
 upgrade-guid = "A8B84FC9-DC1A-44D5-8F5A-E186A9688F14"

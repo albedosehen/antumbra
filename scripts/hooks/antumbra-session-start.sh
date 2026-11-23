@@ -86,8 +86,25 @@ pending="$pending $!"
 # hub runs none, so the session names it: that lists it among the user's devices
 # and marks when it was last seen. Skipped for `local`, the name of a machine
 # nobody named. The answer is not used, and no answer changes nothing.
+#
+# Its operating system goes with it, as a person would name it (`macOS 15.6`,
+# `Ubuntu 24.04.1 LTS`), so the devices page can tell two machines apart by
+# more than a host name. Not found, it is left out and what the server has stays.
+os_label=""
+case "$(uname -s 2>/dev/null)" in
+  Darwin)
+    os_label="macOS $(sw_vers -productVersion 2>/dev/null)"
+    ;;
+  Linux)
+    if [ -r /etc/os-release ]; then
+      os_label="$( (. /etc/os-release 2>/dev/null; printf '%s' "${PRETTY_NAME:-${NAME:-} ${VERSION_ID:-}}") )"
+    fi
+    [ -n "$(printf '%s' "$os_label" | tr -d '[:space:]')" ] || os_label="Linux"
+    ;;
+esac
+os_label="$(printf '%s' "$os_label" | tr -d '\r\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
 if [ "$(printf '%s' "$HOST_ID" | tr '[:upper:]' '[:lower:]')" != "local" ]; then
-  call register_device "$(jq -nc --arg host "$HOST_ID" '{host: $host}')" "$answers/register.json" &
+  call register_device "$(jq -nc --arg host "$HOST_ID" --arg os "$os_label" '{host: $host} + (if $os == "" then {} else {os: $os} end)')" "$answers/register.json" &
   pending="$pending $!"
 fi
 
@@ -314,6 +331,8 @@ for WS in "${ANTUMBRA_WORKSPACES_DIR:-$HOME/.antumbra/workspaces}"/*/workspace.j
           then "Store what you learn about this team'"'"'s work there, with its store_memory; what is the user'"'"'s own goes to your own store."
           elif .write == "ask"
           then "New memories go to your own store. When something you learn is the team'"'"'s and not only the user'"'"'s, ask the user whether to store it in the workspace too."
+          elif $server != ""
+          then "New memories go to your own store. Its tools read and judge; a write to it is refused on this machine until the user turns that on (antumbra join --write ask, or workspace)."
           else "New memories go to your own store. Write to the workspace only when the user asks." end )
   ' "$WS" 2>/dev/null) || line=""
   [ -n "$line" ] && joined="${joined}${line}

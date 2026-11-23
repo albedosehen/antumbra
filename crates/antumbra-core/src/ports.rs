@@ -109,6 +109,54 @@ pub trait Serve: Send + Sync {
     /// without a restart. Default no-op for engines that pin a single adapter or
     /// snapshot their population at build time.
     fn register_expert(&self, _expert: &ExpertId, _adapter_uri: &str) {}
+
+    /// How this engine answers through experts, for a caller that wants to say
+    /// so (`workspace_stats`, and through it `antumbra setup check`). `None`,
+    /// the default, is an engine that does not read a model: a test double, or
+    /// one that echoes.
+    fn serving(&self) -> Option<Serving> {
+        None
+    }
+
+    /// Start making ready what [`Serve::act`] reads, fetching and loading it,
+    /// and say whether an answer can be served now. A first answer on a
+    /// server whose base has never been downloaded would otherwise wait out
+    /// a 3 GB download, and one whose base is not loaded yet a load of a
+    /// minute on a slow CPU, longer than a caller should wait; the `answer`
+    /// tool escalates instead and says why. `Ready`, the default, is an
+    /// engine with nothing to make ready.
+    fn prepare(&self) -> Readiness {
+        Readiness::Ready
+    }
+}
+
+/// Whether an engine can answer now, from [`Serve::prepare`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Readiness {
+    /// What it reads is here and loaded.
+    Ready,
+    /// Not yet, for the reason given: what it reads is downloading or
+    /// loading, started by this ask or an earlier one.
+    NotYet(String),
+    /// Making it ready failed, for the reason given. The next ask starts
+    /// again.
+    Failed(String),
+}
+
+/// How an engine answers through experts: the device the base is read on, the
+/// form it is held in there, and on a CPU the kernels a token goes through.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Serving {
+    /// `cpu`, `cuda` or `metal`: where the base is read, which is not always
+    /// the build's backend (a Metal build serves from the CPU where it tiles).
+    pub device: String,
+    /// `dense`, or the quantized form the base is held in: `q8_0`, `q6_k` or
+    /// `q4_k`.
+    pub base: String,
+    /// On a CPU, the kernels a token goes through: `avx-512`, `avx2` or
+    /// `neon` for Antumbra's own, `none` where the CPU has none of them and
+    /// candle's are used. `None` off the CPU.
+    pub kernels: Option<String>,
 }
 
 /// The optional flagship escalation tier: consulted only when the

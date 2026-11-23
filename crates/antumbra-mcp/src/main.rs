@@ -458,6 +458,11 @@ pub(crate) async fn register_node(store: &Store, tenant: &TenantId, user: &UserI
         hardware::backend(),
         hardware::vram_mib(),
         Utc::now(),
+    )
+    .with_os(
+        antumbra_http::os_label()
+            .as_deref()
+            .and_then(antumbra_core::device::os_of),
     );
     match antumbra_store::repo::device::upsert(store, &profile).await {
         Ok(()) => eprintln!(

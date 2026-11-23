@@ -21,11 +21,12 @@ fn server_for(store: &Store, user: &str, host: &str) -> McpServer {
 }
 
 async fn register(s: &McpServer, host: &str) -> anyhow::Result<RegisteredDeviceOut> {
-    Ok(
-        s.register_device(Parameters(RegisterDeviceParams { host: host.into() }))
-            .await?
-            .0,
-    )
+    Ok(s.register_device(Parameters(RegisterDeviceParams {
+        host: host.into(),
+        os: None,
+    }))
+    .await?
+    .0)
 }
 
 async fn devices(s: &McpServer) -> anyhow::Result<DevicesOut> {
@@ -145,6 +146,7 @@ async fn a_name_that_is_no_machine_is_refused() -> anyhow::Result<()> {
         let Err(refused) = hub
             .register_device(Parameters(RegisterDeviceParams {
                 host: unnamed.into(),
+                os: None,
             }))
             .await
         else {
@@ -212,5 +214,87 @@ async fn the_rest_dispatcher_reaches_the_device_tools() -> anyhow::Result<()> {
     let listed = hub.call_tool("devices", serde_json::json!({})).await?;
     assert_eq!(listed["devices"][0]["host"], "mac");
     assert!(listed.get("trainer").is_none());
+    Ok(())
+}
+
+/// #597: a call moves the last-seen of the machine it came from and nothing
+/// else of its row; a second call inside the throttle writes nothing; a
+/// call from a machine with no row makes none.
+#[tokio::test]
+async fn a_call_moves_its_machines_last_seen_and_is_throttled() -> anyhow::Result<()> {
+    let store = mem_store().await?;
+    let hub = server_for(&store, "user:a", "hub");
+    let (tenant, user) = (TenantId::new("ws:test"), UserId::new("user:a"));
+    let then = Utc::now() - chrono::Duration::hours(11);
+    store_device::upsert(
+        &store,
+        &DeviceProfile::client(tenant.clone(), user.clone(), "laptop", then),
+    )
+    .await?;
+    let laptop = || async {
+        anyhow::Ok(
+            store_device::list_for_user(&store, &tenant, &user)
+                .await?
+                .into_iter()
+                .find(|d| d.host == "laptop"),
+        )
+    };
+
+    // A call that names no machine is the server's own; the laptop stays.
+    hub.call_tool("devices", serde_json::json!({})).await?;
+    assert_eq!(laptop().await?.map(|d| d.last_seen()), Some(then));
+    // A machine with no row is given none by calling.
+    hub.called_from("desktop".into())
+        .call_tool("devices", serde_json::json!({}))
+        .await?;
+    assert_eq!(
+        store_device::list_for_user(&store, &tenant, &user)
+            .await?
+            .len(),
+        1
+    );
+
+    let from_laptop = hub.called_from("laptop".into());
+    let said = from_laptop
+        .call_tool("devices", serde_json::json!({}))
+        .await?;
+    let Some(seen) = laptop().await? else {
+        anyhow::bail!("the laptop's row is gone");
+    };
+    assert!(
+        seen.last_seen() > then + chrono::Duration::hours(10),
+        "{seen:?}"
+    );
+    assert_eq!((seen.updated_at, seen.backend.as_str()), (then, "client"));
+    // The answer says both: seen now, registered then.
+    let row = &said["devices"][0];
+    assert_eq!(row["registered"], then.to_rfc3339());
+    assert_ne!(row["last_seen"], row["registered"]);
+
+    // Inside the throttle: nothing is written, though the row was set back.
+    store_device::saw(&store, &tenant, &user, "laptop", then).await?;
+    from_laptop
+        .call_tool("devices", serde_json::json!({}))
+        .await?;
+    assert_eq!(laptop().await?.and_then(|d| d.seen_at), Some(then));
+    Ok(())
+}
+
+/// A session names its machine's operating system, and what it said stays
+/// when a later registration names none.
+#[tokio::test]
+async fn a_machine_reports_its_operating_system() -> anyhow::Result<()> {
+    let store = mem_store().await?;
+    let hub = server_for(&store, "user:a", "hub");
+    hub.call_tool(
+        "register_device",
+        serde_json::json!({ "host": "laptop", "os": " macOS 15.6\n" }),
+    )
+    .await?;
+    hub.call_tool("register_device", serde_json::json!({ "host": "laptop" }))
+        .await?;
+    let said = hub.call_tool("devices", serde_json::json!({})).await?;
+    assert_eq!(said["devices"][0]["os"], "macOS 15.6");
+    assert!(said["devices"][0].get("name").is_none());
     Ok(())
 }

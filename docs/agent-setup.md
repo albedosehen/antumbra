@@ -33,18 +33,18 @@ If it is missing, install it from a release with the installer for their OS. The
 
 ```sh
 # macOS and Linux
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.5.1/antumbra-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/albedosehen/antumbra/releases/download/v0.5.2/antumbra-cli-installer.sh | sh
 ```
 
 ```powershell
 # Windows (PowerShell)
-irm https://github.com/albedosehen/antumbra/releases/download/v0.5.1/antumbra-cli-installer.ps1 | iex
+irm https://github.com/albedosehen/antumbra/releases/download/v0.5.2/antumbra-cli-installer.ps1 | iex
 ```
 
 To check the archive before anything runs before anything runs, download it and the `.sha256` the release carries beside it, compare, and unpack the binary onto your PATH (the installer does the same comparison, against the sums built into the pinned script):
 
 ```bash
-v=v0.5.1; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
+v=v0.5.2; t=aarch64-apple-darwin   # or x86_64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu
 curl --proto '=https' --tlsv1.2 -LsSfO "https://github.com/albedosehen/antumbra/releases/download/$v/antumbra-cli-$t.tar.xz"{,.sha256}
 shasum -a 256 -c "antumbra-cli-$t.tar.xz.sha256" && tar -xJf "antumbra-cli-$t.tar.xz"
 ```
@@ -136,7 +136,7 @@ Say this if they ask:
 - Copilot CLI, when it is connected: `~/.copilot/hooks/antumbra.json`, and `mcpServers.antumbra` added to `~/.copilot/mcp-config.json`, with a backup beside it, `mcp-config.json.antumbra-backup-<time>`.
 - Codex, when it is connected: `[mcp_servers.antumbra]` in `~/.codex/config.toml`, written by `codex mcp add`, and hooks on SessionStart, UserPromptSubmit and Stop added to `~/.codex/hooks.json`, with a backup beside it, `hooks.json.antumbra-backup-<time>`.
 - On a machine with Unity Gateway (`ug`), for the agents it starts from a directory of its own: the same Gemini CLI extension in `~/.ucode/.gemini-home/.gemini/extensions/antumbra`, the same OpenCode plugin file in `~/.ucode/opencode-xdg/opencode/plugins/`, and `~/.antumbra/claude-settings.json`, Claude Code settings that hold Antumbra's hooks and nothing of theirs. Nothing `ug` wrote is edited.
-- The server: this machine is listed among their devices under its `ANTUMBRA_HOST_ID`, as a memory node. Each session start names it again, which keeps "last seen" current. If they want a particular name, set `ANTUMBRA_HOST_ID` in the settings' `env` before running setup, since setup keeps a name that is already there.
+- The server: this machine is listed among their devices under its `ANTUMBRA_HOST_ID`, as a memory node. It is listed with its operating system, and every call it makes keeps "last seen" current. They can give it a name for people on the dashboard's Devices page; the host name stays what handoffs are addressed to. If they want a particular name, set `ANTUMBRA_HOST_ID` in the settings' `env` before running setup, since setup keeps a name that is already there.
 - Local only: the stack's compose file and `.env` in `~/.antumbra/stack/docker` (or `docker/.env` in the clone, when setup ran from one), the containers `antumbra-surrealdb` and `antumbra-mcp` (they restart with Docker), and the database in `~/.antumbra/surrealdb`.
 
 ## Undo

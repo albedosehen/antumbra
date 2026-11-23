@@ -301,7 +301,7 @@ pub async fn ask(url: &str, args: AskArgs) -> anyhow::Result<()> {
             self_weight,
             temperature,
         );
-        anyhow::bail!("`ask` requires building with --features models (candle + a GPU)");
+        anyhow::bail!("`ask`: this `antumbra` was built without the model backend. The released command has it: install it from a release, or build with --features models");
     }
 }
 

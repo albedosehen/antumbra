@@ -211,7 +211,7 @@ function offerDevices() {
   const chosen = select.value;
   select.replaceChildren(
     h("option", { value: "" }, "Whichever starts a session next"),
-    ...state.shell.devices.map((d) => h("option", { value: d.host }, d.host)),
+    ...state.shell.devices.map((d) => h("option", { value: d.host }, d.name ? `${d.name} (${d.host})` : d.host)),
   );
   if ([...select.options].some((o) => o.value === chosen)) select.value = chosen;
 }

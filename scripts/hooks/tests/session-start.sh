@@ -113,6 +113,9 @@ check "names each" grep -q -- '- ws:crew at https://team.example, as user:bodil'
 check "says which has tools, and by what name" grep -q 'Its tools are the MCP server `antumbra-crew`' <<<"$ctx"
 check "sends the team's to a workspace it can write to" grep -q "ws:crew.*Store what you learn about this team's work there" <<<"$ctx"
 check "and not to one it has no tools for" grep -q 'ws:lab.*You have no tools for it.*New memories go to your own store. Write to the workspace only when the user asks' <<<"$ctx"
+printf '%s' '{"url":"https://kept.example","workspace":"ws:kept","token_file":"/nowhere","write":"private","server":"antumbra-kept"}' > "$joined/c__ws_ask/../d__ws_kept.json.tmp"; mkdir -p "$joined/d__ws_kept"; mv "$joined/d__ws_kept.json.tmp" "$joined/d__ws_kept/workspace.json"
+ctx=$(run "$work/small.json" ANTUMBRA_WORKSPACES_DIR="$joined" | context)
+check "says a write is refused where it has the tools and writing is private" grep -q 'ws:kept.*a write to it is refused on this machine' <<<"$ctx"
 check "asks where it was told to ask" grep -q 'ws:ask.*ask the user whether to store it in the workspace too' <<<"$ctx"
 check "before any memory" test "$(grep -n 'Workspaces this machine joined' <<<"$ctx" | cut -d: -f1)" -lt "$(grep -n 'first small' <<<"$ctx" | cut -d: -f1)"
 ctx=$(run "$work/small.json" ANTUMBRA_WORKSPACES_DIR="$work/none" | context)
@@ -154,7 +157,9 @@ echo "naming this machine"
 calls="$work/calls.log"
 : >"$calls"
 ctx=$(run "$work/small.json" CURL_LOG="$calls" ANTUMBRA_HOST_ID=mac | context)
-check "registers it under its name" grep -qF '{"tool":"register_device","arguments":{"host":"mac"}}' "$calls"
+check "registers it under its name" grep -qF '{"tool":"register_device","arguments":{"host":"mac"' "$calls"
+# With its operating system, which on any machine these run on has a name.
+check "says its operating system" grep -qE '"tool":"register_device","arguments":\{"host":"mac","os":"[^"]+"\}' "$calls"
 check "still answers" grep -q 'first small' <<<"$ctx"
 
 echo "the bearer"

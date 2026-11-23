@@ -112,6 +112,15 @@ pub struct LocalArgs {
     /// runs from a clone.
     #[arg(long)]
     pub gpu: bool,
+    /// Also start the reranker: a second model that reads each recalled
+    /// memory against the prompt, so recall can put the right one first and
+    /// can say that nothing it found is relevant. A few hundred megabytes,
+    /// about two minutes to be ready the first time, and slow on a CPU: it
+    /// adds to every recall. Setup keeps it on once asked for; take
+    /// `ANTUMBRA_RERANK_URL` out of the stack's `.env` to turn it off. The
+    /// GPU build starts its own.
+    #[arg(long)]
+    pub rerank: bool,
     /// The workspace the token grants.
     #[arg(long, default_value = "ws:default")]
     pub workspace: String,
@@ -406,6 +415,19 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
             steps.ok(format!("{env_name}: {part}"));
         }
     }
+    // The reranker, when asked for now or by an earlier run.
+    let (with_reranker, starts_reranker) = reranker(&env_text, args.rerank, args.gpu);
+    if with_reranker != env_text {
+        env_text = with_reranker;
+        if steps.dry_run {
+            steps.would(format!(
+                "write {env_name}: the reranker's address and model"
+            ));
+        } else {
+            write_private(&env_path, &env_text)?;
+            steps.ok(format!("{env_name}: the reranker's address and model"));
+        }
+    }
     let data_dir = env_file::get(&env_text, "ANTUMBRA_SURREAL_DATA")
         .map(PathBuf::from)
         .unwrap_or(data);
@@ -423,7 +445,14 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
         Stack::Pulled { .. } => "--no-build",
     };
     let mut up: Vec<String> = compose_args(&compose_files);
+    if starts_reranker {
+        // A profile is the compose command's own option, before `up`.
+        up.extend(["--profile", "rerank"].map(String::from));
+    }
     up.extend(["up", "-d", build, "surrealdb", "antumbra-mcp"].map(String::from));
+    if starts_reranker {
+        up.push("rerank".to_string());
+    }
     if steps.dry_run {
         if matches!(stack, Stack::Pulled { .. }) {
             steps.would(format!("pull {image} unless Docker has it"));
@@ -443,6 +472,9 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
         }
         println!();
         steps.ok("the store and the server are up");
+        if starts_reranker {
+            steps.info("the reranker is starting: it takes about two minutes the first time, and recall uses it once it answers. On a CPU it adds to every recall");
+        }
     }
 
     let bind = env_file::get(&env_text, "ANTUMBRA_MCP_BIND")
@@ -710,6 +742,34 @@ fn ensure_ollama(base: &str, steps: &Steps) -> anyhow::Result<()> {
         Reach::No => anyhow::bail!("{}", unreachable_from_container(port)),
     }
     Ok(())
+}
+
+/// Where the stack's server reaches the stack's reranker, and the model both
+/// are told of.
+const RERANK_URL: &str = "http://rerank/rerank";
+const RERANK_MODEL: &str = "BAAI/bge-reranker-base";
+
+/// The stack's `.env` with the reranker's address and model in it, and
+/// whether setup starts the reranker: when it is asked for, or an earlier run
+/// asked and the `.env` still names it. An address of the user's own is
+/// theirs: it is kept, and nothing is started for it. The GPU stack brings a
+/// reranker of its own and is left as it is.
+fn reranker(env_text: &str, asked: bool, gpu: bool) -> (String, bool) {
+    if gpu {
+        return (env_text.to_string(), false);
+    }
+    let have = env_file::get(env_text, "ANTUMBRA_RERANK_URL").filter(|url| !url.is_empty());
+    match have {
+        Some(url) => (env_text.to_string(), url == RERANK_URL),
+        None if asked => {
+            let mut text = env_file::set(env_text, "ANTUMBRA_RERANK_URL", RERANK_URL);
+            if env_file::get(&text, "ANTUMBRA_RERANK_MODEL").is_none_or(str::is_empty) {
+                text = env_file::set(&text, "ANTUMBRA_RERANK_MODEL", RERANK_MODEL);
+            }
+            (text, true)
+        }
+        None => (env_text.to_string(), false),
+    }
 }
 
 /// ollama's tag list through the Docker bridge gateway, from this machine.
@@ -1088,7 +1148,7 @@ fn finish(
     // A setup run from a session Unity Gateway started inherits what `ug`
     // set for the agent it started, which is not the user's own.
     let env = agents::gateway::outside(home, &variable);
-    let find = |name: &str| find_program(name);
+    let find = |name: &str| find_running(name);
     let ground = agents::Ground {
         home,
         antumbra: agents::Program::this(find_program("antumbra").is_some()),
@@ -1096,6 +1156,18 @@ fn finish(
         find: &find,
     };
     let chosen = chosen(common, &ground)?;
+    // A command that is there and does not run is said, so an agent left out
+    // for it is not a silence.
+    for agent in Agent::ALL {
+        if let Some(path) = find_program(agent.program()).filter(|path| !runs(path)) {
+            steps.info(format!(
+                "{} was found at {} and does not run (`{} --version` fails), so it is not taken as installed",
+                agent.title(),
+                path.display(),
+                agent.program()
+            ));
+        }
+    }
     // Claude Code's own settings, as they stand when they are asked for.
     let settings = || -> Value {
         json_at(
@@ -1623,6 +1695,15 @@ fn session_host(settings: &Value) -> String {
         .unwrap_or_else(host_id)
 }
 
+/// What setup tells the server of this machine: the name it goes by, and
+/// its operating system when that was found.
+fn registration(host: &str, os: Option<String>) -> Value {
+    match os {
+        Some(os) => json!({ "host": host, "os": os }),
+        None => json!({ "host": host }),
+    }
+}
+
 /// Name this machine in the user's fabric, as every session start does, so it
 /// is listed from now rather than from its first session. A server older than
 /// device registration does not know the tool; that is a warning, not a
@@ -1636,7 +1717,7 @@ fn register_machine(url: &str, token: &str, host: &str, steps: &Steps) {
         url,
         token,
         "register_device",
-        json!({ "host": host }),
+        registration(host, antumbra_http::os_label()),
     ) {
         Ok(said) if said["registered"] == true => steps.ok(format!(
             "this machine is listed among your devices as {} (a {} node)",
@@ -1706,6 +1787,48 @@ fn stamp_of(said: &Value, host: &str) -> Stamp {
         Some(stamped) => Stamp::Other(stamped.to_string()),
         None => Stamp::Unsaid,
     }
+}
+
+/// Whether the server answers through experts, from its answer to
+/// `workspace_stats` (#572).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Serving {
+    /// It does, and this is how, as the check says it.
+    Serves(String),
+    /// It says it cannot: a build without the model backend, whose every
+    /// `answer` goes back to the agent.
+    DoesNot,
+    /// It does not say, being older than the field.
+    Unsaid,
+}
+
+fn serving_of(stats: &Value) -> Serving {
+    let serving = match stats.get("serving") {
+        None => return Serving::Unsaid,
+        Some(Value::Null) => return Serving::DoesNot,
+        Some(serving) => serving,
+    };
+    let on = match serving["device"].as_str().unwrap_or("?") {
+        "cpu" => "the CPU".to_string(),
+        "cuda" => "a CUDA GPU".to_string(),
+        "metal" => "the Metal GPU".to_string(),
+        other => other.to_string(),
+    };
+    let base = match serving["base"].as_str().unwrap_or("?") {
+        "dense" => "a dense base".to_string(),
+        form => format!("a {} base", form.to_uppercase()),
+    };
+    let through = match serving["kernels"].as_str() {
+        Some("none") => {
+            ", through candle's kernels (this CPU has none of Antumbra's, so it decodes a fraction as fast)"
+                .to_string()
+        }
+        Some(kernels) => format!(", through Antumbra's {} kernels", kernels.to_uppercase()),
+        None => String::new(),
+    };
+    Serving::Serves(format!(
+        "the server serves experts on {on} from {base}{through}"
+    ))
 }
 
 /// The name setup registers the MCP server under with Claude Code.
@@ -1850,7 +1973,7 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
     };
     let variable = |name: &str| std::env::var(name).ok();
     let env = agents::gateway::outside(&home, &variable);
-    let find = |name: &str| find_program(name);
+    let find = |name: &str| find_running(name);
     let ground = agents::Ground {
         home: &home,
         antumbra: agents::Program::this(find_program("antumbra").is_some()),
@@ -2213,6 +2336,27 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
             }
             Err(e) => fail(format!("{e}"), "check the server".into()),
         }
+        // Whether `answer` can be served here or always goes back to the
+        // agent. Neither answer is a fault: a server built without the model
+        // backend is a memory server, and one that is older does not say.
+        match call_tool_from(&url, &token, Some(&host), "workspace_stats", json!({})) {
+            Ok(stats) => match serving_of(&stats) {
+                Serving::Serves(line) => ok(line),
+                Serving::DoesNot => println!(
+                    "  ! the server does not serve experts: it was built without the model backend, so `answer` goes back to your agent"
+                ),
+                Serving::Unsaid => println!(
+                    "  ! the server does not say whether it serves experts (it is older than 0.5.2)"
+                ),
+            },
+            Err(e)
+                if e.to_string().contains("unknown tool")
+                    || e.to_string().contains("not in this server's tool profile") =>
+            {
+                println!("  ! the server's tool profile leaves out workspace_stats, so whether it serves experts is not known")
+            }
+            Err(e) => fail(format!("{e}"), "check the server".into()),
+        }
     }
 
     if problems == 0 {
@@ -2262,6 +2406,69 @@ fn secret(n: usize, url_safe: bool) -> anyhow::Result<String> {
 
 /// A program on the PATH. On Windows, `.exe`, `.cmd` and `.bat` count, and
 /// the native Claude Code installer's `~/.local/bin` is looked in too.
+/// How long a program is given to say its version before it is taken to run.
+const VERSION_WAIT: Duration = Duration::from_secs(5);
+
+/// Whether the program at `path` runs: `--version` exits with success. A
+/// file by an agent's name on the PATH is not always the agent: a wrapper
+/// another tool installs can be there and fail for want of the real thing.
+/// One that has not answered in [`VERSION_WAIT`] is stopped and taken to run:
+/// slowness is not a failure. Asked once for a path in a run.
+pub(crate) fn runs(path: &Path) -> bool {
+    static ASKED: std::sync::Mutex<Option<std::collections::HashMap<PathBuf, bool>>> =
+        std::sync::Mutex::new(None);
+    // A poisoned lock holds a whole map: each entry is written in one step.
+    let known = |path: &Path| {
+        ASKED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_or_insert_with(Default::default)
+            .get(path)
+            .copied()
+    };
+    if let Some(known) = known(path) {
+        return known;
+    }
+    let answer = match Command::new(path)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Err(_) => false,
+        Ok(mut child) => {
+            let started = std::time::Instant::now();
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => break status.success(),
+                    Ok(None) if started.elapsed() < VERSION_WAIT => {
+                        std::thread::sleep(Duration::from_millis(25));
+                    }
+                    Ok(None) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break true;
+                    }
+                    Err(_) => break false,
+                }
+            }
+        }
+    };
+    ASKED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_or_insert_with(Default::default)
+        .insert(path.to_path_buf(), answer);
+    answer
+}
+
+/// [`find_program`], for a program that also runs ([`runs`]): how an agent
+/// is found on this machine.
+pub(crate) fn find_running(name: &str) -> Option<PathBuf> {
+    find_program(name).filter(|path| runs(path))
+}
+
 pub(crate) fn find_program(name: &str) -> Option<PathBuf> {
     let exts: &[&str] = if cfg!(windows) {
         &[".exe", ".cmd", ".bat"]
@@ -2716,6 +2923,31 @@ mod tests {
     }
 
     #[test]
+    fn the_check_reads_whether_the_server_serves_experts() -> anyhow::Result<()> {
+        assert_eq!(
+            serving_of(&json!({ "memories": 3, "serving": {
+                "device": "cpu", "base": "q6_k", "kernels": "avx2" } })),
+            Serving::Serves(
+                "the server serves experts on the CPU from a Q6_K base, through Antumbra's AVX2 kernels"
+                    .into()
+            )
+        );
+        // A CPU with none of Antumbra's kernels is said, since it is slow.
+        assert!(matches!(
+            serving_of(&json!({ "serving": { "device": "cpu", "base": "q8_0", "kernels": "none" } })),
+            Serving::Serves(line) if line.contains("candle's kernels")
+        ));
+        // Off the CPU there are no kernels to name.
+        assert_eq!(
+            serving_of(&json!({ "serving": { "device": "cuda", "base": "dense" } })),
+            Serving::Serves("the server serves experts on a CUDA GPU from a dense base".into())
+        );
+        assert_eq!(serving_of(&json!({ "serving": null })), Serving::DoesNot);
+        assert_eq!(serving_of(&json!({ "memories": 3 })), Serving::Unsaid);
+        Ok(())
+    }
+
+    #[test]
     fn the_settings_for_a_launch_without_the_users_hold_what_setup_wires_and_no_more(
     ) -> anyhow::Result<()> {
         let antumbra = Path::new("/home/me/.antumbra");
@@ -3049,5 +3281,71 @@ mod tests {
         anyhow::ensure!(problem.contains("644"), "{problem}");
         std::fs::remove_dir_all(&dir)?;
         Ok(())
+    }
+
+    /// A file by an agent's name that fails is not the agent; one that
+    /// answers is; and one that is not a program at all is not.
+    #[cfg(unix)]
+    #[test]
+    fn a_command_that_is_there_and_fails_does_not_run() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::agents::scratch::Scratch::new("runs")?;
+        let program = |name: &str, body: &str| -> anyhow::Result<PathBuf> {
+            let path = dir.path().join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}\n"))?;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+            Ok(path)
+        };
+        let wrapper = program(
+            "wrapper",
+            "echo 'Error: codex not found in PATH' >&2; exit 1",
+        )?;
+        let real = program("real", "echo 'codex 1.2.3'")?;
+        let text = dir.path().join("notes.txt");
+        std::fs::write(&text, "not a program")?;
+        assert!(!runs(&wrapper));
+        assert!(runs(&real));
+        assert!(!runs(&text));
+        assert!(!runs(&dir.path().join("nothing-here")));
+        // Asked once: the answer stands though the file has changed.
+        std::fs::write(&wrapper, "#!/bin/sh\nexit 0\n")?;
+        assert!(!runs(&wrapper));
+        Ok(())
+    }
+
+    /// The reranker is started when asked for and stays on for later runs;
+    /// it is not started unasked, nor over an address of the user's own, nor
+    /// with the GPU stack, which has one.
+    #[test]
+    fn the_reranker_is_started_when_asked_and_kept_on() {
+        let bare = "SURREAL_PASS=x\nANTUMBRA_RERANK_URL=\n";
+        // Not asked: nothing changes.
+        assert_eq!(reranker(bare, false, false), (bare.to_string(), false));
+        // Asked: its address and model are written, and it is started.
+        let (text, starts) = reranker(bare, true, false);
+        assert!(starts);
+        assert_eq!(
+            env_file::get(&text, "ANTUMBRA_RERANK_URL"),
+            Some("http://rerank/rerank")
+        );
+        assert_eq!(
+            env_file::get(&text, "ANTUMBRA_RERANK_MODEL"),
+            Some("BAAI/bge-reranker-base")
+        );
+        assert_eq!(env_file::get(&text, "SURREAL_PASS"), Some("x"));
+        // A later run that does not say so still starts it, and writes nothing.
+        assert_eq!(reranker(&text, false, false), (text.clone(), true));
+        // The user's own reranker is theirs: kept, and none is started.
+        let theirs =
+            "ANTUMBRA_RERANK_URL=http://gpu-box:8091/rerank\nANTUMBRA_RERANK_MODEL=their/model\n";
+        assert_eq!(reranker(theirs, true, false), (theirs.to_string(), false));
+        // A model of theirs with no address is kept when ours is started.
+        let (text, _) = reranker("ANTUMBRA_RERANK_MODEL=their/model\n", true, false);
+        assert_eq!(
+            env_file::get(&text, "ANTUMBRA_RERANK_MODEL"),
+            Some("their/model")
+        );
+        // The GPU stack has its own.
+        assert_eq!(reranker(bare, true, true), (bare.to_string(), false));
     }
 }

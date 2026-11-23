@@ -105,8 +105,36 @@ $handoffsCall = Start-Call 'handoffs' @{ host = $hostId }
 # hub runs none, so the session names it: that lists it among the user's devices
 # and marks when it was last seen. Skipped for `local`, the name of a machine
 # nobody named. The answer is not used, and no answer changes nothing.
+#
+# Its operating system goes with it, as a person would name it (`Windows 11
+# Pro`), so the devices page can tell two machines apart by more than a host
+# name. Not found, it is left out and what the server has stays.
+function Get-OsLabel {
+    try {
+        if ($IsMacOS) { return ('macOS ' + (& sw_vers -productVersion 2>$null)).Trim() }
+        if ($IsLinux) {
+            $pretty = Get-Content -LiteralPath '/etc/os-release' -ErrorAction Stop |
+                Where-Object { $_ -match '^PRETTY_NAME=' } | Select-Object -First 1
+            if ($pretty) { return ($pretty -replace '^PRETTY_NAME=', '').Trim().Trim('"', "'") }
+            return 'Linux'
+        }
+        $cv = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction Stop
+        $name = [string]$cv.ProductName
+        # The registry still says Windows 10 on Windows 11, which its build tells.
+        $build = 0
+        if ([int]::TryParse([string]$cv.CurrentBuildNumber, [ref]$build) -and $build -ge 22000) {
+            $name = $name -replace '^Windows 10', 'Windows 11'
+        }
+        return $name.Trim()
+    } catch { return '' }
+}
 $registerCall = $null
-if ($hostId.Trim() -ne 'local') { $registerCall = Start-Call 'register_device' @{ host = $hostId } }
+if ($hostId.Trim() -ne 'local') {
+    $registerArgs = @{ host = $hostId }
+    $osLabel = Get-OsLabel
+    if ($osLabel) { $registerArgs.os = $osLabel }
+    $registerCall = Start-Call 'register_device' $registerArgs
+}
 
 # --- where the session is, in git terms (fail-open) -------------------------
 function Invoke-Git([string[]]$GitArgs) {
@@ -421,6 +449,7 @@ try {
                      else { 'You have no tools for it: you read what your prompts are given. ' }
             $line += if ($ws.write -eq 'workspace' -and $server) { "Store what you learn about this team's work there, with its store_memory; what is the user's own goes to your own store." }
                      elseif ($ws.write -eq 'ask') { "New memories go to your own store. When something you learn is the team's and not only the user's, ask the user whether to store it in the workspace too." }
+                     elseif ($server) { 'New memories go to your own store. Its tools read and judge; a write to it is refused on this machine until the user turns that on (antumbra join --write ask, or workspace).' }
                      else { 'New memories go to your own store. Write to the workspace only when the user asks.' }
             $joinedLines += $line
         }
