@@ -510,7 +510,7 @@ fn connect(
         let server = json!({
             "type": "stdio",
             "command": program,
-            "args": ["mcp", "bridge", "--agent", "claude", "--surface", url, "--token-file", token_file, "--file-token-only"],
+            "args": ["mcp", "bridge", "--agent", "claude", "--surface", url, "--token-file", token_file, "--file-token-only", "--writes-as", file.display().to_string()],
         })
         .to_string();
         if register(&name, Some(&server))? {
@@ -551,6 +551,7 @@ fn set_write(antumbra: &Path, to: Option<&str>, write: &str) -> anyhow::Result<V
             "workspace" if connected => format!("{workspace}: what is learned about the team's work goes to the workspace; what is yours stays in your own store."),
             "workspace" => format!("{workspace}: recorded, and it does nothing until your agent has the workspace's tools: antumbra join --connect"),
             "ask" => format!("{workspace}: new memories go to your own store, and your agent asks when something looks like the team's."),
+            _ if connected => format!("{workspace}: new memories go to your own store, and your agent's tools for the workspace refuse to write to it."),
             _ => format!("{workspace}: new memories go to your own store."),
         });
     }
@@ -1158,6 +1159,13 @@ mod tests {
         );
         assert!(
             args.contains(&"--file-token-only") && args.contains(&"--token-file"),
+            "{args:?}"
+        );
+        // The bridge is told where the workspace's write setting is kept.
+        let record = antumbra.join("workspaces/a__ws_crew/workspace.json");
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--writes-as" && std::path::Path::new(w[1]) == record),
             "{args:?}"
         );
         assert_eq!(

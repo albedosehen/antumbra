@@ -314,6 +314,8 @@ for WS in "${ANTUMBRA_WORKSPACES_DIR:-$HOME/.antumbra/workspaces}"/*/workspace.j
           then "Store what you learn about this team'"'"'s work there, with its store_memory; what is the user'"'"'s own goes to your own store."
           elif .write == "ask"
           then "New memories go to your own store. When something you learn is the team'"'"'s and not only the user'"'"'s, ask the user whether to store it in the workspace too."
+          elif $server != ""
+          then "New memories go to your own store. Its tools read and judge; a write to it is refused on this machine until the user turns that on (antumbra join --write ask, or workspace)."
           else "New memories go to your own store. Write to the workspace only when the user asks." end )
   ' "$WS" 2>/dev/null) || line=""
   [ -n "$line" ] && joined="${joined}${line}
