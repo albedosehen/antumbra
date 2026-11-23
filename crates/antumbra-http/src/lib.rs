@@ -158,9 +158,22 @@ pub const DEVICE_HEADER: &str = "X-Antumbra-Host";
 /// This machine's operating system as a person would name it: `macOS 15.6`,
 /// `Windows 11 Pro`, `Ubuntu 24.04.1 LTS`. `None` when it could not be told.
 /// Found once a process.
+///
+/// `ANTUMBRA_HOST_OS` says it instead when set: a server in a container
+/// would otherwise name its image's system, not the machine's, and setup
+/// passes the machine's in.
 pub fn os_label() -> Option<String> {
     static FOUND: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    FOUND.get_or_init(find_os).clone()
+    FOUND
+        .get_or_init(|| told_os(std::env::var("ANTUMBRA_HOST_OS").ok().as_deref()).or_else(find_os))
+        .clone()
+}
+
+/// The operating system a deployment named, when it named one.
+fn told_os(told: Option<&str>) -> Option<String> {
+    told.map(str::trim)
+        .filter(|os| !os.is_empty())
+        .map(str::to_string)
 }
 
 fn said(program: &str, args: &[&str]) -> Option<String> {
@@ -971,6 +984,9 @@ mod tests {
             Some("Arch Linux")
         );
         assert_eq!(os_release_name("ID=x\n"), None);
+        assert_eq!(told_os(Some(" macOS 15.6 ")).as_deref(), Some("macOS 15.6"));
+        assert_eq!(told_os(Some("  ")), None);
+        assert_eq!(told_os(None), None);
         // Whatever this machine is, it has a name.
         assert!(os_label().is_some_and(|os| !os.is_empty()));
     }

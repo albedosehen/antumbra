@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Setup
+
+- **`antumbra setup local --serve-from <trainer>`** starts a server that serves the experts another server trains, beside it: on the trainer's database (`--db-url`, `--db-pass-file`) and with its signing secret (`--jwt-secret-file`), fetching adapters from it. It starts no database of its own. Setup checks the database answers from this machine first, and refuses on a machine whose stack already has a store of its own. Opening the trainer's database to a second machine is the operator's to do (#602).
+- **A server set up in a container is listed under its machine's name and operating system.** The stack fell back to `HOSTNAME`, which a shell does not always export, so the server's own device could be listed with no name; and the container named its image's system (`Distroless`). Setup now writes both to the stack's `.env`. The operating system takes effect with the next server image.
+
 ## 0.5.2 - 2026-11-23
 
 A standard install serves experts: the server image and the installed command both answer through an expert on the machine's CPU. A coding agent's session is advertised the 21 tools it needs and not all 42, and what a joined machine may write to its workspace is kept by its connection and not only said. Your memories can be exported, a member can leave a workspace, and the first measurement of a coding agent with Antumbra and without it is in: a convention it had been given was broken again 3 times in 22 with no memory and never with Antumbra. Two faults a server could be left in are fixed: a server on an embedded store that answered nothing an hour after its last request, and a workspace from before roles left with no owner.
