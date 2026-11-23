@@ -14,6 +14,10 @@ A server with no GPU can be set up beside the one that trains: `antumbra setup l
 - **`antumbra setup local --serve-from <trainer>`** starts a server that serves the experts another server trains, beside it: on the trainer's database (`--db-url`, `--db-pass-file`) and with its signing secret (`--jwt-secret-file`), fetching adapters from it. It starts no database of its own. Setup checks the database answers from this machine first, and refuses on a machine whose stack already has a store of its own. Opening the trainer's database to a second machine is the operator's to do (#602).
 - **A server set up in a container is listed under its machine's name and operating system.** The stack fell back to `HOSTNAME`, which a shell does not always export, so the server's own device could be listed with no name; and the container named its image's system (`Distroless`). Setup now writes both to the stack's `.env` (#603).
 
+### Dependencies
+
+- **`cookie` 0.18.3**, for RUSTSEC-2026-0594 (private cookie nonces can repeat in a process that forks). Antumbra reaches the crate through its HTTP client and makes no private cookies; the patched version is taken all the same.
+
 ### The repository
 
 - **Fixtures, comments and scripts use neutral host names** ([#601](https://github.com/albedosehen/antumbra/pull/601)). They named the machines the project was developed on. The deploy script is `scripts/server-deploy.sh`. Nothing a user or an operator sets was renamed.
