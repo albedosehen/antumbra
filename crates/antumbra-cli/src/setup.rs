@@ -121,6 +121,29 @@ pub struct LocalArgs {
     /// GPU build starts its own.
     #[arg(long)]
     pub rerank: bool,
+    /// Serve the experts another server trains, in place of running a store
+    /// of this machine's own: that server's address, which adapters are
+    /// fetched from. A server with no GPU trains nothing, and this is how it
+    /// answers through experts all the same. It shares the trainer's
+    /// database and signing secret, so it needs --db-url, --db-pass-file and
+    /// --jwt-secret-file, and starts no database.
+    #[arg(long, value_name = "URL", conflicts_with = "gpu", requires_all = ["db_url", "db_pass_file", "jwt_secret_file"])]
+    pub serve_from: Option<String>,
+    /// With --serve-from: the trainer's database, as this machine reaches it
+    /// (ws://host:8000/rpc). It has to be reachable from here; a database
+    /// published on the trainer's loopback alone is not.
+    #[arg(long, value_name = "URL", requires = "serve_from")]
+    pub db_url: Option<String>,
+    /// With --serve-from: the database user.
+    #[arg(long, default_value = "root", requires = "serve_from")]
+    pub db_user: String,
+    /// With --serve-from: a file holding the database password.
+    #[arg(long, value_name = "FILE", requires = "serve_from")]
+    pub db_pass_file: Option<PathBuf>,
+    /// With --serve-from: a file holding the trainer's signing secret
+    /// (`ANTUMBRA_JWT_SECRET` in its stack's `.env`).
+    #[arg(long, value_name = "FILE", requires = "serve_from")]
+    pub jwt_secret_file: Option<PathBuf>,
     /// The workspace the token grants.
     #[arg(long, default_value = "ws:default")]
     pub workspace: String,
@@ -257,7 +280,13 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
     let antumbra = home.join(".antumbra");
     // A name --agent does not know is said now, not after the stack is up.
     named_agents(&args.common.agents)?;
+    // What a server beside a trainer is given is read, and the trainer's
+    // database reached, before anything is started.
+    let serving = ServeFrom::read(args)?;
     println!("Setting up Antumbra on this machine.\n");
+    if let Some(serving) = &serving {
+        serving.reach(&steps)?;
+    }
 
     let stack = find_stack(args.repo.as_deref(), args.gpu)?;
     match &stack {
@@ -374,7 +403,20 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
             value: data.to_string_lossy().replace('\\', "/"),
         },
     ];
-    let (mut env_text, wrote) = env_file::fill(existing.as_deref(), &example, &wants);
+    let (mut env_text, mut wrote) = env_file::fill(existing.as_deref(), &example, &wants);
+    let mut shares = false;
+    if let Some(serving) = &serving {
+        let shared = serving.shared_env(&env_text, existing.as_deref(), &env_name)?;
+        shares = shared != env_text || on_disk.is_none();
+        env_text = shared;
+        // Given, not generated.
+        wrote.retain(|name| !matches!(*name, "SURREAL_PASS" | "ANTUMBRA_JWT_SECRET"));
+    }
+    // The server's machine, as its device row names it. Compose falls back
+    // to HOSTNAME, which a shell does not always export, and the container
+    // sees its image's operating system and not this machine's.
+    let (named, names_machine) = machine_in_env(&env_text, &host_id(), antumbra_http::os_label());
+    env_text = named;
     let mut moved_image = None;
     if let Stack::Pulled { image } = &stack {
         let have = env_file::get(&env_text, "ANTUMBRA_IMAGE");
@@ -399,6 +441,12 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
     }
     if let Some(image) = moved_image {
         said.push(format!("server image {image}"));
+    }
+    if names_machine {
+        said.push("this machine's name and operating system, for its device row".to_string());
+    }
+    if shares {
+        said.push("the trainer's database, its signing secret and its address".to_string());
     }
     if said.is_empty() {
         steps.ok(format!("{env_name} already holds the stack's secrets"));
@@ -431,7 +479,7 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
     let data_dir = env_file::get(&env_text, "ANTUMBRA_SURREAL_DATA")
         .map(PathBuf::from)
         .unwrap_or(data);
-    if !steps.dry_run {
+    if !steps.dry_run && serving.is_none() {
         std::fs::create_dir_all(&data_dir)?;
         give_to_container(&data_dir, &steps)?;
     }
@@ -449,7 +497,13 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
         // A profile is the compose command's own option, before `up`.
         up.extend(["--profile", "rerank"].map(String::from));
     }
-    up.extend(["up", "-d", build, "surrealdb", "antumbra-mcp"].map(String::from));
+    up.extend(["up", "-d", build].map(String::from));
+    // Beside a trainer the database is the trainer's: this stack's own is
+    // neither started nor waited for.
+    up.extend(match serving {
+        Some(_) => vec!["--no-deps".to_string(), "antumbra-mcp".to_string()],
+        None => vec!["surrealdb".to_string(), "antumbra-mcp".to_string()],
+    });
     if starts_reranker {
         up.push("rerank".to_string());
     }
@@ -463,7 +517,10 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
             Stack::Clone(_) => println!("\n  Starting the store and the server. The first run builds the server image,\n  which takes several minutes; later runs rebuild only what the clone changed.\n"),
             Stack::Pulled { .. } => {
                 pull_image(&image, &env_name, &steps)?;
-                println!("\n  Starting the store and the server.\n");
+                match serving {
+                    Some(_) => println!("\n  Starting the server.\n"),
+                    None => println!("\n  Starting the store and the server.\n"),
+                }
             }
         }
         let status = Command::new("docker").args(&up).status()?;
@@ -471,7 +528,10 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
             anyhow::bail!("`docker {}` failed; its output is above", up.join(" "));
         }
         println!();
-        steps.ok("the store and the server are up");
+        steps.ok(match serving {
+            Some(_) => "the server is up, on the trainer's database",
+            None => "the store and the server are up",
+        });
         if starts_reranker {
             steps.info("the reranker is starting: it takes about two minutes the first time, and recall uses it once it answers. On a CPU it adds to every recall");
         }
@@ -549,6 +609,7 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
         "compose": compose_files,
         "token_file": token_path,
         "ollama": if args.gpu { Value::Null } else { Value::String(args.ollama.clone()) },
+        "serve_from": serving.as_ref().map(|s| s.source.clone()),
     });
     finish(
         &home,
@@ -559,6 +620,150 @@ fn local(args: &LocalArgs) -> anyhow::Result<()> {
         &state,
         &steps,
     )
+}
+
+/// The stack's `.env` naming the server's machine: `ANTUMBRA_HOST` when it
+/// names none (one already there is kept, being what the machine's rows are
+/// under), and `ANTUMBRA_HOST_OS` as found now, since a system is upgraded.
+/// Whether anything changed.
+fn machine_in_env(env_text: &str, host: &str, os: Option<String>) -> (String, bool) {
+    let mut text = env_text.to_string();
+    if env_file::get(&text, "ANTUMBRA_HOST").is_none_or(str::is_empty) && host != "local" {
+        text = env_file::set(&text, "ANTUMBRA_HOST", host);
+    }
+    if let Some(os) = os.filter(|os| env_file::get(&text, "ANTUMBRA_HOST_OS") != Some(os.as_str()))
+    {
+        text = env_file::set(&text, "ANTUMBRA_HOST_OS", &os);
+    }
+    let changed = text != env_text;
+    (text, changed)
+}
+
+/// What a server that serves beside a trainer is given (`--serve-from`): the
+/// trainer's address, and the database and signing secret the two share.
+struct ServeFrom {
+    source: String,
+    db_url: String,
+    db_user: String,
+    db_pass: String,
+    secret: String,
+}
+
+impl ServeFrom {
+    /// What `args` asks for, with the two secrets read from their files; or
+    /// `None` for a stack of this machine's own.
+    fn read(args: &LocalArgs) -> anyhow::Result<Option<Self>> {
+        let Some(source) = args.serve_from.as_deref() else {
+            return Ok(None);
+        };
+        let (Some(db_url), Some(pass_file), Some(secret_file)) =
+            (&args.db_url, &args.db_pass_file, &args.jwt_secret_file)
+        else {
+            anyhow::bail!("--serve-from needs --db-url, --db-pass-file and --jwt-secret-file");
+        };
+        let held = |file: &Path, what: &str| -> anyhow::Result<String> {
+            let text = std::fs::read_to_string(file).map_err(|e| {
+                anyhow::anyhow!("could not read {what} from {}: {e}", file.display())
+            })?;
+            let text = text.trim().to_string();
+            anyhow::ensure!(
+                !text.is_empty() && !text.contains(char::is_whitespace),
+                "{} holds no {what}: it should be the one value, on one line",
+                file.display()
+            );
+            Ok(text)
+        };
+        let source = source.trim().trim_end_matches('/').to_string();
+        anyhow::ensure!(
+            source.starts_with("http://") || source.starts_with("https://"),
+            "--serve-from is the trainer's address, http://... or https://..."
+        );
+        database_health(db_url)?;
+        Ok(Some(Self {
+            source,
+            db_url: db_url.trim().to_string(),
+            db_user: args.db_user.clone(),
+            db_pass: held(pass_file, "database password")?,
+            secret: held(secret_file, "signing secret")?,
+        }))
+    }
+
+    /// Reach the trainer's database from here, or say why not. The trainer
+    /// itself not answering is a warning: adapters are fetched when asked for.
+    fn reach(&self, steps: &Steps) -> anyhow::Result<()> {
+        let health = database_health(&self.db_url)?;
+        agent(Duration::from_secs(8)).get(&health).call().map_err(|e| {
+            anyhow::anyhow!(
+                "the trainer's database does not answer at {} ({e}).\n  It has to be reachable from this machine: a stack set up by `antumbra setup local` publishes its database on the trainer's loopback alone, so open it to this machine (a private network, a tunnel) and give that address as --db-url.",
+                self.db_url
+            )
+        })?;
+        steps.ok(format!("the trainer's database answers at {}", self.db_url));
+        match agent(Duration::from_secs(8))
+            .get(&format!("{}/healthz", self.source))
+            .call()
+        {
+            Ok(_) => steps.ok(format!("the trainer answers at {}", self.source)),
+            Err(e) => steps.warn(format!(
+                "the trainer does not answer at {} ({e}); an expert whose adapter is not on this machine is not served until it does",
+                self.source
+            )),
+        }
+        Ok(())
+    }
+
+    /// The stack's `.env` with what is shared written into it. Refused when
+    /// the `.env` on disk is a stack of this machine's own: its password and
+    /// secret are that store's, and writing over them would strand it.
+    fn shared_env(
+        &self,
+        env_text: &str,
+        on_disk: Option<&str>,
+        env_name: &str,
+    ) -> anyhow::Result<String> {
+        let own = on_disk.is_some_and(|text| {
+            env_file::get(text, "SURREAL_PASS").is_some_and(|p| !p.is_empty())
+                && env_file::get(text, "ANTUMBRA_DB_URL").is_none_or(str::is_empty)
+        });
+        anyhow::ensure!(
+            !own,
+            "{env_name} is a stack of this machine's own, with a store behind it. Serving beside a trainer would write the trainer's password and secret over its own.\n  Stop that stack and move {env_name} aside, then run this again; its data is left where it is."
+        );
+        let mut text = env_text.to_string();
+        for (name, value) in [
+            ("SURREAL_PASS", &self.db_pass),
+            ("ANTUMBRA_JWT_SECRET", &self.secret),
+            ("ANTUMBRA_DB_URL", &self.db_url),
+            ("ANTUMBRA_DB_USER", &self.db_user),
+            ("ANTUMBRA_EXPERT_SOURCE", &self.source),
+        ] {
+            if env_file::get(&text, name) != Some(value.as_str()) {
+                text = env_file::set(&text, name, value);
+            }
+        }
+        Ok(text)
+    }
+}
+
+/// Where a database at `db_url` says it is up: its `/health`, over http for
+/// `ws` and https for `wss`. Refuses an address that is not a database's, and
+/// one on this machine's loopback, which the server's container cannot reach
+/// and a trainer elsewhere is not at.
+fn database_health(db_url: &str) -> anyhow::Result<String> {
+    let url = db_url.trim();
+    let (scheme, rest) = url.split_once("://").unwrap_or(("", url));
+    let http = match scheme {
+        "ws" | "http" => "http",
+        "wss" | "https" => "https",
+        _ => anyhow::bail!("--db-url is the trainer's database, as ws://host:8000/rpc (or wss://, http://, https://)"),
+    };
+    let authority = rest.split('/').next().unwrap_or_default();
+    anyhow::ensure!(!authority.is_empty(), "--db-url names no host");
+    anyhow::ensure!(
+        !is_this_machine(host_of(rest)),
+        "--db-url is on this machine's loopback ({authority}). The server runs in a container, which that does not reach, and the trainer's database is on the trainer: give the address this machine reaches it at"
+    );
+    Ok(format!("{http}://{authority}/health"))
 }
 
 /// Where the local stack runs from, which decides how the server image is had.
@@ -3347,5 +3552,177 @@ mod tests {
         );
         // The GPU stack has its own.
         assert_eq!(reranker(bare, true, true), (bare.to_string(), false));
+    }
+
+    /// The stack is told its machine's name when it has none, keeps one it
+    /// has, and follows the operating system.
+    #[test]
+    fn the_stack_is_told_its_machines_name_and_operating_system() {
+        let (text, changed) = machine_in_env("A=1\n", "desk", Some("macOS 15.6".into()));
+        assert!(changed);
+        assert_eq!(env_file::get(&text, "ANTUMBRA_HOST"), Some("desk"));
+        assert_eq!(env_file::get(&text, "ANTUMBRA_HOST_OS"), Some("macOS 15.6"));
+        assert_eq!(env_file::get(&text, "A"), Some("1"));
+        // Run again: nothing to write.
+        assert!(!machine_in_env(&text, "desk", Some("macOS 15.6".into())).1);
+        // A name already there is kept; the system follows an upgrade.
+        let (later, changed) = machine_in_env(&text, "renamed", Some("macOS 16.0".into()));
+        assert!(changed);
+        assert_eq!(env_file::get(&later, "ANTUMBRA_HOST"), Some("desk"));
+        assert_eq!(
+            env_file::get(&later, "ANTUMBRA_HOST_OS"),
+            Some("macOS 16.0")
+        );
+        // An unnamed machine is not named `local`, and no system is no line.
+        let (bare, changed) = machine_in_env("A=1\n", "local", None);
+        assert!(!changed && env_file::get(&bare, "ANTUMBRA_HOST").is_none());
+    }
+
+    fn serving(db_url: &str) -> ServeFrom {
+        ServeFrom {
+            source: "http://trainer.example:8081".into(),
+            db_url: db_url.into(),
+            db_user: "root".into(),
+            db_pass: "pass-of-the-trainer".into(),
+            secret: "secret-of-the-trainer".into(),
+        }
+    }
+
+    /// #602: a database's health address is read from its own, and an
+    /// address that is no database's, or on this machine's loopback, is
+    /// refused before anything is started.
+    #[test]
+    fn a_trainers_database_is_named_by_an_address_this_machine_reaches() -> anyhow::Result<()> {
+        assert_eq!(
+            database_health("ws://trainer.example:8000/rpc")?,
+            "http://trainer.example:8000/health"
+        );
+        assert_eq!(
+            database_health(" wss://db.example/rpc ")?,
+            "https://db.example/health"
+        );
+        assert_eq!(
+            database_health("http://192.0.2.7:8000")?,
+            "http://192.0.2.7:8000/health"
+        );
+        for refused in [
+            "ws://127.0.0.1:8000/rpc",
+            "ws://localhost:8000/rpc",
+            "rocksdb:///data",
+            "trainer.example:8000",
+            "ws:///rpc",
+        ] {
+            assert!(database_health(refused).is_err(), "{refused}");
+        }
+        Ok(())
+    }
+
+    /// The stack's `.env` is given the trainer's database, secret and
+    /// address, and keeps everything else; a stack with a store of its own
+    /// is not written over; and a second run changes nothing.
+    #[test]
+    fn serving_beside_a_trainer_shares_its_database_and_secret() -> anyhow::Result<()> {
+        let s = serving("ws://trainer.example:8000/rpc");
+        let fresh = "SURREAL_PASS=generated\nANTUMBRA_JWT_SECRET=generated\nANTUMBRA_SURREAL_DATA=/x\nANTUMBRA_IMAGE=img:1\n";
+        let shared = s.shared_env(fresh, None, ".env")?;
+        for (name, value) in [
+            ("SURREAL_PASS", "pass-of-the-trainer"),
+            ("ANTUMBRA_JWT_SECRET", "secret-of-the-trainer"),
+            ("ANTUMBRA_DB_URL", "ws://trainer.example:8000/rpc"),
+            ("ANTUMBRA_DB_USER", "root"),
+            ("ANTUMBRA_EXPERT_SOURCE", "http://trainer.example:8081"),
+            ("ANTUMBRA_IMAGE", "img:1"),
+        ] {
+            assert_eq!(env_file::get(&shared, name), Some(value), "{name}");
+        }
+        // Run again over what it wrote: nothing changes, and it is not refused.
+        assert_eq!(s.shared_env(&shared, Some(&shared), ".env")?, shared);
+        // A stack of this machine's own is left alone.
+        let own = "SURREAL_PASS=its-own\nANTUMBRA_JWT_SECRET=its-own\n";
+        let Err(refused) = s.shared_env(own, Some(own), "docker/.env") else {
+            anyhow::bail!("a stack's own secrets were written over");
+        };
+        assert!(
+            refused.to_string().contains("move docker/.env aside"),
+            "{refused}"
+        );
+        Ok(())
+    }
+
+    /// The flags come together or not at all, the secrets come from files,
+    /// and a file that holds no single value is refused.
+    #[test]
+    fn serve_from_takes_its_secrets_from_files() -> anyhow::Result<()> {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Cli {
+            #[command(flatten)]
+            local: LocalArgs,
+        }
+        let dir = crate::agents::scratch::Scratch::new("serve-from")?;
+        let (pass, secret, empty) = (
+            dir.path().join("pass"),
+            dir.path().join("secret"),
+            dir.path().join("empty"),
+        );
+        std::fs::write(&pass, "db-pass\n")?;
+        std::fs::write(&secret, " signing-secret \n")?;
+        std::fs::write(&empty, "\n")?;
+        let parse = |extra: &[&str]| {
+            let mut argv = vec!["x"];
+            argv.extend_from_slice(extra);
+            Cli::try_parse_from(argv).map(|c| c.local)
+        };
+        assert!(ServeFrom::read(&parse(&[])?)?.is_none());
+        assert!(parse(&["--serve-from", "http://trainer.example:8081"]).is_err());
+        assert!(parse(&["--db-url", "ws://trainer.example:8000/rpc"]).is_err());
+        let (p, k, e) = (
+            pass.to_string_lossy(),
+            secret.to_string_lossy(),
+            empty.to_string_lossy(),
+        );
+        let given = |pass: &str| {
+            parse(&[
+                "--serve-from",
+                "http://trainer.example:8081/",
+                "--db-url",
+                "ws://trainer.example:8000/rpc",
+                "--db-pass-file",
+                pass,
+                "--jwt-secret-file",
+                &k,
+            ])
+        };
+        assert!(parse(&[
+            "--gpu",
+            "--serve-from",
+            "http://t.example",
+            "--db-url",
+            "ws://t.example/rpc",
+            "--db-pass-file",
+            &p,
+            "--jwt-secret-file",
+            &k
+        ])
+        .is_err());
+        let Some(read) = ServeFrom::read(&given(&p)?)? else {
+            anyhow::bail!("--serve-from was not read");
+        };
+        assert_eq!(
+            (
+                read.source.as_str(),
+                read.db_pass.as_str(),
+                read.secret.as_str(),
+                read.db_user.as_str()
+            ),
+            (
+                "http://trainer.example:8081",
+                "db-pass",
+                "signing-secret",
+                "root"
+            )
+        );
+        assert!(ServeFrom::read(&given(&e)?).is_err());
+        Ok(())
     }
 }
