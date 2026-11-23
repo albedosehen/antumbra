@@ -164,7 +164,7 @@ Claude Code caps a hook's context at 10,000 characters. Past the cap the agent i
 
 Handoffs come right after the first line: the bootstrap asks `handoffs` for `ANTUMBRA_HOST_ID` and, when something waits for this machine, places the server's count-and-titles lines ahead of everything recalled, a few hundred characters of the budget. Nothing waiting, or no answer, adds nothing.
 
-The bootstrap then names the machine to the server with `register_device`, so it is listed among the user's devices, and when it was last seen, even when no server runs on it. It is skipped when `ANTUMBRA_HOST_ID` is unset (the `local` fallback names no machine in particular). The answer is not used, and a server that does not know the tool changes nothing.
+The bootstrap then names the machine to the server with `register_device`, with its operating system as a person would name it (`macOS 15.6`, `Windows 11 Pro`, a distribution's name and version), so it is listed among the user's devices even when no server runs on it. When it was last seen is kept by its calls, not by this registration. It is skipped when `ANTUMBRA_HOST_ID` is unset (the `local` fallback names no machine in particular). The answer is not used, and a server that does not know the tool changes nothing.
 
 ## Git provenance: stale memories are visible, not silently wrong
 

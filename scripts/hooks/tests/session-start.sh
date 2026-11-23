@@ -157,7 +157,9 @@ echo "naming this machine"
 calls="$work/calls.log"
 : >"$calls"
 ctx=$(run "$work/small.json" CURL_LOG="$calls" ANTUMBRA_HOST_ID=mac | context)
-check "registers it under its name" grep -qF '{"tool":"register_device","arguments":{"host":"mac"}}' "$calls"
+check "registers it under its name" grep -qF '{"tool":"register_device","arguments":{"host":"mac"' "$calls"
+# With its operating system, which on any machine these run on has a name.
+check "says its operating system" grep -qE '"tool":"register_device","arguments":\{"host":"mac","os":"[^"]+"\}' "$calls"
 check "still answers" grep -q 'first small' <<<"$ctx"
 
 echo "the bearer"

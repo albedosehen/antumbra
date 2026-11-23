@@ -823,6 +823,44 @@ td .id {
   color: var(--ink-2);
 }
 
+/* A device: its name, the host it goes by, its operating system. */
+.device-who {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+
+.device-name {
+  font-weight: 600;
+}
+
+.os-tag {
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  font-size: var(--t-s);
+  font-weight: 400;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.device-act {
+  text-align: right;
+}
+
+.device-naming {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.device-naming input {
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
 .tag {
   padding: 0 8px;
   border-radius: var(--radius-s);
