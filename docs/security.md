@@ -7,6 +7,7 @@ The trust model and the boundaries that enforce it. Summarizes a 2026-06 audit: 
 - **Adversary:** a malicious or buggy tenant/user on the networked MCP surface, or untrusted data ingested into the store (memories, documents, traces).
 - **Out of scope:** the operator running the binaries. CLI inputs (`--corpus`, `--url`, `--embedder-url`, file paths) are operator-trusted; protecting the host from its own operator is not a goal.
 - **Crown jewels:** cross-tenant confidentiality (one tenant must never read or write another's data) and the integrity of the frozen population.
+- **At rest:** someone who has Antumbra's files but not the running machine (a stolen laptop, a copied data directory, a backup). Nothing is encrypted at rest today; [encryption.md](encryption.md) is the plan.
 
 ## Tenant isolation (the core guarantee)
 
