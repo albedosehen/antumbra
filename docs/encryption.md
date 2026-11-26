@@ -52,7 +52,7 @@ Queries, indexes, permissions and sync work unchanged, because the engine decryp
 
 Two things stand in the way:
 
-1. **Antumbra is on SurrealDB 3.3, whose engine has no encryption.** Moving to SurrealDB 4 comes first. SurrealDB 4 also removes RocksDB, which the Docker setup's database server uses today.
+1. **Antumbra is on SurrealDB 3.3, whose engine has no encryption.** Moving to SurrealDB 4 comes first, and it waits on 4.0.2 (see the order of work). SurrealDB 4 also removes RocksDB, which the Docker setup's database server uses today.
 2. **SurrealDB 4.0.1 does not pass a key manager to SurrealKV.** Its `surrealdb-kvs-surrealkv` crate builds the engine's options with no key (upstream issue surrealdb/surrealdb#88 is open). The plan is to fix this upstream, with two additions:
    - **An in-process hook for embedded use.** A program registers its `KeyManager` for a store's path before opening it. The key never reaches disk or a configuration string.
    - **A datastore option for servers.** For example `surrealkv_encryption_key_file`, which `surreal start` reads from a mounted secret.
@@ -197,21 +197,25 @@ The first feature that would send a wrapped key off the machine is enrolling a s
 
 ## Order of work
 
-1. **SurrealDB 4.** Move Antumbra to SurrealDB 4 and SurrealKV 1.4, including the Docker database's move off RocksDB. Encryption is impossible before this.
-2. **`antumbra-crypto`.** A new crate:
+The database's part waits on SurrealDB 4.0.2. SurrealDB 4.0.0 and 4.0.1 fail a vector search run as a signed-in user on a table whose read permission contains a subquery ("IR verification failed: Legality", upstream surrealdb/surrealdb#7668). Antumbra's read rules for `memory`, `memory_chunk` and `document_chunk` use such subqueries for grants and the hive, so on 4.0.x recall breaks for every identity but the owner. The fix is closed upstream and scheduled for the v4.0.2 milestone, which has no date.
+
+Everything else works on SurrealDB 3.3 and lands first:
+
+1. **`antumbra-crypto`.** A new crate:
    - the keyring and its slots;
    - the platform protectors;
    - the recovery key;
-   - the sealed-file format;
-   - a `KeyManager` over the keyring.
+   - the sealed-file format.
 
-   It needs nothing from step 1, so it can be built in parallel and tested on its own, including format tests and tests that tampering is refused.
-3. **Upstream.** Propose the SurrealDB changes (the in-process hook and the server option), and carry the hook as a `[patch]` until they are released.
-4. **The embedded store, encrypted by default** for new installs; `antumbra store encrypt` and `antumbra keys status`.
-5. **The files:** adapters, corpora, exports and the Goose files sealed.
-6. **The secrets:** into the credential store, with `antumbra auth header` for the hooks.
-7. **Servers:** the Docker stack's key and secrets, then the KMS protectors.
-8. **Hardware binding:** TPM and Secure Enclave slots, and an optional "ask me first" unlock through Windows Hello or Touch ID.
+   It is tested on its own, including format tests and tests that tampering is refused.
+2. **The files:** adapters, corpora, exports and the Goose files are sealed. New installs seal from the start; `antumbra keys status` lists any file still in the clear, and `antumbra files seal` seals them.
+3. **The secrets:** into the credential store, with `antumbra auth header` for the hooks.
+4. **Upstream, in parallel.** Propose SurrealDB's two additions (the in-process key manager and the server's key-file option), so they can ship with 4.0.2 or soon after.
+5. **SurrealDB 4.0.2**, when it is released and Antumbra's check for #7668 passes: move to SurrealDB 4 and SurrealKV 1.4, with the Docker database off RocksDB. Then add a `KeyManager` over the keyring, make the embedded store encrypted by default for new installs, and ship `antumbra store encrypt` for existing ones.
+6. **Servers:** the Docker stack's key and secrets, then the KMS protectors.
+7. **Hardware binding:** TPM and Secure Enclave slots, and an optional "ask me first" unlock through Windows Hello or Touch ID.
+
+Until step 5, `antumbra keys status` says plainly that the database itself is not yet encrypted.
 
 ## Decisions still open
 
