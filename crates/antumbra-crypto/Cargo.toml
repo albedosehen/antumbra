@@ -1,0 +1,33 @@
+[package]
+name = "antumbra-crypto"
+version = "0.5.3"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Encryption at rest for antumbra: the keyring and the slots that open it, the recovery key, and the sealed-file format for what antumbra writes outside its database. The design is docs/encryption.md."
+
+[features]
+default = []
+# A keyring slot in the platform's credential store: Windows Credential
+# Manager, the macOS Keychain, Secret Service on Linux.
+os-store = ["dep:keyring"]
+
+[dependencies]
+# XChaCha20-Poly1305, and the STREAM construction over it for sealed files.
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc", "zeroize"] }
+aead-stream = { version = "0.6", features = ["alloc"] }
+hkdf = "0.13"
+sha2 = "0.11"
+# Argon2id for a passphrase slot.
+argon2 = { version = "0.6", default-features = false, features = ["alloc", "zeroize"] }
+zeroize = "1.9"
+getrandom = "0.3"
+# Base64 in the keyring file, base32 for the recovery key, hex for ids.
+data-encoding = "2.11"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+keyring = { version = "4.2", optional = true }
+
+[lints]
+workspace = true
