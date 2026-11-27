@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/antumbra-core",
     "crates/antumbra-auth",
+    "crates/antumbra-crypto",
     "crates/antumbra-store",
     "crates/antumbra-embed",
     "crates/antumbra-copal",
