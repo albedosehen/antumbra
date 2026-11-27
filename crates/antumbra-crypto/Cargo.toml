@@ -4,7 +4,7 @@ version = "0.5.3"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Encryption at rest for antumbra: the keyring and the slots that open it, the recovery key, and the sealed-file format for what antumbra writes outside its database. The design is docs/encryption.md."
+description = "Encryption at rest for antumbra: the keyring and the slots that open it, the recovery key, and the sealed-file format for what antumbra writes outside its database."
 
 [features]
 default = []

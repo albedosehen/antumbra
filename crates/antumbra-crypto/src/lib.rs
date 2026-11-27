@@ -1,4 +1,5 @@
-//! Encryption at rest for antumbra, as `docs/encryption.md` designs it.
+//! Encryption at rest for antumbra: what keeps its files unreadable to someone who has them but
+//! not the running machine, such as a lost laptop, a copied data directory or a backup.
 //!
 //! - [`Keyring`]: antumbra's keys, sealed in one file under a random master key that one or
 //!   more slots open (the platform credential store, a recovery key, a passphrase, a key file).
