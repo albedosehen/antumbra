@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Before you upgrade
+
+- **Run `antumbra setup` again on each machine** to move Claude Code onto the bridge. Until then its connection works as it did, and `antumbra setup check` says it is registered the old way.
+
+### Setup
+
+- **Claude Code reaches the server through `antumbra mcp bridge`**, as every other agent does, instead of by its address with a headers helper. Claude Code gives a helper 10 seconds and then connects without the token, which the server refuses. On Windows the helper's PowerShell start took 8.5 to 9 seconds while a session opened, and over 10 when two sessions opened at once, which left those sessions without the memory tools. The bridge starts in a fraction of a second, reads the token from its file for each request, and opens a new session itself when the server restarts. `antumbra setup check` says which way Claude Code is registered, and checks the helper only for a registration by address (#609).
+
 ## 0.5.3 - 2026-11-23
 
 A server with no GPU can be set up beside the one that trains: `antumbra setup local --serve-from` starts it on the trainer's database and signing secret. A server run in a container lists its own machine under its name and its operating system.

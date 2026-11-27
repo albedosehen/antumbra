@@ -1661,6 +1661,56 @@ fn headers_helper_name() -> &'static str {
     }
 }
 
+/// The MCP server setup registers with Claude Code: `antumbra mcp bridge`,
+/// run by `program`, which reads the server's address and the token from what
+/// setup wrote, for each request.
+///
+/// Not the address with a headers helper, as setup registered before. Claude
+/// Code gives a helper 10 seconds and then connects without the token, which
+/// the server refuses, and the connection is reported failed. A Windows
+/// PowerShell start took most of those 10 seconds while a session's other
+/// servers and hooks started beside it, and more when two sessions opened at
+/// once. The bridge is this program, started in a fraction of a second, and it
+/// opens a new session itself when the server restarts.
+fn claude_server(program: &agents::Program) -> Value {
+    json!({
+        "type": "stdio",
+        "command": program.file(),
+        "args": ["mcp", "bridge", "--agent", CLAUDE],
+    })
+}
+
+/// How Claude Code reaches the server, from what `claude mcp get antumbra`
+/// prints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Registration {
+    /// Through `antumbra mcp bridge`, as setup registers it.
+    Bridge,
+    /// By its address, as setup registered it before: with the headers
+    /// helper, which Claude Code gives 10 seconds.
+    Address,
+    /// Some other way, registered by hand.
+    Other,
+}
+
+fn registration_of(printed: &str) -> Registration {
+    let field = |name: &str| {
+        printed.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix(name)
+                .and_then(|rest| rest.strip_prefix(':'))
+                .map(str::trim)
+        })
+    };
+    if field("Args").is_some_and(|args| args.starts_with("mcp bridge")) {
+        Registration::Bridge
+    } else if field("Type").is_some_and(|kind| kind == "http" || kind == "sse") {
+        Registration::Address
+    } else {
+        Registration::Other
+    }
+}
+
 /// The command that runs a script: bash, or Windows PowerShell (which every
 /// Windows machine has; the hooks need nothing newer).
 fn script_command(path: &Path) -> String {
@@ -1737,7 +1787,6 @@ fn connect_claude(
         .iter()
         .map(|(_, s, _)| (*s).to_string())
         .collect();
-    names.push(headers_helper_name().to_string());
     names.dedup();
     write_hooks(&dir, &names, steps)?;
 
@@ -1796,10 +1845,10 @@ fn connect_claude(
         steps.warn("Claude Code's own file memory is on (autoMemoryEnabled: true); with it, memories land in two stores");
     }
 
-    // The MCP server, with the token read from its file on every connection.
-    let helper = script_command(&dir.join(headers_helper_name()));
-    let server =
-        json!({ "type": "http", "url": format!("{url}/mcp"), "headersHelper": helper }).to_string();
+    // The MCP server: the bridge, with the token read from its file for each
+    // request.
+    let program = agents::Program::this(find_program("antumbra").is_some());
+    let server = claude_server(&program).to_string();
     match find_program("claude") {
         None => {
             steps.warn("the claude command is not on your PATH, so the MCP server is not registered. Once it is:");
@@ -2333,32 +2382,6 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
         if let Some((said, fix)) = hooks_held_back(&hooks_run, None) {
             fail(said, fix);
         }
-        // The agent's own connection runs this one, not the settings' hooks, so the
-        // comparison above never sees it.
-        let helper = antumbra.join("hooks").join(headers_helper_name());
-        match helper_state(std::fs::read_to_string(&helper).ok().as_deref()) {
-        Helper::Same => ok(format!(
-            "the MCP connection's headers helper names this machine to the server ({DEVICE_HEADER})"
-        )),
-        Helper::Edited => println!(
-            "  ! {} differs from this build's copy; setup writes this build's to ~/.antumbra/hooks",
-            helper.display()
-        ),
-        Helper::Unnamed => fail(
-            format!(
-                "{} does not name this machine, so the server stamps what the agent writes with its own name",
-                helper.display()
-            ),
-            "run setup again to write this build's".into(),
-        ),
-        Helper::Missing => fail(
-            format!(
-                "{} is missing, and the MCP connection runs it",
-                helper.display()
-            ),
-            "run setup again to write it".into(),
-        ),
-    }
         match settings
             .pointer("/env/ANTUMBRA_URL")
             .and_then(Value::as_str)
@@ -2396,20 +2419,55 @@ fn check(args: &CheckArgs) -> anyhow::Result<()> {
         ) {
             (Some((said, fix)), _) => fail(said, fix),
             (None, Some(claude)) => {
-                let registered = Command::new(claude)
-                    .args(["mcp", "get", "antumbra"])
-                    .stdout(Stdio::null())
+                let printed = Command::new(claude)
+                    .args(["mcp", "get", CLAUDE_SERVER])
                     .stderr(Stdio::null())
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false);
-                if registered {
-                    ok("the MCP server \"antumbra\" is registered with Claude Code".into());
-                } else {
-                    fail(
+                    .output()
+                    .ok()
+                    .filter(|out| out.status.success())
+                    .map(|out| String::from_utf8_lossy(&out.stdout).into_owned());
+                match printed.as_deref().map(registration_of) {
+                    None => fail(
                         "the MCP server \"antumbra\" is not registered".into(),
                         "run setup again".into(),
-                    );
+                    ),
+                    Some(Registration::Bridge) => ok(
+                        "the MCP server \"antumbra\" is registered with Claude Code, as `antumbra mcp bridge`".into(),
+                    ),
+                    Some(Registration::Other) => {
+                        ok("the MCP server \"antumbra\" is registered with Claude Code".into())
+                    }
+                    Some(Registration::Address) => {
+                        println!(
+                            "  ! the MCP server \"antumbra\" is registered with Claude Code by its address, with a headers helper. Claude Code gives the helper 10 seconds and connects without the token when it takes longer, as a PowerShell start can while a session opens; run setup again to register `antumbra mcp bridge` instead"
+                        );
+                        // That registration runs the helper, not the settings'
+                        // hooks, so the comparison of the hooks never sees it.
+                        let helper = antumbra.join("hooks").join(headers_helper_name());
+                        match helper_state(std::fs::read_to_string(&helper).ok().as_deref()) {
+                            Helper::Same => ok(format!(
+                                "the MCP connection's headers helper names this machine to the server ({DEVICE_HEADER})"
+                            )),
+                            Helper::Edited => println!(
+                                "  ! {} differs from this build's copy; run setup again to register the bridge, which needs no helper",
+                                helper.display()
+                            ),
+                            Helper::Unnamed => fail(
+                                format!(
+                                    "{} does not name this machine, so the server stamps what the agent writes with its own name",
+                                    helper.display()
+                                ),
+                                "run setup again to register the bridge, which names it".into(),
+                            ),
+                            Helper::Missing => fail(
+                                format!(
+                                    "{} is missing, and the MCP connection runs it",
+                                    helper.display()
+                                ),
+                                "run setup again to register the bridge, which needs no helper".into(),
+                            ),
+                        }
+                    }
                 }
             }
             (None, None) => println!(
@@ -3080,6 +3138,46 @@ mod tests {
         let blank = json!({ "env": { "ANTUMBRA_HOST_ID": "  " } });
         assert!(!session_host(&blank).trim().is_empty());
         assert!(!session_host(&Value::Null).trim().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn claude_code_is_registered_with_the_bridge() -> anyhow::Result<()> {
+        let named = claude_server(&agents::Program::Named);
+        anyhow::ensure!(named["type"] == "stdio", "{named}");
+        anyhow::ensure!(named["command"] == "antumbra", "{named}");
+        anyhow::ensure!(
+            named["args"] == json!(["mcp", "bridge", "--agent", "claude"]),
+            "{named}"
+        );
+        // Nothing of the address and helper it was registered with before.
+        anyhow::ensure!(
+            named.get("url").is_none() && named.get("headersHelper").is_none(),
+            "{named}"
+        );
+        // A program off the PATH is run where it is. A stdio server's command
+        // is the program apart from its arguments, so a path with a space in
+        // it is not quoted.
+        let at = PathBuf::from("/opt/a b/antumbra");
+        let placed = claude_server(&agents::Program::At(at.clone()));
+        anyhow::ensure!(placed["command"] == at.display().to_string(), "{placed}");
+        Ok(())
+    }
+
+    #[test]
+    fn the_check_reads_how_claude_code_reaches_the_server() -> anyhow::Result<()> {
+        // What `claude mcp get antumbra` prints, as Claude Code 2.1 prints it.
+        let bridge = "antumbra:\n  Scope: User config (available in all your projects)\n  Status: \u{2714} Connected\n  Type: stdio\n  Command: antumbra\n  Args: mcp bridge --agent claude\n\nTo remove this server, run: claude mcp remove antumbra -s user\n";
+        let address = "antumbra:\n  Scope: User config (available in all your projects)\n  Status: \u{2718} Failed to connect\n  Type: http\n  URL: https://workspace.example/mcp\n\nTo remove this server, run: claude mcp remove antumbra -s user\n";
+        let other = "antumbra:\n  Scope: User config (available in all your projects)\n  Type: stdio\n  Command: npx\n  Args: some-other-server --mcp bridge\n";
+        anyhow::ensure!(registration_of(bridge) == Registration::Bridge);
+        anyhow::ensure!(
+            registration_of(&bridge.replace('\n', "\r\n")) == Registration::Bridge,
+            "line endings are not a difference"
+        );
+        anyhow::ensure!(registration_of(address) == Registration::Address);
+        anyhow::ensure!(registration_of(other) == Registration::Other);
+        anyhow::ensure!(registration_of("") == Registration::Other);
         Ok(())
     }
 

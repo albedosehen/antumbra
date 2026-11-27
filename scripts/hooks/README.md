@@ -55,7 +55,13 @@ For an agent other than Claude Code, these scripts are run by `antumbra hook <ag
 
 ### The MCP connection, with the token in a file
 
-The agent's own connection to the surface needs the bearer too. Rather than a static `Authorization: Bearer ${ANTUMBRA_TOKEN}` header, which needs the token in the settings file's `env` block, point the server entry at `antumbra-mcp-headers` as its `headersHelper`. It prints the header from the same token file the hooks read, so the token can live only in that file:
+The agent's own connection to the surface needs the bearer too. `antumbra setup` registers `antumbra mcp bridge`, which reads the token from the same file the hooks read, for each request:
+
+```sh
+claude mcp add-json antumbra --scope user '{"type":"stdio","command":"antumbra","args":["mcp","bridge","--agent","claude"]}'
+```
+
+To register the server by its address instead, rather than a static `Authorization: Bearer ${ANTUMBRA_TOKEN}` header, which needs the token in the settings file's `env` block, point the server entry at `antumbra-mcp-headers` as its `headersHelper`. It prints the header from the same token file, so the token can live only in that file. Claude Code gives a helper 10 seconds and then connects without the token; on Windows, PowerShell's start can take most of that while a session opens, which is why setup registers the bridge:
 
 ```sh
 # macOS / Linux
